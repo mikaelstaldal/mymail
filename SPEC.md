@@ -138,6 +138,7 @@ CREATE TABLE IF NOT EXISTS folders (
 | 4  | Trash     | trash     |                                                                        |
 | 5  | Scheduled | scheduled | Hidden from the normal folder sidebar; messages awaiting deferred send |
 | 6  | Snoozed   | snoozed   | Hidden from the normal folder sidebar; messages awaiting snooze expiry |
+| 7  | Junk      | junk      | Spam messages; visible in sidebar                                      |
 
 "Hidden" folders are not returned by `GET /api/v1/folders` in the normal listing and cannot be targeted by user-defined filters or manual `PATCH` moves. They are managed exclusively by the scheduler. The `folders` table stores a `hidden` column to encode this:
 
@@ -277,6 +278,21 @@ CREATE TABLE IF NOT EXISTS filters (
 - `drop` — discard the message entirely; nothing is stored in the database
 
 Multiple criteria within a filter are ANDed. Filters are evaluated in `position` order. When `stop=1` (default) the first matching filter wins and evaluation halts.
+
+### 4.7 `spam_filter_settings`
+
+```sql
+CREATE TABLE IF NOT EXISTS spam_filter_settings (
+    id            INTEGER PRIMARY KEY CHECK (id = 1), -- single-row table
+    enabled       INTEGER NOT NULL DEFAULT 1,         -- 0=disabled, 1=enabled
+    score_header  TEXT    NOT NULL DEFAULT 'X-Spam-Score', -- header to read score from
+    score_threshold REAL  NOT NULL DEFAULT 5.0        -- route to Junk if score >= threshold
+);
+```
+
+A single row (enforced by `CHECK (id = 1)`). Created with defaults on first run. The `score_header` and `score_threshold` fields support deployments where the MTA uses a non-standard score header name or a different numeric scale.
+
+Spam detection also recognises the `X-Spam-Flag` header (value `YES`, case-insensitive) and the `X-Spam-Status` header (value starting with `Yes`, case-insensitive) regardless of the score threshold. Either a flag match or a score-threshold breach independently triggers spam routing.
 
 ---
 
@@ -734,7 +750,64 @@ Response `200`:
 
 ---
 
-### 5.6 Thread View
+### 5.6 Spam Filter
+
+#### `GET /api/v1/spam-filter`
+
+Returns the current spam filter settings.
+
+Response `200`:
+```json
+{
+  "enabled": true,
+  "score_header": "X-Spam-Score",
+  "score_threshold": 5.0
+}
+```
+
+#### `PUT /api/v1/spam-filter`
+
+Replace spam filter settings entirely.
+
+Request:
+```json
+{
+  "enabled": true,
+  "score_header": "X-Spam-Score",
+  "score_threshold": 5.0
+}
+```
+
+- `score_threshold` must be a positive number. Returns `400` otherwise.
+- `score_header` must be a non-empty string. Returns `400` otherwise.
+
+Response `200`: updated settings object.
+
+#### `POST /api/v1/messages/{id}/mark-junk`
+
+Manually mark a message as junk. Moves it to the Junk folder (id=7). Marks it as read.
+
+Returns `400` if the message is already in the Junk folder.
+
+Response `200`:
+```json
+{ "id": 17, "folder_id": 7 }
+```
+
+#### `POST /api/v1/messages/{id}/mark-not-junk`
+
+Mark a message as not junk. Moves it from the Junk folder back to Inbox (id=1). Marks it as unread.
+
+Returns `400` if the message is not currently in the Junk folder.
+
+Response `200`:
+```json
+{ "id": 17, "folder_id": 1 }
+```
+
+---
+
+### 5.8 Thread View
 
 A thread is a group of messages linked by `In-Reply-To` / `References` headers. The API does not store threads explicitly; they are computed on demand.
 
@@ -759,7 +832,7 @@ Thread reconstruction algorithm:
 
 ---
 
-### 5.7 Identities
+### 5.9 Identities
 
 #### `GET /api/v1/identities`
 
@@ -846,18 +919,34 @@ When invoked as `mymail -lda`, the program:
 1. Opens the SQLite database at `<data>/mymail.sqlite` (creating it if necessary, running schema migrations).
 2. Reads the raw message from **stdin** into memory.
 3. Parses the RFC 5322 message:
-   - Extracts headers: `Message-ID`, `From`, `To`, `Cc`, `Bcc`, `Reply-To`, `Subject`, `Date`, `In-Reply-To`, `References`.
+   - Extracts headers: `Message-ID`, `From`, `To`, `Cc`, `Bcc`, `Reply-To`, `Subject`, `Date`, `In-Reply-To`, `References`, plus spam-related headers (`X-Spam-Flag`, `X-Spam-Status`, and the configured score header).
    - Decodes MIME structure:
      - Finds `text/plain` part → `body_text`
      - Finds `text/html` part → `body_html` (sanitize before storage)
      - Collects `attachment` / `inline` parts (other MIME parts)
    - Falls back: if no `Date` header, use current time. If no `Message-ID`, generate one.
    - Handles encoded words (RFC 2047) in headers.
-4. Applies filters (see §6.1).
+4. Applies spam detection and user-defined filters (see §6.1).
 5. Inserts the message record and attachments in a single transaction.
 6. Exits `0`.
 
 ### 6.1 Filter Application
+
+Delivery proceeds in two phases:
+
+**Phase 1 — Spam detection** (if the spam filter is enabled):
+
+Inspect the parsed message headers to determine `is_spam`. Any of the following independently triggers `is_spam=true`:
+
+- `X-Spam-Flag` header equals `YES` (case-insensitive).
+- `X-Spam-Status` header value starts with `Yes` (case-insensitive).
+- The configured `score_header` (default `X-Spam-Score`) is present and its numeric value is ≥ `score_threshold` (default 5.0).
+
+Set the initial delivery folder: `folder_id = 7` (Junk) if `is_spam`, else `folder_id = 1` (Inbox).
+
+If the spam filter is disabled, set `folder_id = 1` (Inbox) unconditionally.
+
+**Phase 2 — User-defined filters:**
 
 Filters are loaded from the database ordered by `position ASC`. For each filter:
 
@@ -866,11 +955,13 @@ Filters are loaded from the database ordered by `position ASC`. For each filter:
 3. On match:
    - `move` → set `folder_id` to the filter's `folder_id`
    - `trash` → set `folder_id` to Trash (id=4)
-   - `mark_read` → leave `folder_id` as Inbox, set `read=1`
+   - `mark_read` → set `read=1` (does not change `folder_id`)
    - `drop` → exit immediately without inserting anything; return exit code `0` to the MTA (the message is silently discarded, not bounced)
 4. If `stop=1`, halt filter evaluation. (`drop` always implies stop — continuing after a drop is meaningless.)
 
-If no filter matches, deliver to Inbox (`folder_id=1`).
+The final `folder_id` after both phases determines where the message is stored. This means user-defined filters can rescue a spam-tagged message from Junk (e.g. a filter matching a known-good sender with `action=move` targeting Inbox) or can send a non-spam message directly to Junk (`action=move, folder_id=7`).
+
+`mark_read` does not alter the folder chosen by the spam filter; it only sets the read flag.
 
 ### 6.2 LDA Error Handling
 
@@ -1116,6 +1207,9 @@ The Scheduled folder is shown in the sidebar so the user can review and cancel p
 6. **Filter management** — CRUD UI for filters, with drag-to-reorder.
 7. **Folder management** — create/rename/delete/reorder user folders.
 8. **Identity management** — CRUD UI for sender identities (name + address + default flag), with drag-to-reorder. The default identity is marked visually; clicking a "Set default" button updates it.
+9. **Spam filter settings** — toggle to enable/disable the spam filter, numeric field for the score threshold, and text field for the score header name. Submits `PUT /api/v1/spam-filter`.
+
+**Junk folder:** shown in the folder sidebar between Trash and user-created folders. The message detail view for messages in the Junk folder shows a **Not junk** button (calls `POST /api/v1/messages/{id}/mark-not-junk`) instead of the normal move controls. All other message views show a **Mark as junk** button (calls `POST /api/v1/messages/{id}/mark-junk`).
 
 ### HTML Body Display
 
@@ -1209,6 +1303,11 @@ When a snoozed message returns to Inbox, `read` is forcibly set to `0` regardles
 
 ### Filter Evaluation in LDA
 Filters are evaluated in the LDA process at delivery time, not asynchronously. This is correct because filters need to run before the message lands in the Inbox (otherwise notifications or badge counts would be wrong). The LDA holds a short write lock on the database for the duration of a single message insertion.
+
+### Header-Based Spam Detection
+Rather than implementing a built-in Bayesian classifier or content scorer, mymail reads spam verdicts from headers that the MTA pipeline has already set (SpamAssassin, Rspamd, etc.). This keeps mymail simple and lets operators choose and tune their preferred spam analysis tool independently. The standard `X-Spam-Flag` / `X-Spam-Status` / `X-Spam-Score` headers are the de-facto interoperability interface for this purpose. No new Go dependency is needed — header inspection uses the already-parsed `net/mail` header map.
+
+Spam detection runs in Phase 1 (before user filters) so that user filters run with knowledge of the spam verdict and can override the Junk destination for known-good senders. This mirrors how most MUA spam integrations work.
 
 ---
 
