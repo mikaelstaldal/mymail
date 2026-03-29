@@ -1212,7 +1212,7 @@ Filters are evaluated in the LDA process at delivery time, not asynchronously. T
 
 ---
 
-## 17. Open Questions / Future Work
+## 17. Out of scope
 
 - **Multiple mailboxes**: currently one SQLite file = one mailbox. Multi-user support would require either per-user databases or a `user_id` column throughout.
 - **PGP/S-MIME**: not in scope for v1.
