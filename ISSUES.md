@@ -4,16 +4,6 @@ Issues requiring a decision or further research before the spec can be finalised
 
 ---
 
-## Reliability
-
-### R1 — Schema version tracking (§4)
-Migrations are implemented as `CREATE TABLE IF NOT EXISTS` plus `ALTER TABLE ADD COLUMN`, but there is no migrations table to record which migrations have been applied. This is fragile once a second or third migration is added. Decide on a migration strategy (e.g. `PRAGMA user_version`, a `schema_migrations` table, or a third-party library).
-
-### R2 — Thread view: full bodies, no pagination (§5.8)
-The thread endpoint returns full message objects including `body_html` and `body_text`. Long threads (100+ messages) or messages with large HTML bodies will produce very large responses. Decide: return message summaries (same shape as the list endpoint) with a separate fetch for the selected message, or add a `limit`/`offset` parameter.
-
----
-
 ## Missing features
 
 ### F1 — Reply All (§13)

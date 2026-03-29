@@ -115,7 +115,33 @@ Exit codes follow standard LDA conventions:
 
 File: `<data>/mymail.sqlite`
 
-All timestamps are stored as UTC RFC 3339 strings. The schema is created idempotently on startup using `CREATE TABLE IF NOT EXISTS` and idempotent `ALTER TABLE` migrations.
+All timestamps are stored as UTC RFC 3339 strings.
+
+### Schema migrations
+
+The database schema is versioned using `PRAGMA user_version`. On every startup the server reads the current version and applies any missing migrations in order, then sets `user_version` to the new value. Each migration is a plain SQL string executed in a transaction; if it fails the server aborts with a fatal error.
+
+```
+user_version 0  →  fresh database: run all CREATE TABLE / CREATE INDEX / CREATE TRIGGER statements
+user_version 1  →  (reserved for first future migration)
+```
+
+**Current schema version: 0** (initial schema; no migrations beyond table creation yet).
+
+The migration runner pseudocode:
+
+```
+v = PRAGMA user_version
+if v == 0:
+    -- create all tables, indexes, triggers, seed built-in folders
+    PRAGMA user_version = 0   -- already at 0; explicit for clarity
+if v < 1:
+    -- future migration example: ALTER TABLE messages ADD COLUMN foo TEXT
+    PRAGMA user_version = 1
+...
+```
+
+Because `PRAGMA user_version` is set inside the same transaction as the DDL statements, a crash mid-migration leaves the version unchanged and the migration will be retried on next startup.
 
 ### 4.1 `folders`
 
@@ -818,14 +844,38 @@ A thread is a group of messages linked by `In-Reply-To` / `References` headers. 
 
 #### `GET /api/v1/messages/{id}/thread`
 
-Returns all messages in the same thread as `{id}`, ordered by `date` ascending.
+Returns all messages in the same thread as `{id}`, ordered by `date` ascending. Each entry has the same shape as items in the folder message list (i.e. summary only — no `body_text`, `body_html`, `raw`, or `attachments`). The UI fetches the full message via `GET /api/v1/messages/{id}` when the user selects a message in the thread.
 
 Response `200`:
 ```json
 {
   "messages": [
-    { /* full message object */ },
-    { /* ... */ }
+    {
+      "id": 12,
+      "folder_id": 1,
+      "message_id": "<prev@example.com>",
+      "from_addr": "Alice <alice@example.com>",
+      "to_addr": "Bob <bob@example.com>",
+      "subject": "Re: Hello",
+      "date": "2026-03-28T09:00:00Z",
+      "read": true,
+      "flagged": false,
+      "has_attachments": false,
+      "created_at": "2026-03-28T09:01:02Z"
+    },
+    {
+      "id": 17,
+      "folder_id": 1,
+      "message_id": "<abc@example.com>",
+      "from_addr": "Bob <bob@example.com>",
+      "to_addr": "Alice <alice@example.com>",
+      "subject": "Re: Hello",
+      "date": "2026-03-29T10:00:00Z",
+      "read": true,
+      "flagged": false,
+      "has_attachments": true,
+      "created_at": "2026-03-29T10:01:05Z"
+    }
   ]
 }
 ```
