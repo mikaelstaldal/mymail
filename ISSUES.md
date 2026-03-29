@@ -9,8 +9,6 @@ Issues requiring a decision or further research before the spec can be finalised
 
 
 
-### F5 — Address autocomplete / contact list (§13)
-Users must type addresses from memory. Consider a `GET /api/v1/contacts?q=...` endpoint that queries distinct `from_addr` / `to_addr` values from the `messages` table and returns matching name+address pairs.
 
 
 

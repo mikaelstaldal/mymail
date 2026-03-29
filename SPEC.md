@@ -280,7 +280,23 @@ CREATE TABLE IF NOT EXISTS identities (
 
 The first identity is created interactively or via CLI (see §3). There is no seeded default.
 
-### 4.6 `filters`
+### 4.6 `contacts`
+
+```sql
+CREATE TABLE IF NOT EXISTS contacts (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    address    TEXT    NOT NULL UNIQUE,   -- email address (lower-cased for deduplication)
+    name       TEXT    NOT NULL DEFAULT '', -- display name; may be empty
+    created_at TEXT    NOT NULL,          -- RFC 3339 UTC
+    updated_at TEXT    NOT NULL           -- RFC 3339 UTC
+);
+
+CREATE INDEX IF NOT EXISTS idx_contacts_address ON contacts(address);
+```
+
+Contacts are upserted automatically on message receipt (From address) and on send (To, Cc, Bcc addresses). On auto-upsert, `address` is inserted if not present; if a row already exists, `name` is updated only when the stored `name` is empty (so a manually set name is never overwritten automatically). `address` is lower-cased before storage to ensure case-insensitive deduplication.
+
+### 4.7 `filters`
 
 ```sql
 CREATE TABLE IF NOT EXISTS filters (
@@ -985,6 +1001,66 @@ Response `200`:
 
 ---
 
+### 5.10 Contacts
+
+#### `GET /api/v1/contacts`
+
+List all contacts ordered by `name` ascending (empty names sorted last), then `address` ascending.
+
+Query parameters:
+
+| Parameter | Type   | Description                                                        |
+|-----------|--------|--------------------------------------------------------------------|
+| `q`       | string | Filter to contacts whose `address` or `name` contains the value (case-insensitive substring). Used for autocomplete. |
+| `limit`   | int    | Max contacts to return (default 50, max 200)                       |
+| `offset`  | int    | Pagination offset (default 0)                                      |
+
+Response `200`:
+```json
+{
+  "total": 2,
+  "contacts": [
+    { "id": 1, "address": "alice@example.com", "name": "Alice Doe" },
+    { "id": 2, "address": "bob@example.com",   "name": "" }
+  ]
+}
+```
+
+#### `POST /api/v1/contacts`
+
+Create a contact.
+
+Request:
+```json
+{ "address": "carol@example.com", "name": "Carol" }
+```
+
+- `address` must be a valid RFC 5322 `addr-spec`. Returns `409` if the address already exists.
+- `name` is optional; defaults to empty string.
+
+Response `201`: contact object.
+
+#### `PUT /api/v1/contacts/{id}`
+
+Replace a contact entirely.
+
+Request:
+```json
+{ "address": "carol@example.com", "name": "Carol Smith" }
+```
+
+Same validation as POST. Returns `409` if the new address conflicts with a different existing contact.
+
+Response `200`: updated contact object.
+
+#### `DELETE /api/v1/contacts/{id}`
+
+Delete a contact.
+
+Response `204`.
+
+---
+
 ## 6. Local Delivery Agent (LDA)
 
 When invoked as `mymail -lda`, the program:
@@ -1003,7 +1079,8 @@ When invoked as `mymail -lda`, the program:
 4. Duplicate detection: if a `Message-ID` is present and a message with the same `Message-ID` already exists anywhere in the database, exit `0` silently. This prevents double-storage when the MTA retries delivery after a transient failure that was actually recovered.
 5. Applies spam detection and user-defined filters (see §6.1).
 6. Inserts the message record and attachments in a single transaction.
-7. Exits `0`.
+7. Upserts the sender into the `contacts` table: lower-case the `From` address; insert if not present, otherwise update `name` only if the existing `name` is empty.
+8. Exits `0`.
 
 ### 6.1 Filter Application
 
@@ -1196,6 +1273,7 @@ The send flow in the service layer:
 3. Write the raw message to the pipe.
 4. Close the pipe and wait for the process to exit.
 5. On non-zero exit: capture stderr (max 4 KB) and return it as an error. No retries — the MTA owns queueing.
+6. On success: upsert each recipient from To, Cc, and Bcc into the `contacts` table using the same rule as the LDA (lower-case address; insert if absent, update `name` only if stored `name` is empty).
 
 ---
 
@@ -1351,7 +1429,7 @@ The Scheduled folder is shown in the sidebar so the user can review and cancel p
 
 1. **Folder view** — paginated message list for selected folder. Unread messages shown in bold. Click to open message detail. A **Mark all as read** button in the toolbar sends `PATCH /api/v1/messages` with all message IDs in the folder and `"read": true`.
 2. **Message detail** — full headers, rendered HTML body (in sandboxed iframe) or plain text, attachment download links. Shows thread if `references` chain exists. Reply/Reply All/Forward/Move/Delete/Snooze buttons. The **Snooze** button opens a small picker with quick presets (later today, tomorrow morning, next week) and a custom date/time option; submits `POST /api/v1/messages/{id}/snooze`.
-3. **Compose / Reply / Reply All / Forward** — form with a **From** selector (dropdown of all identities, pre-selected to the default; or, when replying, to the identity whose address matches the original To/Cc), To, Cc, Bcc, Subject, plain-text body, optional HTML body toggle. File upload for attachments. A **Send later** toggle reveals a date/time picker for `send_at`; when set, the Send button becomes "Schedule". Auto-save to Drafts on a 30-second timer (scheduled messages auto-save to Drafts until explicitly scheduled).
+3. **Compose / Reply / Reply All / Forward** — form with a **From** selector (dropdown of all identities, pre-selected to the default; or, when replying, to the identity whose address matches the original To/Cc), To, Cc, Bcc, Subject, plain-text body, optional HTML body toggle. File upload for attachments. A **Send later** toggle reveals a date/time picker for `send_at`; when set, the Send button becomes "Schedule". Auto-save to Drafts on a 30-second timer (scheduled messages auto-save to Drafts until explicitly scheduled). The To, Cc, and Bcc fields offer address autocomplete: as the user types, the UI queries `GET /api/v1/contacts?q=<input>` and shows a dropdown of matching name + address suggestions.
 
    Pre-population rules per action:
 
@@ -1373,6 +1451,7 @@ The Scheduled folder is shown in the sidebar so the user can review and cancel p
 7. **Folder management** — create/rename/delete/reorder user folders.
 8. **Identity management** — CRUD UI for sender identities (name + address + signature + default flag), with drag-to-reorder. The default identity is marked visually; clicking a "Set default" button updates it. The signature field is a plain-text textarea; leave empty for no signature.
 9. **Spam filter settings** — toggle to enable/disable the spam filter, numeric field for the score threshold, and text field for the score header name. Submits `PUT /api/v1/spam-filter`.
+10. **Contact management** — paginated list of all contacts with name and address. Supports adding, editing, and deleting contacts. Queries `GET /api/v1/contacts`, `POST /api/v1/contacts`, `PUT /api/v1/contacts/{id}`, and `DELETE /api/v1/contacts/{id}`.
 
 **Junk folder:** shown in the folder sidebar between Trash and user-created folders. The message detail view for messages in the Junk folder shows a **Not junk** button (calls `POST /api/v1/messages/{id}/mark-not-junk`) instead of the normal move controls. All other message views show a **Mark as junk** button (calls `POST /api/v1/messages/{id}/mark-junk`).
 
