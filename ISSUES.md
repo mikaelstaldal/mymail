@@ -12,8 +12,6 @@ Issues requiring a decision or further research before the spec can be finalised
 
 
 
-### F8 — Plain text / HTML view toggle (§13)
-When a message has both `body_html` and `body_text`, the spec does not say which is shown by default or whether the user can switch. Specify default behaviour and whether a toggle is provided.
 
 ### F9 — Forward with attachments (§13)
 "Forward" is listed as an available action but the compose flow for forwarding is not specified. Clarify: how are original attachments pre-populated into the compose form (copied as new attachment rows? referenced lazily?), and what API call initiates a forward.

@@ -1428,7 +1428,7 @@ The Scheduled folder is shown in the sidebar so the user can review and cancel p
 ### Views
 
 1. **Folder view** — paginated message list for selected folder. Unread messages shown in bold. Click to open message detail. A **Mark all as read** button in the toolbar sends `PATCH /api/v1/messages` with all message IDs in the folder and `"read": true`.
-2. **Message detail** — full headers, rendered HTML body (in sandboxed iframe) or plain text, attachment download links. Shows thread if `references` chain exists. Reply/Reply All/Forward/Move/Delete/Snooze buttons. The **Snooze** button opens a small picker with quick presets (later today, tomorrow morning, next week) and a custom date/time option; submits `POST /api/v1/messages/{id}/snooze`.
+2. **Message detail** — full headers, body, attachment download links. Shows thread if `references` chain exists. Reply/Reply All/Forward/Move/Delete/Snooze buttons. The **Snooze** button opens a small picker with quick presets (later today, tomorrow morning, next week) and a custom date/time option; submits `POST /api/v1/messages/{id}/snooze`. When a message has both `body_html` and `body_text`, the body is shown according to the user's **preferred view** setting (see Client-Side Storage), defaulting to HTML. A **Plain text / HTML** toggle button switches the view for the current message and updates the stored preference. If only one body type is present it is shown directly with no toggle. HTML is rendered in a sandboxed iframe (see §13 HTML Body Display); plain text is rendered as preformatted text.
 3. **Compose / Reply / Reply All / Forward** — form with a **From** selector (dropdown of all identities, pre-selected to the default; or, when replying, to the identity whose address matches the original To/Cc), To, Cc, Bcc, Subject, plain-text body, optional HTML body toggle. File upload for attachments. A **Send later** toggle reveals a date/time picker for `send_at`; when set, the Send button becomes "Schedule". Auto-save to Drafts on a 30-second timer (scheduled messages auto-save to Drafts until explicitly scheduled). The To, Cc, and Bcc fields offer address autocomplete: as the user types, the UI queries `GET /api/v1/contacts?q=<input>` and shows a dropdown of matching name + address suggestions.
 
    Pre-population rules per action:
@@ -1481,6 +1481,7 @@ Using `localStorage`:
 - Dark mode toggle
 - Message list density preference
 - Notification permission state (cached to avoid repeated `Notification.permission` lookups)
+- **Preferred body view** (`"html"` or `"text"`; default `"html"`): controls which body part is shown first in message detail when both are present. Updated whenever the user clicks the Plain text / HTML toggle.
 
 ---
 
