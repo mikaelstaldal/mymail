@@ -1,6 +1,6 @@
 # mymail — Specification
 
-A self-hosted email client with a Go backend, SQLite storage, REST API, and embedded web UI.
+A self-hosted personal (single-user) email client with a Go backend, SQLite storage, REST API, and embedded web UI.
 Designed to run on a Linux server alongside a mail system such as Postfix.
 
 ---
@@ -130,12 +130,20 @@ CREATE TABLE IF NOT EXISTS folders (
 
 **Built-in folders** (created on first run, protected from deletion):
 
-| id | name   | slug   |
-|----|--------|--------|
-| 1  | Inbox  | inbox  |
-| 2  | Sent   | sent   |
-| 3  | Drafts | drafts |
-| 4  | Trash  | trash  |
+| id | name      | slug      | Notes                                                                  |
+|----|-----------|-----------|------------------------------------------------------------------------|
+| 1  | Inbox     | inbox     |                                                                        |
+| 2  | Sent      | sent      |                                                                        |
+| 3  | Drafts    | drafts    |                                                                        |
+| 4  | Trash     | trash     |                                                                        |
+| 5  | Scheduled | scheduled | Hidden from the normal folder sidebar; messages awaiting deferred send |
+| 6  | Snoozed   | snoozed   | Hidden from the normal folder sidebar; messages awaiting snooze expiry |
+
+"Hidden" folders are not returned by `GET /api/v1/folders` in the normal listing and cannot be targeted by user-defined filters or manual `PATCH` moves. They are managed exclusively by the scheduler. The `folders` table stores a `hidden` column to encode this:
+
+```sql
+ALTER TABLE folders ADD COLUMN hidden INTEGER NOT NULL DEFAULT 0;
+```
 
 User-created folders have `id >= 100`.
 
@@ -160,13 +168,19 @@ CREATE TABLE IF NOT EXISTS messages (
     raw           BLOB    NOT NULL,        -- original raw RFC 5322 message
     read          INTEGER NOT NULL DEFAULT 0, -- 0=unread, 1=read
     flagged       INTEGER NOT NULL DEFAULT 0, -- 0=normal, 1=starred/flagged
+    send_at       TEXT,                    -- RFC 3339 UTC; non-NULL = deferred send, message sits in Scheduled folder
+    snoozed_until TEXT,                    -- RFC 3339 UTC; non-NULL = snoozed, message sits in Snoozed folder
+    snooze_folder INTEGER,                 -- folder_id to return to when snooze expires (usually Inbox=1)
+    send_error    TEXT,                    -- last sendmail error for a scheduled message that failed to send
     created_at    TEXT    NOT NULL         -- RFC 3339 UTC, time of storage
 );
 
-CREATE INDEX IF NOT EXISTS idx_messages_folder_id  ON messages(folder_id);
-CREATE INDEX IF NOT EXISTS idx_messages_date       ON messages(date);
-CREATE INDEX IF NOT EXISTS idx_messages_message_id ON messages(message_id);
-CREATE INDEX IF NOT EXISTS idx_messages_read       ON messages(read);
+CREATE INDEX IF NOT EXISTS idx_messages_folder_id    ON messages(folder_id);
+CREATE INDEX IF NOT EXISTS idx_messages_date         ON messages(date);
+CREATE INDEX IF NOT EXISTS idx_messages_message_id   ON messages(message_id);
+CREATE INDEX IF NOT EXISTS idx_messages_read         ON messages(read);
+CREATE INDEX IF NOT EXISTS idx_messages_send_at      ON messages(send_at) WHERE send_at IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_messages_snoozed_until ON messages(snoozed_until) WHERE snoozed_until IS NOT NULL;
 ```
 
 ### 4.3 `messages_fts` (FTS5)
@@ -520,7 +534,7 @@ Response `200`:
 
 #### `POST /api/v1/messages/send`
 
-Compose and send a new message. The handler builds an RFC 5322 message, stores a copy in the Sent folder, then pipes the raw message to `sendmail -t -oi`.
+Compose and send a new message, or schedule it for future delivery.
 
 Request:
 ```json
@@ -534,7 +548,8 @@ Request:
   "body_text": "Hi Alice,\n...",
   "body_html": "<p>Hi Alice,</p>...",
   "in_reply_to": "<abc@example.com>",
-  "references": ["<older@example.com>", "<abc@example.com>"]
+  "references": ["<older@example.com>", "<abc@example.com>"],
+  "send_at": "2026-04-01T09:00:00Z"
 }
 ```
 
@@ -542,21 +557,35 @@ Request:
 - The `From` header is constructed as `"Name" <address>` from the chosen identity.
 - At least one of `body_text` or `body_html` must be non-empty.
 - Attachments in the send flow are handled via a separate endpoint (see §5.3).
-- If `sendmail` exits with a non-zero code, return `500` with the captured stderr as the error message. No retry logic — let the MTA handle queuing.
-- The message stored in Sent has `read=true`.
+- **If `send_at` is absent or null**: send immediately. The handler builds and pipes the message to `sendmail -t -oi`. If `sendmail` exits non-zero, return `500` with captured stderr. The stored copy goes to Sent with `read=true`.
+- **If `send_at` is a future RFC 3339 timestamp**: do not send now. Store the message in the Scheduled folder with `send_at` set. The background scheduler will send it at the specified time (see §7). Returns `202 Accepted`. `send_at` must be at least 1 minute in the future; returns `400` otherwise.
 
-Response `201`:
+Response `201` (sent immediately):
 ```json
 { "id": 23 }
 ```
 
-The `id` is the database ID of the stored Sent copy.
+Response `202` (scheduled):
+```json
+{ "id": 24, "send_at": "2026-04-01T09:00:00Z" }
+```
 
 #### `POST /api/v1/messages/send-with-attachments`
 
 Same as `/messages/send` but uses `multipart/form-data`. The JSON fields are submitted as a `message` part (content-type `application/json`); each attachment is a separate file part.
 
-Response `201`: same as `/messages/send`.
+Response `201`/`202`: same as `/messages/send`.
+
+#### `DELETE /api/v1/scheduled/{id}`
+
+Cancel a scheduled (not-yet-sent) message. Moves it to Drafts and clears `send_at`, so the user can edit and reschedule or discard it.
+
+Returns `400` if the message has already been sent (i.e. is no longer in the Scheduled folder).
+
+Response `200`:
+```json
+{ "id": 24, "folder_id": 3 }
+```
 
 #### `POST /api/v1/messages/import`
 
@@ -594,7 +623,47 @@ Response `204`.
 
 ---
 
-### 5.4 Filters
+### 5.4 Snooze
+
+Snoozing a message temporarily hides it from the Inbox and returns it at a specified future time, triggering the same new-message notification as a freshly delivered message.
+
+#### `POST /api/v1/messages/{id}/snooze`
+
+Snooze a message. The message must currently be in Inbox (or a user folder — snoozing is not valid for Sent, Drafts, Trash, Scheduled, or Snoozed). Returns `400` otherwise.
+
+Request:
+```json
+{ "until": "2026-04-02T08:00:00Z" }
+```
+
+- `until` must be a future RFC 3339 timestamp, at least 1 minute ahead. Returns `400` otherwise.
+- The message's current `folder_id` is saved to `snooze_folder` (so it returns to the right place).
+- `folder_id` is changed to Snoozed (id=6) and `snoozed_until` is set.
+- `read` is unchanged.
+
+Response `200`:
+```json
+{
+  "id": 17,
+  "folder_id": 6,
+  "snoozed_until": "2026-04-02T08:00:00Z"
+}
+```
+
+#### `DELETE /api/v1/messages/{id}/snooze`
+
+Cancel a snooze early, returning the message to its original folder immediately. `snoozed_until` and `snooze_folder` are cleared.
+
+Returns `400` if the message is not currently snoozed.
+
+Response `200`:
+```json
+{ "id": 17, "folder_id": 1 }
+```
+
+---
+
+### 5.5 Filters
 
 #### `GET /api/v1/filters`
 
@@ -665,7 +734,7 @@ Response `200`:
 
 ---
 
-### 5.5 Thread View
+### 5.6 Thread View
 
 A thread is a group of messages linked by `In-Reply-To` / `References` headers. The API does not store threads explicitly; they are computed on demand.
 
@@ -690,7 +759,7 @@ Thread reconstruction algorithm:
 
 ---
 
-### 5.6 Identities
+### 5.7 Identities
 
 #### `GET /api/v1/identities`
 
@@ -811,7 +880,51 @@ If no filter matches, deliver to Inbox (`folder_id=1`).
 
 ---
 
-## 7. Batch Import
+## 7. Background Scheduler
+
+The server starts a single background goroutine on startup that processes deferred sends and snooze expiries. It wakes up every 60 seconds, queries the database for due items, and processes them.
+
+### 7.1 Deferred Send
+
+```sql
+SELECT id FROM messages
+WHERE folder_id = 5          -- Scheduled folder
+  AND send_at <= CURRENT_TIMESTAMP
+ORDER BY send_at ASC;
+```
+
+For each result, in order:
+
+1. Build the RFC 5322 message from the stored fields (same logic as immediate send in §8).
+2. Pipe to `sendmail -t -oi`.
+3. **On success**: set `folder_id = 2` (Sent), `read = 1`, `send_at = NULL`, `send_error = NULL`.
+4. **On failure** (non-zero sendmail exit): set `send_error` to captured stderr (max 4 KB). Leave the message in the Scheduled folder. The scheduler will retry on the next tick. After 3 consecutive failures (detectable by `send_error` being non-NULL on entry), the message is moved to Drafts and `send_at` is cleared, so it is no longer retried. The `send_error` text remains visible in the message detail so the user knows what happened.
+
+### 7.2 Snooze Expiry
+
+```sql
+SELECT id, snooze_folder FROM messages
+WHERE folder_id = 6          -- Snoozed folder
+  AND snoozed_until <= CURRENT_TIMESTAMP
+ORDER BY snoozed_until ASC;
+```
+
+For each result:
+
+1. Set `folder_id = snooze_folder`, `snoozed_until = NULL`, `snooze_folder = NULL`, `read = 0`.
+2. Mark as unread (`read = 0`) so the polling notification logic treats it as a new arrival.
+
+Setting `read = 0` means the next poll of `GET /api/v1/folders` will see an increased `unread_count` for the target folder (typically Inbox), triggering the same browser notification as a freshly delivered message (see §12).
+
+### 7.3 Scheduler Robustness
+
+- The scheduler holds the SQLite write lock only for the duration of each individual UPDATE, not across the full tick. This keeps the database available to the HTTP server between updates.
+- If the server is offline when a `send_at` or `snoozed_until` deadline passes, the scheduler processes the overdue items on the next startup/tick. Deferred sends may go out late; snoozed messages will reappear late. This is acceptable given the "simple, let the MTA handle reliability" design philosophy.
+- The scheduler goroutine is stopped cleanly on server shutdown via a context cancellation.
+
+---
+
+## 8. Batch Import
 
 ### 7.1 Supported Formats
 
@@ -901,7 +1014,7 @@ Users with MBX files or other unsupported formats can pre-convert using standard
 
 ---
 
-## 8. Outgoing Mail
+## 9. Outgoing Mail
 
 The send flow in the service layer:
 
@@ -920,7 +1033,7 @@ The send flow in the service layer:
 
 ---
 
-## 9. HTML Sanitization
+## 10. HTML Sanitization
 
 Incoming HTML bodies and the HTML part of outgoing messages are sanitized using a library equivalent to [microcosm-cc/bluemonday](https://github.com/microcosm-cc/bluemonday) with a strict email-appropriate policy:
 
@@ -936,7 +1049,7 @@ Incoming HTML bodies and the HTML part of outgoing messages are sanitized using 
 
 ---
 
-## 10. Security Headers
+## 11. Security Headers
 
 All HTTP responses include:
 
@@ -951,7 +1064,7 @@ The CSP allows HTTPS images (for email HTML bodies rendered in the UI) but restr
 
 ---
 
-## 11. Authentication
+## 12. Authentication
 
 Identical to mycal. See mycal's `internal/auth/` for the htpasswd implementation.
 
@@ -963,7 +1076,7 @@ Identical to mycal. See mycal's `internal/auth/` for the htpasswd implementation
 
 ---
 
-## 12. Web UI
+## 13. Web UI
 
 ### Technology Stack
 
@@ -983,6 +1096,7 @@ Same approach as mycal:
 |  - Inbox (3)      |  Message detail / compose pane   |
 |  - Sent           |  (full headers, body, attachments)|
 |  - Drafts         |                                  |
+|  - Scheduled      |                                  |
 |  - Trash          |                                  |
 |  - [user folders] |                                  |
 +-------------------+-----------------------------------+
@@ -990,15 +1104,18 @@ Same approach as mycal:
 +------------------------------------------------------|
 ```
 
+The Scheduled folder is shown in the sidebar so the user can review and cancel pending sends. The Snoozed folder is **not** shown in the sidebar — snoozed messages are managed via the snooze/unsnooze buttons on individual messages, not by browsing a folder.
+
 ### Views
 
 1. **Folder view** — paginated message list for selected folder. Unread messages shown in bold. Click to open message detail.
-2. **Message detail** — full headers, rendered HTML body (in sandboxed iframe) or plain text, attachment download links. Shows thread if `references` chain exists. Reply/Forward/Move/Delete buttons.
-3. **Compose / Reply / Forward** — form with a **From** selector (dropdown of all identities, pre-selected to the default; or, when replying, to the identity whose address matches the original To/Cc), To, Cc, Bcc, Subject, plain-text body, optional HTML body toggle. File upload for attachments. Auto-save to Drafts on a 30-second timer.
-4. **Search** — global full-text search with results shown as a message list.
-5. **Filter management** — CRUD UI for filters, with drag-to-reorder.
-6. **Folder management** — create/rename/delete/reorder user folders.
-7. **Identity management** — CRUD UI for sender identities (name + address + default flag), with drag-to-reorder. The default identity is marked visually; clicking a "Set default" button updates it.
+2. **Message detail** — full headers, rendered HTML body (in sandboxed iframe) or plain text, attachment download links. Shows thread if `references` chain exists. Reply/Forward/Move/Delete/Snooze buttons. The **Snooze** button opens a small picker with quick presets (later today, tomorrow morning, next week) and a custom date/time option; submits `POST /api/v1/messages/{id}/snooze`.
+3. **Compose / Reply / Forward** — form with a **From** selector (dropdown of all identities, pre-selected to the default; or, when replying, to the identity whose address matches the original To/Cc), To, Cc, Bcc, Subject, plain-text body, optional HTML body toggle. File upload for attachments. A **Send later** toggle reveals a date/time picker for `send_at`; when set, the Send button becomes "Schedule". Auto-save to Drafts on a 30-second timer (scheduled messages auto-save to Drafts until explicitly scheduled).
+4. **Message detail** (Scheduled folder) — shows the scheduled send time prominently. A **Cancel schedule** button calls `DELETE /api/v1/scheduled/{id}`, returning the message to Drafts for editing.
+5. **Search** — global full-text search with results shown as a message list.
+6. **Filter management** — CRUD UI for filters, with drag-to-reorder.
+7. **Folder management** — create/rename/delete/reorder user folders.
+8. **Identity management** — CRUD UI for sender identities (name + address + default flag), with drag-to-reorder. The default identity is marked visually; clicking a "Set default" button updates it.
 
 ### HTML Body Display
 
@@ -1027,7 +1144,7 @@ Using `localStorage`:
 
 ---
 
-## 13. Go Dependencies
+## 14. Go Dependencies
 
 ```
 modernc.org/sqlite                  # Pure-Go SQLite (no CGO)
@@ -1043,7 +1160,7 @@ Building the binary: `go build -tags netgo` produces a single static binary with
 
 ---
 
-## 14. `go.mod`
+## 15. `go.mod`
 
 ```go
 module github.com/mikaelstaldal/mymail
@@ -1061,7 +1178,7 @@ require (
 
 ---
 
-## 15. Key Design Decisions
+## 16. Key Design Decisions
 
 ### No IMAP/POP3
 The application relies entirely on the host MTA for mail retrieval. This keeps the codebase simple and lets Postfix handle TLS, authentication, queuing, and delivery retries.
@@ -1084,12 +1201,18 @@ Identities are stored in the database and managed through the same API/UI as eve
 ### No Send Queue in mymail
 If `sendmail` returns an error (e.g. MTA down), mymail returns an HTTP 500 to the client. The message is **not** stored in a retry queue. The user is expected to retry. This matches the "simple client, let the MTA work" philosophy.
 
+### Scheduling via Polling, Not a Timer Queue
+The scheduler uses a 60-second polling loop rather than a priority queue or `time.AfterFunc`. This is simpler, requires no persistent timer state across restarts, and is accurate enough for email scheduling where minute-level precision is sufficient. The partial-index on `send_at` and `snoozed_until` keeps the polling queries fast even with a large messages table.
+
+### Snooze Restores Unread State
+When a snoozed message returns to Inbox, `read` is forcibly set to `0` regardless of whether it was read before snoozing. This is intentional: the user asked to be reminded, so the message should behave like a new arrival (badge, document title, browser notification). If the user had read it before snoozing and does not want the notification, they can simply dismiss it.
+
 ### Filter Evaluation in LDA
 Filters are evaluated in the LDA process at delivery time, not asynchronously. This is correct because filters need to run before the message lands in the Inbox (otherwise notifications or badge counts would be wrong). The LDA holds a short write lock on the database for the duration of a single message insertion.
 
 ---
 
-## 16. Open Questions / Future Work
+## 17. Open Questions / Future Work
 
 - **Multiple mailboxes**: currently one SQLite file = one mailbox. Multi-user support would require either per-user databases or a `user_id` column throughout.
 - **PGP/S-MIME**: not in scope for v1.
