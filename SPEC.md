@@ -268,7 +268,8 @@ CREATE TABLE IF NOT EXISTS identities (
     name         TEXT    NOT NULL,          -- display name, e.g. "Alice Doe"
     address      TEXT    NOT NULL UNIQUE,   -- email address, e.g. "alice@example.com"
     is_default   INTEGER NOT NULL DEFAULT 0, -- exactly one row should have 1
-    position     INTEGER NOT NULL DEFAULT 0  -- display order in the From selector
+    position     INTEGER NOT NULL DEFAULT 0, -- display order in the From selector
+    signature    TEXT    NOT NULL DEFAULT '' -- plain-text signature; empty = no signature
 );
 ```
 
@@ -914,14 +915,16 @@ Response `200`:
     "name": "Alice Doe",
     "address": "alice@example.com",
     "is_default": true,
-    "position": 0
+    "position": 0,
+    "signature": "Alice Doe\nalice@example.com"
   },
   {
     "id": 2,
     "name": "Alice Doe (work)",
     "address": "alice@corp.example.com",
     "is_default": false,
-    "position": 1
+    "position": 1,
+    "signature": ""
   }
 ]
 ```
@@ -936,13 +939,15 @@ Request:
   "name": "Alice Doe (work)",
   "address": "alice@corp.example.com",
   "is_default": false,
-  "position": 1
+  "position": 1,
+  "signature": "Alice Doe\nalice@corp.example.com"
 }
 ```
 
 - `name` must be non-empty.
 - `address` must be a valid RFC 5322 `addr-spec`. Returns `409` if the address already exists.
 - If `is_default` is `true`, all other identities are set to `is_default=false` in the same transaction.
+- `signature` is optional; defaults to empty string if absent.
 
 Response `201`: identity object.
 
@@ -1358,11 +1363,13 @@ The Scheduled folder is shown in the sidebar so the user can review and cancel p
    | **References**  | Original references + original `Message-ID`                                             | Original references + original `Message-ID`                                       | Empty                     |
 
    "No double `Re:`": if the original subject already starts with `Re:` (case-insensitive), it is used as-is.
+
+   **Signature pre-population:** when the compose form opens, if the selected From identity has a non-empty `signature`, it is appended to the plain-text body preceded by `\n-- \n` (the standard signature delimiter). When the From identity is changed via the dropdown, the old identity's signature block (if present) is replaced with the new identity's signature. Reply and Reply-All prepend the quoted original message after the signature; Forward places the forwarded message after the signature.
 4. **Message detail** (Scheduled folder) — shows the scheduled send time prominently. A **Cancel schedule** button calls `DELETE /api/v1/scheduled/{id}`, returning the message to Drafts for editing.
 5. **Search** — global full-text search with results shown as a message list.
 6. **Filter management** — CRUD UI for filters, with drag-to-reorder.
 7. **Folder management** — create/rename/delete/reorder user folders.
-8. **Identity management** — CRUD UI for sender identities (name + address + default flag), with drag-to-reorder. The default identity is marked visually; clicking a "Set default" button updates it.
+8. **Identity management** — CRUD UI for sender identities (name + address + signature + default flag), with drag-to-reorder. The default identity is marked visually; clicking a "Set default" button updates it. The signature field is a plain-text textarea; leave empty for no signature.
 9. **Spam filter settings** — toggle to enable/disable the spam filter, numeric field for the score threshold, and text field for the score header name. Submits `PUT /api/v1/spam-filter`.
 
 **Junk folder:** shown in the folder sidebar between Trash and user-created folders. The message detail view for messages in the Junk folder shows a **Not junk** button (calls `POST /api/v1/messages/{id}/mark-not-junk`) instead of the normal move controls. All other message views show a **Mark as junk** button (calls `POST /api/v1/messages/{id}/mark-junk`).
