@@ -13,8 +13,6 @@ Issues requiring a decision or further research before the spec can be finalised
 Users must type addresses from memory. Consider a `GET /api/v1/contacts?q=...` endpoint that queries distinct `from_addr` / `to_addr` values from the `messages` table and returns matching name+address pairs.
 
 
-### F7 — "Mark all as read" folder action (§13)
-The bulk PATCH endpoint supports marking all messages read, but the UI spec does not describe a "Mark all as read" button per folder. This is a common email action.
 
 ### F8 — Plain text / HTML view toggle (§13)
 When a message has both `body_html` and `body_text`, the spec does not say which is shown by default or whether the user can switch. Specify default behaviour and whether a toggle is provided.
