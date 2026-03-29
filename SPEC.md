@@ -245,6 +245,8 @@ END;
 
 ### 4.4 `attachments`
 
+Only MIME parts with `Content-Disposition: attachment` (or with no `Content-Disposition` and a non-displayable `Content-Type`) are stored here. Inline image parts referenced by `cid:` URLs in the HTML body are **not** stored as attachments; they are embedded as `data:` URIs directly into `body_html` at storage time (see §6 and §10). This avoids storing the same bytes twice.
+
 ```sql
 CREATE TABLE IF NOT EXISTS attachments (
     id           INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -988,8 +990,9 @@ When invoked as `mymail -lda`, the program:
    - Extracts headers: `Message-ID`, `From`, `To`, `Cc`, `Bcc`, `Reply-To`, `Subject`, `Date`, `In-Reply-To`, `References`, plus spam-related headers (`X-Spam-Flag`, `X-Spam-Status`, and the configured score header).
    - Decodes MIME structure:
      - Finds `text/plain` part → `body_text`
-     - Finds `text/html` part → `body_html` (sanitize before storage)
-     - Collects `attachment` / `inline` parts (other MIME parts)
+     - Finds `text/html` part → `body_html` (inline `cid:` images resolved and sanitized before storage — see below)
+     - Collects inline image parts (MIME parts with a `Content-ID` header referenced by `cid:` in the HTML body) and embeds them into `body_html` as `data:` URIs (see §10). These parts are **not** stored in the `attachments` table.
+     - Collects remaining `attachment` parts (Content-Disposition: attachment, or non-displayable parts without a Content-ID reference) → stored in `attachments` table
    - Falls back: if no `Date` header, use current time. If no `Message-ID`, generate one.
    - Handles encoded words (RFC 2047) in headers.
 4. Duplicate detection: if a `Message-ID` is present and a message with the same `Message-ID` already exists anywhere in the database, exit `0` silently. This prevents double-storage when the MTA retries delivery after a transient failure that was actually recovered.
@@ -1199,7 +1202,7 @@ Incoming HTML bodies and the HTML part of outgoing messages are sanitized using 
 
 **Allowed attributes:**
 - `href` on `a` (must be `http://`, `https://`, or `mailto:`)
-- `src` on `img` (must be `http://` or `https://`; `cid:` references are stripped)
+- `src` on `img` (must be `http://`, `https://`, or `data:image/…;base64,…`; `cid:` references are resolved to `data:` URIs before sanitisation as described below)
 - `alt` on `img`
 - Standard formatting attributes: `align`, `colspan`, `rowspan`, `style` (restricted to the safe property list below)
 
@@ -1239,6 +1242,19 @@ Incoming HTML bodies and the HTML part of outgoing messages are sanitized using 
 **Explicitly forbidden regardless of property name:** any value containing `url(`, `expression(`, `-moz-binding`, or a CSS comment (`/*`). These are stripped at the value level before the property allowlist is checked. This prevents URL-based tracking and legacy IE CSS expression attacks.
 
 **Not allowed:** `background` (shorthand, could include `background-image`), `position`, `display`, `overflow`, `content`, `z-index`, `opacity`, and all vendor-prefixed properties (`-webkit-*`, `-moz-*`, etc.).
+
+### `cid:` inline image resolution
+
+Before the HTML sanitiser runs, all `<img src="cid:...">` references in the HTML body are resolved to `data:` URIs using the MIME parts collected from the same message. The algorithm:
+
+1. Build a map of `Content-ID` value → MIME part bytes for all inline image parts in the message (strip angle brackets from the Content-ID header value before keying, e.g. `<logo@example.com>` → `logo@example.com`).
+2. For each `<img src="cid:<content-id>">` in the HTML body:
+   - Look up `<content-id>` in the map (case-insensitive).
+   - If found and the part's byte size is **≤ 1 MiB (1 048 576 bytes)**: replace the `src` value with `data:<content-type>;base64,<base64-encoded-bytes>`.
+   - If found but larger than 1 MiB, or not found: remove the `src` attribute entirely (the browser renders a broken image placeholder).
+3. After rewriting, run the HTML sanitiser as normal. The sanitiser then allows `data:image/…;base64,…` `src` values through.
+
+This step runs at storage time (LDA and import), so `body_html` is stored with `data:` URIs already embedded. No MIME part data is stored separately for inline images.
 
 ---
 

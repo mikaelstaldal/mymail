@@ -8,9 +8,6 @@ Issues requiring a decision or further research before the spec can be finalised
 
 
 
-### F3 — Inline images (`cid:` references) (§10)
-The sanitiser strips `cid:` from `<img src>`, so inline images (common in formatted email) display as broken images. Options: (a) add a proxy endpoint `GET /api/v1/messages/{id}/parts/{content_id}` and rewrite `cid:` URLs to it during sanitisation; (b) embed inline parts as `data:` URIs; (c) document the limitation.
-
 ### F4 — Per-identity signature (§4.5, §13)
 No sender signature is specified. It is a standard email client feature. If desired, add a `signature` TEXT column to the `identities` table and pre-populate the compose body with it.
 
