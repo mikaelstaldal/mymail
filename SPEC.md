@@ -58,7 +58,7 @@ mymail -lda [flags]
 | `-basic-auth-file`  | ``                  | Path to htpasswd file; if set, enables HTTP Basic Auth |
 | `-basic-auth-realm` | `mymail`            | Auth realm shown to clients                            |
 
-Identities are managed entirely through the REST API (§5.6) and the web UI. There is no CLI flag for the initial identity; the first identity is created via the web UI on first use (the compose view prompts the user if no identities exist).
+Identities are managed entirely through the REST API (§5.9) and the web UI. There is no CLI flag for the initial identity; the first identity is created via the web UI on first use (the compose view prompts the user if no identities exist).
 
 ### Import mode (`-import`)
 
@@ -124,27 +124,24 @@ CREATE TABLE IF NOT EXISTS folders (
     id         INTEGER PRIMARY KEY AUTOINCREMENT,
     name       TEXT    NOT NULL UNIQUE,   -- display name, e.g. "Work"
     slug       TEXT    NOT NULL UNIQUE,   -- URL-safe key, e.g. "work"
-    position   INTEGER NOT NULL DEFAULT 0 -- display order
+    position   INTEGER NOT NULL DEFAULT 0, -- display order
+    hidden     INTEGER NOT NULL DEFAULT 0  -- 1 = hidden from normal folder listing
 );
 ```
 
 **Built-in folders** (created on first run, protected from deletion):
 
-| id | name      | slug      | Notes                                                                  |
-|----|-----------|-----------|------------------------------------------------------------------------|
-| 1  | Inbox     | inbox     |                                                                        |
-| 2  | Sent      | sent      |                                                                        |
-| 3  | Drafts    | drafts    |                                                                        |
-| 4  | Trash     | trash     |                                                                        |
-| 5  | Scheduled | scheduled | Hidden from the normal folder sidebar; messages awaiting deferred send |
-| 6  | Snoozed   | snoozed   | Hidden from the normal folder sidebar; messages awaiting snooze expiry |
-| 7  | Junk      | junk      | Spam messages; visible in sidebar                                      |
+| id | name      | slug      | hidden | Notes                                                                  |
+|----|-----------|-----------|--------|------------------------------------------------------------------------|
+| 1  | Inbox     | inbox     | 0      |                                                                        |
+| 2  | Sent      | sent      | 0      |                                                                        |
+| 3  | Drafts    | drafts    | 0      |                                                                        |
+| 4  | Trash     | trash     | 0      |                                                                        |
+| 5  | Scheduled | scheduled | 1      | Hidden from the normal folder sidebar; messages awaiting deferred send |
+| 6  | Snoozed   | snoozed   | 1      | Hidden from the normal folder sidebar; messages awaiting snooze expiry |
+| 7  | Junk      | junk      | 0      | Spam messages; visible in sidebar                                      |
 
-"Hidden" folders are not returned by `GET /api/v1/folders` in the normal listing and cannot be targeted by user-defined filters or manual `PATCH` moves. They are managed exclusively by the scheduler. The `folders` table stores a `hidden` column to encode this:
-
-```sql
-ALTER TABLE folders ADD COLUMN hidden INTEGER NOT NULL DEFAULT 0;
-```
+"Hidden" folders (`hidden=1`) are not returned by `GET /api/v1/folders` in the normal listing and cannot be targeted by user-defined filters or manual `PATCH` moves. They are managed exclusively by the scheduler.
 
 User-created folders have `id >= 100`.
 
@@ -156,7 +153,7 @@ CREATE TABLE IF NOT EXISTS messages (
     folder_id     INTEGER NOT NULL REFERENCES folders(id),
     message_id    TEXT,                    -- RFC 5322 Message-ID header value
     in_reply_to   TEXT,                    -- In-Reply-To header value
-    references    TEXT,                    -- References header value (space-separated)
+    references    TEXT,                    -- References header value (space-separated); serialized as JSON array by the API
     from_addr     TEXT    NOT NULL,        -- From header (display name + address)
     to_addr       TEXT    NOT NULL,        -- To header (may contain multiple)
     cc_addr       TEXT    NOT NULL DEFAULT '',
@@ -173,6 +170,7 @@ CREATE TABLE IF NOT EXISTS messages (
     snoozed_until TEXT,                    -- RFC 3339 UTC; non-NULL = snoozed, message sits in Snoozed folder
     snooze_folder INTEGER,                 -- folder_id to return to when snooze expires (usually Inbox=1)
     send_error    TEXT,                    -- last sendmail error for a scheduled message that failed to send
+    send_failure_count INTEGER NOT NULL DEFAULT 0, -- consecutive send failures; message moved to Drafts after 3
     created_at    TEXT    NOT NULL         -- RFC 3339 UTC, time of storage
 );
 
@@ -926,9 +924,10 @@ When invoked as `mymail -lda`, the program:
      - Collects `attachment` / `inline` parts (other MIME parts)
    - Falls back: if no `Date` header, use current time. If no `Message-ID`, generate one.
    - Handles encoded words (RFC 2047) in headers.
-4. Applies spam detection and user-defined filters (see §6.1).
-5. Inserts the message record and attachments in a single transaction.
-6. Exits `0`.
+4. Duplicate detection: if a `Message-ID` is present and a message with the same `Message-ID` already exists anywhere in the database, exit `0` silently. This prevents double-storage when the MTA retries delivery after a transient failure that was actually recovered.
+5. Applies spam detection and user-defined filters (see §6.1).
+6. Inserts the message record and attachments in a single transaction.
+7. Exits `0`.
 
 ### 6.1 Filter Application
 
@@ -986,10 +985,10 @@ ORDER BY send_at ASC;
 
 For each result, in order:
 
-1. Build the RFC 5322 message from the stored fields (same logic as immediate send in §8).
+1. Build the RFC 5322 message from the stored fields (same logic as immediate send in §9).
 2. Pipe to `sendmail -t -oi`.
-3. **On success**: set `folder_id = 2` (Sent), `read = 1`, `send_at = NULL`, `send_error = NULL`.
-4. **On failure** (non-zero sendmail exit): set `send_error` to captured stderr (max 4 KB). Leave the message in the Scheduled folder. The scheduler will retry on the next tick. After 3 consecutive failures (detectable by `send_error` being non-NULL on entry), the message is moved to Drafts and `send_at` is cleared, so it is no longer retried. The `send_error` text remains visible in the message detail so the user knows what happened.
+3. **On success**: set `folder_id = 2` (Sent), `read = 1`, `send_at = NULL`, `send_error = NULL`, `send_failure_count = 0`.
+4. **On failure** (non-zero sendmail exit): increment `send_failure_count`, set `send_error` to captured stderr (max 4 KB). Leave the message in the Scheduled folder. The scheduler will retry on the next tick. After 3 consecutive failures (`send_failure_count >= 3`), the message is moved to Drafts and `send_at` is cleared, so it is no longer retried. The `send_error` text remains visible in the message detail so the user knows what happened.
 
 ### 7.2 Snooze Expiry
 
@@ -1017,7 +1016,7 @@ Setting `read = 0` means the next poll of `GET /api/v1/folders` will see an incr
 
 ## 8. Batch Import
 
-### 7.1 Supported Formats
+### 8.1 Supported Formats
 
 #### mbox
 
@@ -1052,7 +1051,7 @@ There is no public formal specification, no maintained Go library, and it is onl
 
 Reference: [MBX format description — faisal.com](https://www.faisal.com/docs/mbx.html)
 
-### 7.2 Individual Message Format
+### 8.2 Individual Message Format
 
 Each message inside an mbox file or Maildir directory is an RFC 5322 Internet Message Format document.
 
@@ -1060,7 +1059,7 @@ Reference: [RFC 5322 — Internet Message Format](https://datatracker.ietf.org/d
 
 Parsing uses the Go standard library's [`net/mail`](https://pkg.go.dev/net/mail) package for individual messages (header decoding, address parsing) combined with a third-party mbox reader for file-level splitting.
 
-### 7.3 Go Libraries
+### 8.3 Go Libraries
 
 #### mbox reading — `github.com/emersion/go-mbox`
 
@@ -1084,7 +1083,7 @@ If auto-detection of all four variants is needed (e.g. files from SVR4-derived c
 - API: `maildir.Dir(path)` → iterate with `Keys()`, open each with `Message(key) (io.Reader, error)`. Handles `new/` and `cur/` subdirectories. Flag parsing (Seen, Replied, Flagged, etc.) available via `Flags(key)`.
 - Maildir++ subdirectories: each subfolder is a separate `maildir.Dir`; the caller is responsible for enumerating them by listing directories prefixed with `.`.
 
-### 7.4 Import Implementation Notes
+### 8.4 Import Implementation Notes
 
 - Open the database and run schema migrations before importing.
 - Wrap each source file/directory import in a single SQLite transaction for atomicity (if it fails mid-way, nothing from that source is partially committed).
@@ -1093,7 +1092,7 @@ If auto-detection of all four variants is needed (e.g. files from SVR4-derived c
 - mbox files can be large (multi-GB). Use the streaming `NextMessage()` API; do not load the entire file into memory.
 - Preserve the original `Date` header as the message's `date` field. If absent, fall back to the mtime of the Maildir file (for Maildir) or the timestamp on the `From ` separator line (for mbox).
 
-### 7.5 Pre-conversion with System Tools
+### 8.5 Pre-conversion with System Tools
 
 Users with MBX files or other unsupported formats can pre-convert using standard Linux tools:
 
