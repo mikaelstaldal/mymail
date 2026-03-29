@@ -163,8 +163,8 @@ CREATE TABLE IF NOT EXISTS folders (
 | 2  | Sent      | sent      | 0      |                                                                        |
 | 3  | Drafts    | drafts    | 0      |                                                                        |
 | 4  | Trash     | trash     | 0      |                                                                        |
-| 5  | Scheduled | scheduled | 1      | Hidden from the normal folder sidebar; messages awaiting deferred send |
-| 6  | Snoozed   | snoozed   | 1      | Hidden from the normal folder sidebar; messages awaiting snooze expiry |
+| 5  | Scheduled | scheduled | 0      | Visible in sidebar; messages awaiting deferred send                    |
+| 6  | Snoozed   | snoozed   | 0      | Visible in sidebar; messages awaiting snooze expiry                    |
 | 7  | Junk      | junk      | 0      | Spam messages; visible in sidebar                                      |
 
 "Hidden" folders (`hidden=1`) are not returned by `GET /api/v1/folders` in the normal listing and cannot be targeted by user-defined filters or manual `PATCH` moves. They are managed exclusively by the scheduler.
@@ -1336,14 +1336,16 @@ Same approach as mycal:
 |  - Sent           |  (full headers, body, attachments)|
 |  - Drafts         |                                  |
 |  - Scheduled      |                                  |
+|  - Snoozed        |                                  |
 |  - Trash          |                                  |
+|  - Junk           |                                  |
 |  - [user folders] |                                  |
 +-------------------+-----------------------------------+
 |  [Compose]  [Search bar]                             |
 +------------------------------------------------------|
 ```
 
-The Scheduled folder is shown in the sidebar so the user can review and cancel pending sends. The Snoozed folder is **not** shown in the sidebar — snoozed messages are managed via the snooze/unsnooze buttons on individual messages, not by browsing a folder.
+The Scheduled folder is shown in the sidebar so the user can review and cancel pending sends. The Snoozed folder is also shown in the sidebar so the user can browse and cancel snoozed messages; individual messages in the Snoozed folder show a **Cancel snooze** button (calls `DELETE /api/v1/messages/{id}/snooze`).
 
 ### Views
 

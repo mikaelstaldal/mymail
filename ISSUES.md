@@ -12,8 +12,6 @@ Issues requiring a decision or further research before the spec can be finalised
 ### F5 — Address autocomplete / contact list (§13)
 Users must type addresses from memory. Consider a `GET /api/v1/contacts?q=...` endpoint that queries distinct `from_addr` / `to_addr` values from the `messages` table and returns matching name+address pairs.
 
-### F6 — Access to Snoozed folder (§13)
-The Snoozed folder is hidden from the sidebar with no UI path to browse or bulk-cancel snoozed messages. Consider showing it in the sidebar like the Scheduled folder, or providing a dedicated "Snoozed" view.
 
 ### F7 — "Mark all as read" folder action (§13)
 The bulk PATCH endpoint supports marking all messages read, but the UI spec does not describe a "Mark all as read" button per folder. This is a common email action.
