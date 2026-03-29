@@ -6,8 +6,6 @@ Issues requiring a decision or further research before the spec can be finalised
 
 ## Missing features
 
-### F1 — Reply All (§13)
-Reply-All is absent from the compose view description. It is standard for email. Decide whether to add it; if so, the pre-population logic (recipients = original To + Cc minus own identity address) needs specifying.
 
 ### F2 — Empty Trash / Empty Junk (§5.2, §13)
 There is no endpoint to delete all messages in a folder at once. Users cannot empty Trash or Junk without selecting every message individually. Consider adding `DELETE /api/v1/folders/{id}/messages` (delete all) or a bulk-select-all UI action.

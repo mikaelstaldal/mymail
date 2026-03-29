@@ -1316,8 +1316,21 @@ The Scheduled folder is shown in the sidebar so the user can review and cancel p
 ### Views
 
 1. **Folder view** — paginated message list for selected folder. Unread messages shown in bold. Click to open message detail.
-2. **Message detail** — full headers, rendered HTML body (in sandboxed iframe) or plain text, attachment download links. Shows thread if `references` chain exists. Reply/Forward/Move/Delete/Snooze buttons. The **Snooze** button opens a small picker with quick presets (later today, tomorrow morning, next week) and a custom date/time option; submits `POST /api/v1/messages/{id}/snooze`.
-3. **Compose / Reply / Forward** — form with a **From** selector (dropdown of all identities, pre-selected to the default; or, when replying, to the identity whose address matches the original To/Cc), To, Cc, Bcc, Subject, plain-text body, optional HTML body toggle. File upload for attachments. A **Send later** toggle reveals a date/time picker for `send_at`; when set, the Send button becomes "Schedule". Auto-save to Drafts on a 30-second timer (scheduled messages auto-save to Drafts until explicitly scheduled).
+2. **Message detail** — full headers, rendered HTML body (in sandboxed iframe) or plain text, attachment download links. Shows thread if `references` chain exists. Reply/Reply All/Forward/Move/Delete/Snooze buttons. The **Snooze** button opens a small picker with quick presets (later today, tomorrow morning, next week) and a custom date/time option; submits `POST /api/v1/messages/{id}/snooze`.
+3. **Compose / Reply / Reply All / Forward** — form with a **From** selector (dropdown of all identities, pre-selected to the default; or, when replying, to the identity whose address matches the original To/Cc), To, Cc, Bcc, Subject, plain-text body, optional HTML body toggle. File upload for attachments. A **Send later** toggle reveals a date/time picker for `send_at`; when set, the Send button becomes "Schedule". Auto-save to Drafts on a 30-second timer (scheduled messages auto-save to Drafts until explicitly scheduled).
+
+   Pre-population rules per action:
+
+   | Field           | Reply                                                                                   | Reply All                                                                         | Forward                   |
+   |-----------------|-----------------------------------------------------------------------------------------|-----------------------------------------------------------------------------------|---------------------------|
+   | **From**        | Identity whose address appears in the original To or Cc; falls back to default identity | Same as Reply                                                                     | Default identity          |
+   | **To**          | Original `From` address                                                                 | Original `From` address                                                           | Empty                     |
+   | **Cc**          | Empty                                                                                   | All addresses from original To + Cc, minus the chosen From identity's own address | Empty                     |
+   | **Subject**     | `Re: <original subject>` (no double `Re:`)                                              | `Re: <original subject>` (no double `Re:`)                                        | `Fwd: <original subject>` |
+   | **In-Reply-To** | Original `Message-ID`                                                                   | Original `Message-ID`                                                             | Empty                     |
+   | **References**  | Original references + original `Message-ID`                                             | Original references + original `Message-ID`                                       | Empty                     |
+
+   "No double `Re:`": if the original subject already starts with `Re:` (case-insensitive), it is used as-is.
 4. **Message detail** (Scheduled folder) — shows the scheduled send time prominently. A **Cancel schedule** button calls `DELETE /api/v1/scheduled/{id}`, returning the message to Drafts for editing.
 5. **Search** — global full-text search with results shown as a message list.
 6. **Filter management** — CRUD UI for filters, with drag-to-reorder.
