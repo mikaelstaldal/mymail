@@ -493,6 +493,13 @@ Download attachment data.
 
 Response `200` with appropriate `Content-Type` and `Content-Disposition: attachment; filename="<filename>"`.
 
+The filename used in `Content-Disposition` is sanitised from the stored attachment name before being placed in the header:
+1. Replace each space character with `_`.
+2. Remove all characters that are not ASCII alphanumeric (`A–Z`, `a–z`, `0–9`), `-`, `_`, or `.`.
+3. If the result is empty, use the fallback `attachment`.
+
+Example: `"My Report (draft).pdf"` → `"My_Report_draft.pdf"`.
+
 #### `PATCH /api/v1/messages/{id}`
 
 Update message metadata. Supports partial updates (only supplied fields are changed).
@@ -1133,9 +1140,44 @@ Incoming HTML bodies and the HTML part of outgoing messages are sanitized using 
 - `href` on `a` (must be `http://`, `https://`, or `mailto:`)
 - `src` on `img` (must be `http://` or `https://`; `cid:` references are stripped)
 - `alt` on `img`
-- Standard formatting attributes: `align`, `colspan`, `rowspan`, `style` (restricted property list)
+- Standard formatting attributes: `align`, `colspan`, `rowspan`, `style` (restricted to the safe property list below)
 
 **Stripped always:** `script`, `style` (standalone), `iframe`, `object`, `embed`, `form`, `input`
+
+**Allowed CSS properties** (enforced on the `style` attribute; all others are stripped):
+
+| Property           | Notes                        |
+|--------------------|------------------------------|
+| `color`            |                              |
+| `background-color` |                              |
+| `font-family`      |                              |
+| `font-size`        |                              |
+| `font-style`       |                              |
+| `font-variant`     |                              |
+| `font-weight`      |                              |
+| `letter-spacing`   |                              |
+| `line-height`      |                              |
+| `text-align`       |                              |
+| `text-decoration`  |                              |
+| `text-indent`      |                              |
+| `vertical-align`   |                              |
+| `white-space`      |                              |
+| `word-spacing`     |                              |
+| `border`           | Shorthand                    |
+| `border-color`     |                              |
+| `border-style`     |                              |
+| `border-width`     |                              |
+| `border-collapse`  |                              |
+| `border-spacing`   |                              |
+| `padding`          | Shorthand and longhand sides |
+| `margin`           | Shorthand and longhand sides |
+| `width`            |                              |
+| `max-width`        |                              |
+| `height`           |                              |
+
+**Explicitly forbidden regardless of property name:** any value containing `url(`, `expression(`, `-moz-binding`, or a CSS comment (`/*`). These are stripped at the value level before the property allowlist is checked. This prevents URL-based tracking and legacy IE CSS expression attacks.
+
+**Not allowed:** `background` (shorthand, could include `background-image`), `position`, `display`, `overflow`, `content`, `z-index`, `opacity`, and all vendor-prefixed properties (`-webkit-*`, `-moz-*`, etc.).
 
 ---
 
@@ -1163,6 +1205,31 @@ Identical to mycal. See mycal's `internal/auth/` for the htpasswd implementation
 - If `-basic-auth-file` is not set, all requests are accepted without authentication.
 - The LDA mode ignores authentication entirely (no HTTP involved).
 - Creating the htpasswd file: `htpasswd -Bc htpasswd myuser`
+
+### 12.1 CSRF Protection
+
+All state-changing HTTP methods (POST, PUT, PATCH, DELETE) are protected by two layers:
+
+**Layer 1 — Origin / Referer validation:**
+The server rejects any state-changing request whose `Origin` header (or, if absent, the origin derived from the `Referer` header) does not match the server's own origin (`scheme://host:port`). Requests with neither header are also rejected. GET requests are exempt (they must be side-effect-free).
+
+**Layer 2 — CSRF token:**
+- On startup the server generates a cryptographically random 32-byte token (hex-encoded, 64 characters). It is held in memory and regenerated on each restart.
+- The token is embedded in the main HTML page as `<meta name="csrf-token" content="...">` so that the JavaScript UI can read it.
+- Every state-changing API request from the UI must include the header `X-CSRF-Token: <token>`.
+- The server validates this header on every state-changing request. A missing or incorrect token returns `403 Forbidden`.
+- The LDA mode and GET requests are fully exempt.
+
+The token endpoint itself:
+
+#### `GET /api/v1/csrf-token`
+
+Returns the current CSRF token. Used by the UI on startup (as a fallback if the meta tag is unavailable). Subject to the same Basic Auth rules as all other endpoints.
+
+Response `200`:
+```json
+{ "token": "a3f8...e91c" }
+```
 
 ---
 
@@ -1212,7 +1279,7 @@ The Scheduled folder is shown in the sidebar so the user can review and cancel p
 
 ### HTML Body Display
 
-Rendered in a sandboxed `<iframe srcdoc="...">` with `sandbox="allow-same-origin"` (no scripts). The sanitized HTML body is set as `srcdoc`. This prevents CSS/JS injection from message bodies affecting the parent UI.
+Rendered in a sandboxed `<iframe srcdoc="...">` with `sandbox` and no additional tokens (maximum restriction: no scripts, no same-origin access, no forms, no popups). The sanitized HTML body is set as `srcdoc`. Links inside the email body must use `target="_blank"` and `rel="noopener noreferrer"` so they open in a new tab despite the sandbox; the sanitiser adds these attributes to all `<a href>` elements during sanitisation.
 
 ### New Message Notifications
 
@@ -1310,7 +1377,17 @@ Spam detection runs in Phase 1 (before user filters) so that user filters run wi
 
 ---
 
-## 17. Out of scope
+## 17. Production Deployment
+
+mymail binds plain HTTP and delegates TLS termination, rate limiting, and access control to the operator's infrastructure. A separate `docs/deployment.md` document should be created covering:
+
+- **TLS**: mymail must be placed behind a TLS-terminating reverse proxy (nginx, Caddy, etc.) before being exposed outside localhost. Using `-basic-auth-file` over plain HTTP leaks credentials; TLS is mandatory when Basic Auth is enabled.
+- **Rate limiting**: The primary exposure from missing rate limiting is CPU exhaustion via repeated failed authentication attempts, not password guessing (bcrypt cost factor already limits guessing to ~10 attempts/second). The reverse proxy should apply a per-IP request rate limit (e.g. 20 req/s) to prevent this DoS vector.
+- **Bind address**: When not behind a reverse proxy on the same host, use `-addr 127.0.0.1` to prevent accidental exposure on public interfaces.
+
+---
+
+## 18. Out of scope
 
 - **Multiple mailboxes**: currently one SQLite file = one mailbox. Multi-user support would require either per-user databases or a `user_id` column throughout.
 - **PGP/S-MIME**: not in scope for v1.

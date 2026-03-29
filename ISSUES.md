@@ -4,28 +4,6 @@ Issues requiring a decision or further research before the spec can be finalised
 
 ---
 
-## Security
-
-### S1 — iframe sandbox attributes (§13)
-`sandbox="allow-same-origin"` lets the sandboxed iframe run as the same origin as the parent UI. Without `allow-scripts` this is mostly safe, but it means CSS-level tracking pixels in email HTML are not blocked by the sandbox, and any future accidental addition of `allow-scripts` would be catastrophic. Decide: use `sandbox` with no attributes (safest, breaks no-JS CSS layouts), or `sandbox="allow-popups allow-popups-to-escape-sandbox"` to let links open in a new tab without same-origin privileges.
-
-### S2 — CSRF protection (§12)
-The spec uses HTTP Basic Auth but specifies no CSRF tokens or `SameSite` cookie policy. When auth is disabled (the default), any web page can issue authenticated API requests from the user's browser. Decide: require `Origin` / `Referer` header validation, add a CSRF token, or accept the risk given the "local server only" use case and document the requirement to bind to `127.0.0.1`.
-
-### S3 — `style` attribute allowed properties list (§10)
-The sanitisation policy permits the `style` attribute with a "restricted property list" that is never defined. Unfiltered `style` allows CSS-exfiltration via `background-image: url(https://tracker.example.com)`. Decide which CSS properties are allowed (e.g. `color`, `font-*`, `text-*`, `background-color`) and add the list to the spec.
-
-### S4 — `Content-Disposition` filename encoding (§5.2)
-Attachment filenames come from untrusted email headers. A filename containing `\r\n` or `"` can break the `Content-Disposition` header. Decide: sanitise (strip non-printable characters, escape quotes) and/or encode using RFC 5987 (`filename*=UTF-8''...`).
-
-### S5 — Rate limiting (§12)
-No rate limiting is specified on any endpoint. Without it, Basic Auth is trivially brute-forceable. Decide: add a configurable rate limit (e.g. `-rate-limit` flag, default 20 req/s per IP), or document that rate limiting is expected from a reverse proxy.
-
-### S6 — HTTPS / TLS (§12)
-The spec describes HTTP-only operation but recommends Basic Auth, which sends credentials in plaintext without TLS. Decide: add native TLS support (`-tls-cert` / `-tls-key` flags), or add an explicit warning that Basic Auth requires a TLS-terminating reverse proxy (nginx, Caddy, etc.) and document a recommended setup.
-
----
-
 ## Reliability
 
 ### R1 — Schema version tracking (§4)
