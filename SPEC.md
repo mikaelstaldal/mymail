@@ -579,6 +579,17 @@ Response `200`:
 { "deleted": 2 }
 ```
 
+#### `DELETE /api/v1/folders/{id}/messages`
+
+Delete all messages in a folder. Applies the same two-step semantics as single delete: messages not already in Trash are moved to Trash; messages already in Trash are permanently deleted. This means "Empty Trash" (`DELETE /api/v1/folders/4/messages`) permanently deletes everything in Trash, while "Empty Junk" (`DELETE /api/v1/folders/7/messages`) moves all Junk messages to Trash.
+
+Returns `400` for hidden folders (Scheduled, Snoozed).
+
+Response `200`:
+```json
+{ "deleted": 42 }
+```
+
 #### `POST /api/v1/messages/send`
 
 Compose and send a new message, or schedule it for future delivery.
@@ -1339,6 +1350,8 @@ The Scheduled folder is shown in the sidebar so the user can review and cancel p
 9. **Spam filter settings** — toggle to enable/disable the spam filter, numeric field for the score threshold, and text field for the score header name. Submits `PUT /api/v1/spam-filter`.
 
 **Junk folder:** shown in the folder sidebar between Trash and user-created folders. The message detail view for messages in the Junk folder shows a **Not junk** button (calls `POST /api/v1/messages/{id}/mark-not-junk`) instead of the normal move controls. All other message views show a **Mark as junk** button (calls `POST /api/v1/messages/{id}/mark-junk`).
+
+**Empty folder:** the Trash and Junk folder views show an **Empty** button in the toolbar. Clicking it prompts for confirmation, then calls `DELETE /api/v1/folders/{id}/messages`.
 
 ### HTML Body Display
 

@@ -7,8 +7,6 @@ Issues requiring a decision or further research before the spec can be finalised
 ## Missing features
 
 
-### F2 — Empty Trash / Empty Junk (§5.2, §13)
-There is no endpoint to delete all messages in a folder at once. Users cannot empty Trash or Junk without selecting every message individually. Consider adding `DELETE /api/v1/folders/{id}/messages` (delete all) or a bulk-select-all UI action.
 
 ### F3 — Inline images (`cid:` references) (§10)
 The sanitiser strips `cid:` from `<img src>`, so inline images (common in formatted email) display as broken images. Options: (a) add a proxy endpoint `GET /api/v1/messages/{id}/parts/{content_id}` and rewrite `cid:` URLs to it during sanitisation; (b) embed inline parts as `data:` URIs; (c) document the limitation.
