@@ -1,0 +1,1098 @@
+# mymail — Specification
+
+A self-hosted email client with a Go backend, SQLite storage, REST API, and embedded web UI.
+Designed to run on a Linux server alongside a mail system such as Postfix.
+
+---
+
+## 1. Overview
+
+mymail stores, organizes, and presents email. It does **not** speak IMAP/POP3 or SMTP directly. Instead:
+
+- **Incoming mail** is delivered by the local MTA (Postfix, etc.) via a local delivery agent (LDA) mode.
+- **Outgoing mail** is handed off to the system `sendmail` binary.
+- The application is a single self-contained binary with an embedded web UI.
+
+---
+
+## 2. Project Structure
+
+```
+mymail/
+├── main.go                   # Entry point, CLI flags, routing, startup
+├── go.mod / go.sum
+├── internal/
+│   ├── auth/                 # HTTP Basic Auth middleware (htpasswd)
+│   ├── handler/              # HTTP handlers (REST API)
+│   ├── lda/                  # Local delivery agent (parse & store incoming mail)
+│   ├── model/                # Data types (Message, Folder, Filter, etc.)
+│   ├── repository/           # SQLite data access layer
+│   ├── sanitize/             # HTML sanitization for message bodies
+│   └── service/              # Business logic
+├── web/
+│   ├── embed.go              # //go:embed directive
+│   └── static/               # Frontend assets (HTML, JS, CSS)
+├── docs/                     # API documentation
+└── data/                     # Runtime data directory (default)
+```
+
+Follows the same layered architecture as mycal:
+`handler → service → repository → SQLite`
+
+---
+
+## 3. Command-Line Interface
+
+```
+mymail [flags]
+mymail -lda [flags]
+```
+
+### Server mode (default)
+
+| Flag                | Default             | Description                                            |
+|---------------------|---------------------|--------------------------------------------------------|
+| `-port`             | `8080`              | HTTP listen port (1–65535)                             |
+| `-addr`             | `` (all interfaces) | Bind address                                           |
+| `-data`             | `data/`             | Data directory (stores `mymail.sqlite`)                |
+| `-basic-auth-file`  | ``                  | Path to htpasswd file; if set, enables HTTP Basic Auth |
+| `-basic-auth-realm` | `mymail`            | Auth realm shown to clients                            |
+
+Identities are managed entirely through the REST API (§5.6) and the web UI. There is no CLI flag for the initial identity; the first identity is created via the web UI on first use (the compose view prompts the user if no identities exist).
+
+### Import mode (`-import`)
+
+```
+mymail -import -data <dir> <mapping>...
+```
+
+Each `<mapping>` argument is a colon-separated triplet `<folder>:<format>:<path>`:
+
+| Part       | Values                                                      | Description                                                          |
+|------------|-------------------------------------------------------------|----------------------------------------------------------------------|
+| `<folder>` | `inbox`, `sent`, `drafts`, `trash`, or any user-folder name | Target folder in mymail. Created automatically if it does not exist. |
+| `<format>` | `mbox`, `maildir`                                           | Source format (see §7 for details)                                   |
+| `<path>`   | file or directory path                                      | Source mbox file or Maildir root directory                           |
+
+Example — import from a Thunderbird profile:
+
+```bash
+mymail -import -data /var/lib/mymail \
+  inbox:mbox:/home/user/.thunderbird/abc123/Mail/Local\ Folders/Inbox \
+  sent:mbox:/home/user/.thunderbird/abc123/Mail/Local\ Folders/Sent \
+  drafts:mbox:/home/user/.thunderbird/abc123/Mail/Local\ Folders/Drafts \
+  work:maildir:/home/user/Maildir/.Work
+```
+
+Behaviour:
+- Messages are imported in source order (oldest first within each file/directory).
+- Duplicate detection: if a message with the same `Message-ID` already exists anywhere in the database, it is skipped (not re-imported). Messages without a `Message-ID` are always imported.
+- Filters are **not** applied during import — messages go directly to the specified target folder.
+- A running count is printed to stdout as each folder completes: `inbox: 1042 imported, 3 skipped`.
+- On completion, a summary line is printed: `Total: 2381 imported, 17 skipped`.
+- Exit code `0` on success, `1` on any error (details logged to stderr). A single unparseable message logs a warning and continues; it does not abort the import.
+
+### LDA mode (`-lda`)
+
+When invoked with `-lda`, the program reads a single RFC 5322 message from **stdin**, stores it in the database, applies filters, and exits. 
+All other server flags are irrelevant in this mode; only `-data` is used.
+
+This allows Postfix configuration like:
+
+```
+# /etc/postfix/main.cf
+mailbox_command = /usr/local/bin/mymail -lda -data /var/lib/mymail
+```
+
+Exit codes follow standard LDA conventions:
+- `0` — success
+- `1` — permanent failure (message will bounce)
+- `75` — temporary failure (MTA will retry; used e.g. if database is locked)
+
+---
+
+## 4. Database Schema
+
+File: `<data>/mymail.sqlite`
+
+All timestamps are stored as UTC RFC 3339 strings. The schema is created idempotently on startup using `CREATE TABLE IF NOT EXISTS` and idempotent `ALTER TABLE` migrations.
+
+### 4.1 `folders`
+
+```sql
+CREATE TABLE IF NOT EXISTS folders (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    name       TEXT    NOT NULL UNIQUE,   -- display name, e.g. "Work"
+    slug       TEXT    NOT NULL UNIQUE,   -- URL-safe key, e.g. "work"
+    position   INTEGER NOT NULL DEFAULT 0 -- display order
+);
+```
+
+**Built-in folders** (created on first run, protected from deletion):
+
+| id | name   | slug   |
+|----|--------|--------|
+| 1  | Inbox  | inbox  |
+| 2  | Sent   | sent   |
+| 3  | Drafts | drafts |
+| 4  | Trash  | trash  |
+
+User-created folders have `id >= 100`.
+
+### 4.2 `messages`
+
+```sql
+CREATE TABLE IF NOT EXISTS messages (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    folder_id     INTEGER NOT NULL REFERENCES folders(id),
+    message_id    TEXT,                    -- RFC 5322 Message-ID header value
+    in_reply_to   TEXT,                    -- In-Reply-To header value
+    references    TEXT,                    -- References header value (space-separated)
+    from_addr     TEXT    NOT NULL,        -- From header (display name + address)
+    to_addr       TEXT    NOT NULL,        -- To header (may contain multiple)
+    cc_addr       TEXT    NOT NULL DEFAULT '',
+    bcc_addr      TEXT    NOT NULL DEFAULT '',
+    reply_to_addr TEXT    NOT NULL DEFAULT '',
+    subject       TEXT    NOT NULL DEFAULT '',
+    date          TEXT    NOT NULL,        -- RFC 3339 UTC timestamp (from Date header)
+    body_text     TEXT    NOT NULL DEFAULT '', -- plain-text part
+    body_html     TEXT    NOT NULL DEFAULT '', -- HTML part (sanitized on storage)
+    raw           BLOB    NOT NULL,        -- original raw RFC 5322 message
+    read          INTEGER NOT NULL DEFAULT 0, -- 0=unread, 1=read
+    flagged       INTEGER NOT NULL DEFAULT 0, -- 0=normal, 1=starred/flagged
+    created_at    TEXT    NOT NULL         -- RFC 3339 UTC, time of storage
+);
+
+CREATE INDEX IF NOT EXISTS idx_messages_folder_id  ON messages(folder_id);
+CREATE INDEX IF NOT EXISTS idx_messages_date       ON messages(date);
+CREATE INDEX IF NOT EXISTS idx_messages_message_id ON messages(message_id);
+CREATE INDEX IF NOT EXISTS idx_messages_read       ON messages(read);
+```
+
+### 4.3 `messages_fts` (FTS5)
+
+```sql
+CREATE VIRTUAL TABLE IF NOT EXISTS messages_fts USING fts5(
+    from_addr,
+    to_addr,
+    cc_addr,
+    subject,
+    body_text,
+    content='messages',
+    content_rowid='id'
+);
+```
+
+Maintained by triggers:
+
+```sql
+CREATE TRIGGER IF NOT EXISTS messages_fts_insert AFTER INSERT ON messages BEGIN
+    INSERT INTO messages_fts(rowid, from_addr, to_addr, cc_addr, subject, body_text)
+    VALUES (new.id, new.from_addr, new.to_addr, new.cc_addr, new.subject, new.body_text);
+END;
+
+CREATE TRIGGER IF NOT EXISTS messages_fts_delete AFTER DELETE ON messages BEGIN
+    INSERT INTO messages_fts(messages_fts, rowid, from_addr, to_addr, cc_addr, subject, body_text)
+    VALUES ('delete', old.id, old.from_addr, old.to_addr, old.cc_addr, old.subject, old.body_text);
+END;
+
+CREATE TRIGGER IF NOT EXISTS messages_fts_update AFTER UPDATE ON messages BEGIN
+    INSERT INTO messages_fts(messages_fts, rowid, from_addr, to_addr, cc_addr, subject, body_text)
+    VALUES ('delete', old.id, old.from_addr, old.to_addr, old.cc_addr, old.subject, old.body_text);
+    INSERT INTO messages_fts(rowid, from_addr, to_addr, cc_addr, subject, body_text)
+    VALUES (new.id, new.from_addr, new.to_addr, new.cc_addr, new.subject, new.body_text);
+END;
+```
+
+### 4.4 `attachments`
+
+```sql
+CREATE TABLE IF NOT EXISTS attachments (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    message_id   INTEGER NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
+    filename     TEXT    NOT NULL,
+    content_type TEXT    NOT NULL,
+    size         INTEGER NOT NULL,
+    data         BLOB    NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_attachments_message_id ON attachments(message_id);
+```
+
+### 4.5 `identities`
+
+```sql
+CREATE TABLE IF NOT EXISTS identities (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    name         TEXT    NOT NULL,          -- display name, e.g. "Alice Doe"
+    address      TEXT    NOT NULL UNIQUE,   -- email address, e.g. "alice@example.com"
+    is_default   INTEGER NOT NULL DEFAULT 0, -- exactly one row should have 1
+    position     INTEGER NOT NULL DEFAULT 0  -- display order in the From selector
+);
+```
+
+**Constraints enforced in the service layer** (not as SQL constraints, to give cleaner error messages):
+- At least one identity must exist at all times.
+- Exactly one identity has `is_default=1`. When a new identity is created with `is_default=true`, all other rows are set to `is_default=0` in the same transaction. When the default identity is deleted, the identity with the lowest `position` (then lowest `id`) becomes the new default.
+- `address` must be a syntactically valid email address (RFC 5322 `addr-spec`).
+
+The first identity is created interactively or via CLI (see §3). There is no seeded default.
+
+### 4.6 `filters`
+
+```sql
+CREATE TABLE IF NOT EXISTS filters (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    position      INTEGER NOT NULL DEFAULT 0,  -- evaluation order (ascending)
+    name          TEXT    NOT NULL DEFAULT '',  -- human-readable label
+    -- match criteria (all non-empty fields are ANDed together)
+    match_from    TEXT    NOT NULL DEFAULT '',  -- substring match on From
+    match_to      TEXT    NOT NULL DEFAULT '',  -- substring match on To or Cc
+    match_subject TEXT    NOT NULL DEFAULT '',  -- substring match on Subject
+    -- action
+    action        TEXT    NOT NULL,             -- "move", "trash", "mark_read"
+    folder_id     INTEGER REFERENCES folders(id), -- required when action="move"
+    stop          INTEGER NOT NULL DEFAULT 1   -- 0=continue to next filter, 1=stop
+);
+```
+
+**Actions:**
+- `move` — deliver to `folder_id` instead of Inbox
+- `trash` — deliver directly to Trash
+- `mark_read` — deliver to Inbox but mark as read
+- `drop` — discard the message entirely; nothing is stored in the database
+
+Multiple criteria within a filter are ANDed. Filters are evaluated in `position` order. When `stop=1` (default) the first matching filter wins and evaluation halts.
+
+---
+
+## 5. REST API
+
+**Base path:** `/api/v1`
+
+**Content type:** `application/json` for all request and response bodies, except attachment download endpoints.
+
+**Max request body:** 32 MB (to accommodate raw message uploads; typical JSON operations limited to 1 MB).
+
+**Error responses:**
+
+```json
+{ "error": "human-readable message" }
+```
+
+HTTP status codes:
+- `400` — validation error
+- `401` — authentication required
+- `404` — not found
+- `409` — conflict (e.g. duplicate folder name)
+- `500` — internal error
+
+### 5.1 Folders
+
+#### `GET /api/v1/folders`
+
+Returns all folders ordered by `position`.
+
+Response `200`:
+```json
+[
+  {
+    "id": 1,
+    "name": "Inbox",
+    "slug": "inbox",
+    "position": 0,
+    "unread_count": 3
+  }
+]
+```
+
+#### `POST /api/v1/folders`
+
+Create a user-defined folder.
+
+Request:
+```json
+{
+  "name": "Work",
+  "position": 10
+}
+```
+
+The `slug` is derived from `name` (lowercase, spaces → hyphens, non-alphanumeric stripped). Returns `409` if name or slug already exists.
+
+Response `201`: folder object.
+
+#### `PATCH /api/v1/folders/{id}`
+
+Update folder name and/or position. Built-in folders (id 1–4) may have their `position` updated but not their `name`.
+
+Request (all fields optional):
+```json
+{
+  "name": "Important Work",
+  "position": 5
+}
+```
+
+Response `200`: updated folder object.
+
+#### `DELETE /api/v1/folders/{id}`
+
+Delete a user-created folder. Messages in this folder are moved to Trash first. Returns `400` for built-in folders.
+
+Response `204`.
+
+---
+
+### 5.2 Messages
+
+#### `GET /api/v1/folders/{folder_id}/messages`
+
+List messages in a folder. Results are ordered by `date` descending.
+
+Query parameters:
+
+| Parameter | Type | Description                                  |
+|-----------|------|----------------------------------------------|
+| `limit`   | int  | Max messages to return (default 50, max 200) |
+| `offset`  | int  | Pagination offset (default 0)                |
+| `unread`  | bool | If `true`, return only unread messages       |
+| `flagged` | bool | If `true`, return only flagged messages      |
+
+Response `200`:
+```json
+{
+  "total": 142,
+  "messages": [
+    {
+      "id": 17,
+      "folder_id": 1,
+      "message_id": "<abc@example.com>",
+      "from_addr": "Alice <alice@example.com>",
+      "to_addr": "Bob <bob@example.com>",
+      "subject": "Hello",
+      "date": "2026-03-29T10:00:00Z",
+      "read": false,
+      "flagged": false,
+      "has_attachments": true,
+      "created_at": "2026-03-29T10:01:05Z"
+    }
+  ]
+}
+```
+
+Note: the list endpoint omits `body_text`, `body_html`, `raw`, `cc_addr`, `bcc_addr`, and `attachments` for efficiency.
+
+#### `GET /api/v1/messages/search`
+
+Full-text search across all folders.
+
+Query parameters:
+
+| Parameter   | Type   | Description                     |
+|-------------|--------|---------------------------------|
+| `q`         | string | FTS5 query string (required)    |
+| `folder_id` | int    | Restrict to a folder (optional) |
+| `limit`     | int    | Default 50, max 200             |
+| `offset`    | int    | Pagination offset               |
+
+The query is executed as `SELECT ... FROM messages_fts WHERE messages_fts MATCH ?` using FTS5 syntax. Results include a `snippet` field (FTS5 `snippet()` function output) and are ordered by rank (relevance).
+
+Response `200`:
+```json
+{
+  "total": 5,
+  "messages": [
+    {
+      "id": 17,
+      "folder_id": 1,
+      "from_addr": "...",
+      "subject": "...",
+      "date": "...",
+      "read": false,
+      "flagged": false,
+      "snippet": "...highlighted excerpt..."
+    }
+  ]
+}
+```
+
+#### `GET /api/v1/messages/{id}`
+
+Get full message details including body and attachments list.
+
+Response `200`:
+```json
+{
+  "id": 17,
+  "folder_id": 1,
+  "message_id": "<abc@example.com>",
+  "in_reply_to": "<prev@example.com>",
+  "references": ["<older@example.com>", "<prev@example.com>"],
+  "from_addr": "Alice <alice@example.com>",
+  "to_addr": "Bob <bob@example.com>",
+  "cc_addr": "",
+  "reply_to_addr": "",
+  "subject": "Hello",
+  "date": "2026-03-29T10:00:00Z",
+  "body_text": "Hi Bob,\n...",
+  "body_html": "<p>Hi Bob,</p>...",
+  "read": true,
+  "flagged": false,
+  "created_at": "2026-03-29T10:01:05Z",
+  "attachments": [
+    {
+      "id": 3,
+      "filename": "report.pdf",
+      "content_type": "application/pdf",
+      "size": 204800
+    }
+  ]
+}
+```
+
+Fetching a message automatically marks it as read (sets `read=1`). The HTML body is sanitized (see §7).
+
+#### `GET /api/v1/messages/{id}/raw`
+
+Download the original raw RFC 5322 message.
+
+Response `200` with `Content-Type: message/rfc822` and `Content-Disposition: attachment; filename="message.eml"`.
+
+#### `GET /api/v1/attachments/{id}`
+
+Download attachment data.
+
+Response `200` with appropriate `Content-Type` and `Content-Disposition: attachment; filename="<filename>"`.
+
+#### `PATCH /api/v1/messages/{id}`
+
+Update message metadata. Supports partial updates (only supplied fields are changed).
+
+Request (all fields optional):
+```json
+{
+  "folder_id": 3,
+  "read": true,
+  "flagged": false
+}
+```
+
+Response `200`: updated message summary (same shape as list item).
+
+#### `PATCH /api/v1/messages`
+
+Bulk update. Apply the same patch to multiple messages.
+
+Request:
+```json
+{
+  "ids": [17, 18, 19],
+  "folder_id": 4,
+  "read": true
+}
+```
+
+Response `200`:
+```json
+{ "updated": 3 }
+```
+
+#### `DELETE /api/v1/messages/{id}`
+
+If the message is not in Trash, move it to Trash. If it is already in Trash, permanently delete it.
+
+Response `204`.
+
+#### `DELETE /api/v1/messages`
+
+Bulk delete. Same two-step semantics as single delete.
+
+Request:
+```json
+{ "ids": [17, 18] }
+```
+
+Response `200`:
+```json
+{ "deleted": 2 }
+```
+
+#### `POST /api/v1/messages/send`
+
+Compose and send a new message. The handler builds an RFC 5322 message, stores a copy in the Sent folder, then pipes the raw message to `sendmail -t -oi`.
+
+Request:
+```json
+{
+  "identity_id": 2,
+  "to_addr": "Alice <alice@example.com>",
+  "cc_addr": "",
+  "bcc_addr": "",
+  "reply_to_addr": "",
+  "subject": "Re: Hello",
+  "body_text": "Hi Alice,\n...",
+  "body_html": "<p>Hi Alice,</p>...",
+  "in_reply_to": "<abc@example.com>",
+  "references": ["<older@example.com>", "<abc@example.com>"]
+}
+```
+
+- `identity_id` is optional; if absent, the default identity is used. Returns `400` if the supplied ID does not exist.
+- The `From` header is constructed as `"Name" <address>` from the chosen identity.
+- At least one of `body_text` or `body_html` must be non-empty.
+- Attachments in the send flow are handled via a separate endpoint (see §5.3).
+- If `sendmail` exits with a non-zero code, return `500` with the captured stderr as the error message. No retry logic — let the MTA handle queuing.
+- The message stored in Sent has `read=true`.
+
+Response `201`:
+```json
+{ "id": 23 }
+```
+
+The `id` is the database ID of the stored Sent copy.
+
+#### `POST /api/v1/messages/send-with-attachments`
+
+Same as `/messages/send` but uses `multipart/form-data`. The JSON fields are submitted as a `message` part (content-type `application/json`); each attachment is a separate file part.
+
+Response `201`: same as `/messages/send`.
+
+#### `POST /api/v1/messages/import`
+
+Store a raw RFC 5322 message (submitted as request body with `Content-Type: message/rfc822`) directly into a folder. Intended for testing and manual import.
+
+Query parameter: `folder_id` (default: Inbox).
+
+Filters are **not** applied (this is a direct import).
+
+Response `201`:
+```json
+{ "id": 25 }
+```
+
+---
+
+### 5.3 Draft Management
+
+Drafts are regular messages in the Drafts folder (`folder_id=3`). The compose UI saves drafts via `PATCH /api/v1/messages/{id}` (updating the stored draft) or creates new ones via a simplified endpoint:
+
+#### `POST /api/v1/drafts`
+
+Save a new draft. Same request body as `/messages/send` but nothing is sent.
+
+Response `201`:
+```json
+{ "id": 27 }
+```
+
+#### `DELETE /api/v1/drafts/{id}`
+
+Permanently delete a draft (no Trash step).
+
+Response `204`.
+
+---
+
+### 5.4 Filters
+
+#### `GET /api/v1/filters`
+
+Returns all filters ordered by `position`.
+
+Response `200`:
+```json
+[
+  {
+    "id": 1,
+    "position": 0,
+    "name": "GitHub notifications",
+    "match_from": "notifications@github.com",
+    "match_to": "",
+    "match_subject": "",
+    "action": "move",
+    "folder_id": 5,
+    "stop": true
+  }
+]
+```
+
+#### `POST /api/v1/filters`
+
+Create a filter. At least one of `match_from`, `match_to`, `match_subject` must be non-empty.
+
+Request:
+```json
+{
+  "position": 0,
+  "name": "GitHub notifications",
+  "match_from": "notifications@github.com",
+  "action": "move",
+  "folder_id": 5,
+  "stop": true
+}
+```
+
+Response `201`: filter object.
+
+#### `PUT /api/v1/filters/{id}`
+
+Replace a filter entirely.
+
+Request: same shape as POST.
+
+Response `200`: updated filter object.
+
+#### `DELETE /api/v1/filters/{id}`
+
+Response `204`.
+
+#### `POST /api/v1/filters/reorder`
+
+Update `position` values for multiple filters at once.
+
+Request:
+```json
+{ "ids": [3, 1, 2] }
+```
+
+The supplied order becomes the new `position` sequence (0, 1, 2, …).
+
+Response `200`:
+```json
+{ "updated": 3 }
+```
+
+---
+
+### 5.5 Thread View
+
+A thread is a group of messages linked by `In-Reply-To` / `References` headers. The API does not store threads explicitly; they are computed on demand.
+
+#### `GET /api/v1/messages/{id}/thread`
+
+Returns all messages in the same thread as `{id}`, ordered by `date` ascending.
+
+Response `200`:
+```json
+{
+  "messages": [
+    { /* full message object */ },
+    { /* ... */ }
+  ]
+}
+```
+
+Thread reconstruction algorithm:
+1. Starting from the message's `message_id`, collect all `message_id` values in its `references` chain.
+2. Query for any message whose `message_id`, `in_reply_to`, or `references` overlaps with the collected set.
+3. Union and sort by `date`.
+
+---
+
+### 5.6 Identities
+
+#### `GET /api/v1/identities`
+
+Returns all identities ordered by `position`, then `id`.
+
+Response `200`:
+```json
+[
+  {
+    "id": 1,
+    "name": "Alice Doe",
+    "address": "alice@example.com",
+    "is_default": true,
+    "position": 0
+  },
+  {
+    "id": 2,
+    "name": "Alice Doe (work)",
+    "address": "alice@corp.example.com",
+    "is_default": false,
+    "position": 1
+  }
+]
+```
+
+#### `POST /api/v1/identities`
+
+Create an identity.
+
+Request:
+```json
+{
+  "name": "Alice Doe (work)",
+  "address": "alice@corp.example.com",
+  "is_default": false,
+  "position": 1
+}
+```
+
+- `name` must be non-empty.
+- `address` must be a valid RFC 5322 `addr-spec`. Returns `409` if the address already exists.
+- If `is_default` is `true`, all other identities are set to `is_default=false` in the same transaction.
+
+Response `201`: identity object.
+
+#### `PUT /api/v1/identities/{id}`
+
+Replace an identity entirely. Same validation rules as POST.
+
+If `is_default` is set to `true`, clears `is_default` on all other identities. If `is_default` is set to `false` and this is the only identity, returns `400`.
+
+Response `200`: updated identity object.
+
+#### `DELETE /api/v1/identities/{id}`
+
+Delete an identity. Returns `400` if it is the only identity.
+
+If the deleted identity was the default, the identity with the lowest `position` (then lowest `id`) among remaining identities is promoted to default.
+
+Response `204`.
+
+#### `POST /api/v1/identities/reorder`
+
+Update `position` values for multiple identities at once.
+
+Request:
+```json
+{ "ids": [2, 1, 3] }
+```
+
+The supplied order becomes the new `position` sequence (0, 1, 2, …).
+
+Response `200`:
+```json
+{ "updated": 3 }
+```
+
+---
+
+## 6. Local Delivery Agent (LDA)
+
+When invoked as `mymail -lda`, the program:
+
+1. Opens the SQLite database at `<data>/mymail.sqlite` (creating it if necessary, running schema migrations).
+2. Reads the raw message from **stdin** into memory.
+3. Parses the RFC 5322 message:
+   - Extracts headers: `Message-ID`, `From`, `To`, `Cc`, `Bcc`, `Reply-To`, `Subject`, `Date`, `In-Reply-To`, `References`.
+   - Decodes MIME structure:
+     - Finds `text/plain` part → `body_text`
+     - Finds `text/html` part → `body_html` (sanitize before storage)
+     - Collects `attachment` / `inline` parts (other MIME parts)
+   - Falls back: if no `Date` header, use current time. If no `Message-ID`, generate one.
+   - Handles encoded words (RFC 2047) in headers.
+4. Applies filters (see §6.1).
+5. Inserts the message record and attachments in a single transaction.
+6. Exits `0`.
+
+### 6.1 Filter Application
+
+Filters are loaded from the database ordered by `position ASC`. For each filter:
+
+1. Check each non-empty match field as a **case-insensitive substring** search against the corresponding parsed header.
+2. All non-empty criteria must match (AND logic).
+3. On match:
+   - `move` → set `folder_id` to the filter's `folder_id`
+   - `trash` → set `folder_id` to Trash (id=4)
+   - `mark_read` → leave `folder_id` as Inbox, set `read=1`
+   - `drop` → exit immediately without inserting anything; return exit code `0` to the MTA (the message is silently discarded, not bounced)
+4. If `stop=1`, halt filter evaluation. (`drop` always implies stop — continuing after a drop is meaningless.)
+
+If no filter matches, deliver to Inbox (`folder_id=1`).
+
+### 6.2 LDA Error Handling
+
+- Database locked (SQLite `SQLITE_BUSY`): retry up to 30 seconds with exponential backoff, then exit `75` (temporary failure — MTA will re-deliver).
+- Parse failure: log to stderr, exit `1` (permanent failure — message bounces; prevents silent loss).
+- All other errors: log to stderr, exit `75`.
+
+---
+
+## 7. Batch Import
+
+### 7.1 Supported Formats
+
+#### mbox
+
+A single file containing multiple messages concatenated. Each message begins with a `From ` separator line (note the trailing space) and extends to the next such line.
+
+Four incompatible variants exist, differing in how `From ` occurrences within message bodies are escaped and how message boundaries are located:
+
+| Variant     | Body escaping                                                                           | Boundary detection      | Used by                    |
+|-------------|-----------------------------------------------------------------------------------------|-------------------------|----------------------------|
+| **mboxo**   | Prepends `>` to bare `From ` lines (not reversible)                                     | `From ` scan            | Original Unix mail, Eudora |
+| **mboxrd**  | Prepends `>` to any line starting with one or more `>` followed by `From ` (reversible) | `From ` scan            | qmail, Thunderbird export  |
+| **mboxcl**  | Same as mboxrd                                                                          | `Content-Length` header | SVR4 Unix tools            |
+| **mboxcl2** | No escaping (not needed)                                                                | `Content-Length` header | SVR4 variant               |
+
+References:
+- [RFC 4155 — The application/mbox Media Type](https://datatracker.ietf.org/doc/html/rfc4155)
+- [Mbox format variants — Wikipedia](https://en.wikipedia.org/wiki/Mbox)
+- [mbox man page — qmail.org](http://qmail.org/man/man5/mbox.html)
+
+#### Maildir
+
+Each message is stored as a separate file. A Maildir root contains three subdirectories: `new/` (unread, not yet moved by MUA), `cur/` (read or moved), `tmp/` (delivery scratch space, ignored on import). Maildir++ extends this with subdirectories named `.FolderName/` for subfolders.
+
+References:
+- [Maildir specification — cr.yp.to](https://cr.yp.to/proto/maildir.html)
+- [Maildir — Wikipedia](https://en.wikipedia.org/wiki/Maildir)
+
+#### MBX (not supported)
+
+The UW-IMAP / Pine / Alpine native format. It uses a 2 KB binary file header, per-message metadata, and CRLF line endings. 
+There is no public formal specification, no maintained Go library, and it is only used by UW-derived mail clients. It is **out of scope** for this importer; users with MBX files should first convert them with `mb2md` or a similar tool.
+
+Reference: [MBX format description — faisal.com](https://www.faisal.com/docs/mbx.html)
+
+### 7.2 Individual Message Format
+
+Each message inside an mbox file or Maildir directory is an RFC 5322 Internet Message Format document.
+
+Reference: [RFC 5322 — Internet Message Format](https://datatracker.ietf.org/doc/html/rfc5322)
+
+Parsing uses the Go standard library's [`net/mail`](https://pkg.go.dev/net/mail) package for individual messages (header decoding, address parsing) combined with a third-party mbox reader for file-level splitting.
+
+### 7.3 Go Libraries
+
+#### mbox reading — `github.com/emersion/go-mbox`
+
+- Package: [pkg.go.dev/github.com/emersion/go-mbox](https://pkg.go.dev/github.com/emersion/go-mbox)
+- License: MIT · v1.0.4 (June 2025)
+- Handles: mboxo and mboxrd (streaming `From ` scan). Sufficient for files produced by Thunderbird, Evolution, mutt, and Google Takeout.
+- API: `mbox.NewReader(r io.Reader)` → `*Reader`; call `NextMessage() (io.Reader, error)` in a loop.
+
+If auto-detection of all four variants is needed (e.g. files from SVR4-derived clients using `Content-Length`), use:
+
+- Package: [pkg.go.dev/github.com/tvanriper/mbox](https://pkg.go.dev/github.com/tvanriper/mbox)
+- License: MIT · v0.1.6 (June 2025, pre-v1)
+- Handles: mboxo, mboxrd, mboxcl, mboxcl2 with `DetectType(io.ReadSeeker)` auto-detection.
+
+**Decision**: use `emersion/go-mbox` as the primary dependency (stable v1, MIT, widely used). Note the variant limitation in user-facing documentation; add `tvanriper/mbox` only if SVR4 mboxcl support is later needed.
+
+#### Maildir reading — `github.com/emersion/go-maildir`
+
+- Package: [pkg.go.dev/github.com/emersion/go-maildir](https://pkg.go.dev/github.com/emersion/go-maildir)
+- License: MIT · v0.6.0 (August 2024)
+- API: `maildir.Dir(path)` → iterate with `Keys()`, open each with `Message(key) (io.Reader, error)`. Handles `new/` and `cur/` subdirectories. Flag parsing (Seen, Replied, Flagged, etc.) available via `Flags(key)`.
+- Maildir++ subdirectories: each subfolder is a separate `maildir.Dir`; the caller is responsible for enumerating them by listing directories prefixed with `.`.
+
+### 7.4 Import Implementation Notes
+
+- Open the database and run schema migrations before importing.
+- Wrap each source file/directory import in a single SQLite transaction for atomicity (if it fails mid-way, nothing from that source is partially committed).
+- For Maildir, map the `S` (Seen) flag from the message filename to `read=1`.
+- The mbox `From ` separator line is **not** part of the RFC 5322 message and must be stripped before storing the `raw` BLOB.
+- mbox files can be large (multi-GB). Use the streaming `NextMessage()` API; do not load the entire file into memory.
+- Preserve the original `Date` header as the message's `date` field. If absent, fall back to the mtime of the Maildir file (for Maildir) or the timestamp on the `From ` separator line (for mbox).
+
+### 7.5 Pre-conversion with System Tools
+
+Users with MBX files or other unsupported formats can pre-convert using standard Linux tools:
+
+| Tool        | Package    | Purpose                                                      | Man page                                                                  |
+|-------------|------------|--------------------------------------------------------------|---------------------------------------------------------------------------|
+| `mb2md`     | `mb2md`    | Convert mbox files to Maildir                                | [Debian](https://manpages.debian.org/trixie/mb2md/mb2md.1.en.html)        |
+| `formail`   | `procmail` | Split mbox into individual `.eml` files; reformat From-lines | [Debian](https://manpages.debian.org/unstable/procmail/formail.1.en.html) |
+| `reformail` | `maildrop` | Split mbox, duplicate detection, header manipulation         | [Debian](https://manpages.debian.org/jessie/maildrop/reformail.1.en.html) |
+
+---
+
+## 8. Outgoing Mail
+
+The send flow in the service layer:
+
+1. Construct a MIME message:
+   - `Date`: current time (RFC 5322 format)
+   - `Message-ID`: generate `<uuid@hostname>`
+   - `MIME-Version: 1.0`
+   - Body: `multipart/alternative` with `text/plain` and/or `text/html` parts.
+   - If attachments present: wrap in `multipart/mixed`.
+   - Encode non-ASCII headers as RFC 2047 encoded words.
+   - Encode attachment data as base64.
+2. Open a pipe to `sendmail -t -oi` (the `-t` flag reads recipients from headers; `-oi` prevents a lone `.` line from ending the message).
+3. Write the raw message to the pipe.
+4. Close the pipe and wait for the process to exit.
+5. On non-zero exit: capture stderr (max 4 KB) and return it as an error. No retries — the MTA owns queueing.
+
+---
+
+## 9. HTML Sanitization
+
+Incoming HTML bodies and the HTML part of outgoing messages are sanitized using a library equivalent to [microcosm-cc/bluemonday](https://github.com/microcosm-cc/bluemonday) with a strict email-appropriate policy:
+
+**Allowed elements:** `a`, `b`, `blockquote`, `br`, `code`, `del`, `em`, `h1`–`h6`, `hr`, `i`, `img`, `li`, `ol`, `p`, `pre`, `s`, `strong`, `table`, `tbody`, `td`, `tfoot`, `th`, `thead`, `tr`, `ul`
+
+**Allowed attributes:**
+- `href` on `a` (must be `http://`, `https://`, or `mailto:`)
+- `src` on `img` (must be `http://` or `https://`; `cid:` references are stripped)
+- `alt` on `img`
+- Standard formatting attributes: `align`, `colspan`, `rowspan`, `style` (restricted property list)
+
+**Stripped always:** `script`, `style` (standalone), `iframe`, `object`, `embed`, `form`, `input`
+
+---
+
+## 10. Security Headers
+
+All HTTP responses include:
+
+```
+X-Content-Type-Options: nosniff
+X-Frame-Options: DENY
+Referrer-Policy: same-origin
+Content-Security-Policy: default-src 'self'; img-src 'self' https:; style-src 'self' 'unsafe-inline'
+```
+
+The CSP allows HTTPS images (for email HTML bodies rendered in the UI) but restricts scripts to `'self'`.
+
+---
+
+## 11. Authentication
+
+Identical to mycal. See mycal's `internal/auth/` for the htpasswd implementation.
+
+- Optional HTTP Basic Auth over all endpoints (API + static UI).
+- Passwords stored as bcrypt hashes in an htpasswd file.
+- If `-basic-auth-file` is not set, all requests are accepted without authentication.
+- The LDA mode ignores authentication entirely (no HTTP involved).
+- Creating the htpasswd file: `htpasswd -Bc htpasswd myuser`
+
+---
+
+## 12. Web UI
+
+### Technology Stack
+
+Same approach as mycal:
+- **No build step.** ES6 modules, import maps.
+- **Preact** + **HTM** for reactive components (vendored).
+- Plain CSS for styling.
+- All assets embedded in the binary via `//go:embed`.
+
+### Layout
+
+```
++-------------------+-----------------------------------+
+|  Folder list      |  Message list (subject, from,    |
+|  (sidebar)        |  date, snippet)                  |
+|                   +-----------------------------------+
+|  - Inbox (3)      |  Message detail / compose pane   |
+|  - Sent           |  (full headers, body, attachments)|
+|  - Drafts         |                                  |
+|  - Trash          |                                  |
+|  - [user folders] |                                  |
++-------------------+-----------------------------------+
+|  [Compose]  [Search bar]                             |
++------------------------------------------------------|
+```
+
+### Views
+
+1. **Folder view** — paginated message list for selected folder. Unread messages shown in bold. Click to open message detail.
+2. **Message detail** — full headers, rendered HTML body (in sandboxed iframe) or plain text, attachment download links. Shows thread if `references` chain exists. Reply/Forward/Move/Delete buttons.
+3. **Compose / Reply / Forward** — form with a **From** selector (dropdown of all identities, pre-selected to the default; or, when replying, to the identity whose address matches the original To/Cc), To, Cc, Bcc, Subject, plain-text body, optional HTML body toggle. File upload for attachments. Auto-save to Drafts on a 30-second timer.
+4. **Search** — global full-text search with results shown as a message list.
+5. **Filter management** — CRUD UI for filters, with drag-to-reorder.
+6. **Folder management** — create/rename/delete/reorder user folders.
+7. **Identity management** — CRUD UI for sender identities (name + address + default flag), with drag-to-reorder. The default identity is marked visually; clicking a "Set default" button updates it.
+
+### HTML Body Display
+
+Rendered in a sandboxed `<iframe srcdoc="...">` with `sandbox="allow-same-origin"` (no scripts). The sanitized HTML body is set as `srcdoc`. This prevents CSS/JS injection from message bodies affecting the parent UI.
+
+### New Message Notifications
+
+The web UI polls `GET /api/v1/folders` every 30 seconds. When the `unread_count` for the Inbox folder increases compared to the previously known value, the UI:
+
+1. Updates the unread badge on the Inbox entry in the folder sidebar.
+2. Updates the `document.title` to include the unread count (e.g. `(3) mymail`).
+3. If the user has granted the [Notifications API](https://developer.mozilla.org/en-US/docs/Web/API/Notifications_API) permission, fires a browser notification: title `New mail`, body `You have N unread messages in Inbox`.
+
+Permission is requested the first time the user opens the UI (a prompt is shown explaining why). If permission is denied, steps 1 and 2 still apply; only the browser notification is skipped. The permission state is not re-requested after an explicit denial.
+
+Polling is suspended while the browser tab is hidden (`document.visibilityState === 'hidden'`) and resumes immediately when the tab becomes visible again.
+
+### Client-Side Storage
+
+Using `localStorage`:
+- Selected folder
+- Compose draft state (as fallback)
+- Dark mode toggle
+- Message list density preference
+- Notification permission state (cached to avoid repeated `Notification.permission` lookups)
+
+---
+
+## 13. Go Dependencies
+
+```
+modernc.org/sqlite                  # Pure-Go SQLite (no CGO)
+github.com/microcosm-cc/bluemonday  # HTML sanitization
+golang.org/x/crypto                 # bcrypt for htpasswd
+github.com/emersion/go-mbox         # mbox file reading (batch import)
+github.com/emersion/go-maildir      # Maildir reading (batch import)
+```
+
+Parsing individual RFC 5322 messages: Go standard library (`net/mail`, `mime`, `mime/multipart`, `mime/quotedprintable`) — no third-party MIME library needed.
+
+Building the binary: `go build -tags netgo` produces a single static binary with no CGO dependencies.
+
+---
+
+## 14. `go.mod`
+
+```go
+module github.com/mikaelstaldal/mymail
+
+go 1.24
+
+require (
+    github.com/emersion/go-maildir v0.6.0
+    github.com/emersion/go-mbox v1.0.4
+    github.com/microcosm-cc/bluemonday v1.0.27
+    golang.org/x/crypto v0.x.x
+    modernc.org/sqlite v1.x.x
+)
+```
+
+---
+
+## 15. Key Design Decisions
+
+### No IMAP/POP3
+The application relies entirely on the host MTA for mail retrieval. This keeps the codebase simple and lets Postfix handle TLS, authentication, queuing, and delivery retries.
+
+### Raw Message Storage
+Every incoming and outgoing message is stored as a raw RFC 5322 BLOB. This makes it lossless and allows the original message to be downloaded at any time, regardless of parse errors or future schema changes.
+
+### FTS5 Content Table
+Using `content='messages'` makes the FTS index a "content table" — rows are stored in `messages`, and the FTS index stores only the search tokens. The trigger-based maintenance keeps them in sync. This avoids duplicating large body text in the FTS table.
+
+### Attachment Storage in SQLite
+Attachments are stored in SQLite BLOBs. For typical personal email workloads this is acceptable. A future optimization could store large attachments on disk and keep only a path reference in SQLite.
+
+### Sendmail for Outgoing Mail
+Using `/usr/sbin/sendmail` (or whatever `sendmail` resolves to in `PATH`) means outgoing mail benefits from the full MTA pipeline: queueing, TLS, DKIM signing, etc.
+
+### Sender Identities
+Identities are stored in the database and managed through the same API/UI as everything else — no config file needed. Storing them in SQLite (rather than a flat file) keeps all configuration in one place and makes the REST API the single source of truth. The "exactly one default" invariant is maintained in the service layer rather than as a SQL constraint so that the error message is human-readable.
+
+### No Send Queue in mymail
+If `sendmail` returns an error (e.g. MTA down), mymail returns an HTTP 500 to the client. The message is **not** stored in a retry queue. The user is expected to retry. This matches the "simple client, let the MTA work" philosophy.
+
+### Filter Evaluation in LDA
+Filters are evaluated in the LDA process at delivery time, not asynchronously. This is correct because filters need to run before the message lands in the Inbox (otherwise notifications or badge counts would be wrong). The LDA holds a short write lock on the database for the duration of a single message insertion.
+
+---
+
+## 16. Open Questions / Future Work
+
+- **Multiple mailboxes**: currently one SQLite file = one mailbox. Multi-user support would require either per-user databases or a `user_id` column throughout.
+- **PGP/S-MIME**: not in scope for v1.
+- **Push notifications** (browser): not in scope for v1; polling the message list every 30 seconds is sufficient.
+- **Offline support / PWA**: not in scope.
+- **Large attachment threshold**: if attachments > N MB become a problem, move to disk storage. Threshold TBD.
