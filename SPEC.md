@@ -197,7 +197,8 @@ CREATE TABLE IF NOT EXISTS messages (
     snooze_folder INTEGER,                 -- folder_id to return to when snooze expires (usually Inbox=1)
     send_error    TEXT,                    -- last sendmail error for a scheduled message that failed to send
     send_failure_count INTEGER NOT NULL DEFAULT 0, -- consecutive send failures; message moved to Drafts after 3
-    created_at    TEXT    NOT NULL         -- RFC 3339 UTC, time of storage
+    created_at    TEXT    NOT NULL,        -- RFC 3339 UTC, time of storage
+    updated_at    TEXT    NOT NULL         -- RFC 3339 UTC, time of last modification (set equal to created_at on insert; updated on every PATCH)
 );
 
 CREATE INDEX IF NOT EXISTS idx_messages_folder_id    ON messages(folder_id);
@@ -689,7 +690,7 @@ Save a new draft. Same request body as `/messages/send` but nothing is sent.
 
 Response `201`:
 ```json
-{ "id": 27 }
+{ "id": 27, "updated_at": "2026-03-30T12:00:00Z" }
 ```
 
 #### `DELETE /api/v1/drafts/{id}`
@@ -1478,7 +1479,7 @@ Polling is suspended while the browser tab is hidden (`document.visibilityState 
 
 Using `localStorage`:
 - Selected folder
-- Compose draft state (as fallback)
+- Compose draft state (as fallback) — stored as a JSON object containing all compose field values, the server-assigned draft `id` (if one exists), and a `savedAt` RFC 3339 UTC timestamp written each time the auto-save fires. **Draft recovery on page reload:** if a `savedAt` timestamp is present in `localStorage` and a server draft `id` is recorded, the UI fetches the server draft and compares its `updated_at` with `savedAt`; whichever is newer is loaded into the compose form silently (no prompt). If only one source exists it is used directly. If neither exists, the compose form opens blank.
 - Dark mode toggle
 - Message list density preference
 - Notification permission state (cached to avoid repeated `Notification.permission` lookups)

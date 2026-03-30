@@ -13,9 +13,6 @@ Issues requiring a decision or further research before the spec can be finalised
 
 
 
-### F10 — Auto-save draft recovery UX (§13)
-The spec says drafts auto-save every 30 seconds and `localStorage` is a fallback, but does not describe what happens on page reload if both a server draft and a `localStorage` draft exist (e.g. tab crashed mid-edit). Specify the recovery prompt UX.
-
 ### F11 — Draft + attachment flow (§5.3)
 There is no `POST /api/v1/drafts-with-attachments` equivalent. The spec says "Attachments in the send flow are handled via a separate endpoint" but only defines that endpoint for `/messages/send`. Specify how attachments are saved with drafts (e.g. multipart draft creation, or a separate `POST /api/v1/drafts/{id}/attachments` endpoint).
 
