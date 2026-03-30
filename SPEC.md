@@ -693,6 +693,15 @@ Response `201`:
 { "id": 27, "updated_at": "2026-03-30T12:00:00Z" }
 ```
 
+#### `POST /api/v1/drafts-with-attachments`
+
+Same as `POST /api/v1/drafts` but uses `multipart/form-data`. The JSON fields are submitted as a `message` part (content-type `application/json`); each attachment is a separate file part. Use this endpoint when the compose UI auto-saves a draft that has one or more files attached.
+
+Response `201`:
+```json
+{ "id": 28, "updated_at": "2026-03-30T12:00:00Z" }
+```
+
 #### `DELETE /api/v1/drafts/{id}`
 
 Permanently delete a draft (no Trash step).

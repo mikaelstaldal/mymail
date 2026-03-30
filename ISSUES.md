@@ -13,9 +13,6 @@ Issues requiring a decision or further research before the spec can be finalised
 
 
 
-### F11 — Draft + attachment flow (§5.3)
-There is no `POST /api/v1/drafts-with-attachments` equivalent. The spec says "Attachments in the send flow are handled via a separate endpoint" but only defines that endpoint for `/messages/send`. Specify how attachments are saved with drafts (e.g. multipart draft creation, or a separate `POST /api/v1/drafts/{id}/attachments` endpoint).
-
 ---
 
 ## Ambiguous / under-specified behaviour
