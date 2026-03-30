@@ -13,9 +13,6 @@ Issues requiring a decision or further research before the spec can be finalised
 
 
 
-### F9 — Forward with attachments (§13)
-"Forward" is listed as an available action but the compose flow for forwarding is not specified. Clarify: how are original attachments pre-populated into the compose form (copied as new attachment rows? referenced lazily?), and what API call initiates a forward.
-
 ### F10 — Auto-save draft recovery UX (§13)
 The spec says drafts auto-save every 30 seconds and `localStorage` is a fallback, but does not describe what happens on page reload if both a server draft and a `localStorage` draft exist (e.g. tab crashed mid-edit). Specify the recovery prompt UX.
 
