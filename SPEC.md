@@ -1284,6 +1284,7 @@ The send flow in the service layer:
 4. Close the pipe and wait for the process to exit.
 5. On non-zero exit: capture stderr (max 4 KB) and return it as an error. No retries — the MTA owns queueing.
 6. On success: upsert each recipient from To, Cc, and Bcc into the `contacts` table using the same rule as the LDA (lower-case address; insert if absent, update `name` only if stored `name` is empty).
+7. Store the sent message in the Sent folder with the `Bcc` header intact in the raw BLOB. The `Bcc` header is intentionally preserved: it is hidden from recipients (the MTA strips it from the outgoing copies; `sendmail -t` does not re-send to addresses already delivered), but it remains visible to anyone with access to the sending account so the sender has a complete record of who received the message.
 
 ---
 
