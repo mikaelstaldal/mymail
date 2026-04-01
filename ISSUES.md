@@ -19,9 +19,3 @@ Issues requiring a decision or further research before the spec can be finalised
 
 ### A1 — §5.7 is missing
 The spec jumps from §5.6 (Spam Filter) to §5.8 (Thread View). Either a section was removed without renumbering, or the numbering was incremented by mistake. Verify and correct.
-
-### A3 — Message-ID hostname source (§9)
-The spec says generate `<uuid@hostname>` but does not specify how `hostname` is determined (`os.Hostname()`? a configurable `-hostname` flag?). This matters for uniqueness and for message threading interoperability. Specify.
-
-### A4 — `match_to` filter UI label (§4.6, §13)
-The `match_to` column matches both the `To` **and** `Cc` headers (as documented in the SQL comment), but the column name and any auto-generated UI label would read as "To" only. Specify that the filter management UI must label this field "To / Cc" to avoid user confusion.

@@ -1273,7 +1273,7 @@ The send flow in the service layer:
 
 1. Construct a MIME message:
    - `Date`: current time (RFC 5322 format)
-   - `Message-ID`: generate `<uuid@hostname>`
+   - `Message-ID`: generate `<uuid@domain>` where `domain` is the domain part of the selected sender's `From` address (e.g. if the identity's address is `alice@example.com`, use `example.com`)
    - `MIME-Version: 1.0`
    - Body: `multipart/alternative` with `text/plain` and/or `text/html` parts.
    - If attachments present: wrap in `multipart/mixed`.
@@ -1459,7 +1459,7 @@ The Scheduled folder is shown in the sidebar so the user can review and cancel p
    **Signature pre-population:** when the compose form opens, if the selected From identity has a non-empty `signature`, it is appended to the plain-text body preceded by `\n-- \n` (the standard signature delimiter). When the From identity is changed via the dropdown, the old identity's signature block (if present) is replaced with the new identity's signature. Reply and Reply-All prepend the quoted original message after the signature; Forward places the forwarded message after the signature.
 4. **Message detail** (Scheduled folder) — shows the scheduled send time prominently. A **Cancel schedule** button calls `DELETE /api/v1/scheduled/{id}`, returning the message to Drafts for editing.
 5. **Search** — global full-text search with results shown as a message list.
-6. **Filter management** — CRUD UI for filters, with drag-to-reorder.
+6. **Filter management** — CRUD UI for filters, with drag-to-reorder. The `match_to` field must be labelled **"To / Cc"** in the UI, because it matches against both the `To` and `Cc` headers.
 7. **Folder management** — create/rename/delete/reorder user folders.
 8. **Identity management** — CRUD UI for sender identities (name + address + signature + default flag), with drag-to-reorder. The default identity is marked visually; clicking a "Set default" button updates it. The signature field is a plain-text textarea; leave empty for no signature.
 9. **Spam filter settings** — toggle to enable/disable the spam filter, numeric field for the score threshold, and text field for the score header name. Submits `PUT /api/v1/spam-filter`.
