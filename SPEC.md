@@ -58,7 +58,7 @@ mymail -lda [flags]
 | `-basic-auth-file`  | ``                  | Path to htpasswd file; if set, enables HTTP Basic Auth |
 | `-basic-auth-realm` | `mymail`            | Auth realm shown to clients                            |
 
-Identities are managed entirely through the REST API (§5.9) and the web UI. There is no CLI flag for the initial identity; the first identity is created via the web UI on first use (the compose view prompts the user if no identities exist).
+Identities are managed entirely through the REST API (§5.8) and the web UI. There is no CLI flag for the initial identity; the first identity is created via the web UI on first use (the compose view prompts the user if no identities exist).
 
 ### Import mode (`-import`)
 
@@ -323,7 +323,7 @@ CREATE TABLE IF NOT EXISTS filters (
 
 Multiple criteria within a filter are ANDed. Filters are evaluated in `position` order. When `stop=1` (default) the first matching filter wins and evaluation halts.
 
-### 4.7 `spam_filter_settings`
+### 4.8 `spam_filter_settings`
 
 ```sql
 CREATE TABLE IF NOT EXISTS spam_filter_settings (
@@ -878,7 +878,7 @@ Response `200`:
 
 ---
 
-### 5.8 Thread View
+### 5.7 Thread View
 
 A thread is a group of messages linked by `In-Reply-To` / `References` headers. The API does not store threads explicitly; they are computed on demand.
 
@@ -927,7 +927,7 @@ Thread reconstruction algorithm:
 
 ---
 
-### 5.9 Identities
+### 5.8 Identities
 
 #### `GET /api/v1/identities`
 
@@ -1011,7 +1011,7 @@ Response `200`:
 
 ---
 
-### 5.10 Contacts
+### 5.9 Contacts
 
 #### `GET /api/v1/contacts`
 
