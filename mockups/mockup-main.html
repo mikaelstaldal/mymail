@@ -1,0 +1,774 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>(3) mymail — Inbox</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --sidebar-bg: #1c2b3a;
+    --sidebar-text: #c8d8e8;
+    --sidebar-muted: #7a97b0;
+    --sidebar-hover: #243447;
+    --sidebar-active: #1e4d7b;
+    --sidebar-active-border: #3b82f6;
+    --sidebar-badge: #3b82f6;
+    --topbar-bg: #ffffff;
+    --topbar-border: #e2e8f0;
+    --list-bg: #f8fafc;
+    --list-border: #e2e8f0;
+    --list-item-hover: #f0f4f8;
+    --list-item-active-bg: #eff6ff;
+    --list-item-active-border: #3b82f6;
+    --detail-bg: #ffffff;
+    --btn-primary: #3b82f6;
+    --btn-primary-hover: #2563eb;
+    --btn-danger: #ef4444;
+    --btn-danger-hover: #dc2626;
+    --text-primary: #1e293b;
+    --text-secondary: #475569;
+    --text-muted: #94a3b8;
+    --unread-weight: 700;
+    --border-radius: 6px;
+  }
+
+  html, body {
+    height: 100%;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+    font-size: 14px;
+    color: var(--text-primary);
+    background: #e8edf2;
+  }
+
+  /* ── App Shell ── */
+  .app {
+    display: grid;
+    grid-template-rows: auto 1fr auto;
+    grid-template-columns: 220px 1fr;
+    grid-template-areas:
+      "sidebar topbar"
+      "sidebar content"
+      "sidebar bottombar";
+    height: 100vh;
+  }
+
+  /* ── Sidebar ── */
+  .sidebar {
+    grid-area: sidebar;
+    background: var(--sidebar-bg);
+    color: var(--sidebar-text);
+    display: flex;
+    flex-direction: column;
+    overflow-y: auto;
+  }
+
+  .sidebar-header {
+    padding: 16px 16px 12px;
+    font-size: 18px;
+    font-weight: 700;
+    color: #fff;
+    letter-spacing: -0.3px;
+    border-bottom: 1px solid rgba(255,255,255,0.07);
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .sidebar-header .logo-icon {
+    width: 28px; height: 28px;
+    background: var(--sidebar-badge);
+    border-radius: 6px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 15px;
+    flex-shrink: 0;
+  }
+
+  .sidebar-section-label {
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--sidebar-muted);
+    padding: 14px 16px 4px;
+  }
+
+  .folder-list { list-style: none; padding: 0 8px 8px; }
+
+  .folder-item a {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 7px 10px;
+    border-radius: 5px;
+    color: var(--sidebar-text);
+    text-decoration: none;
+    font-size: 13.5px;
+    transition: background 0.12s;
+    border-left: 3px solid transparent;
+  }
+  .folder-item a:hover { background: var(--sidebar-hover); }
+  .folder-item.active a {
+    background: var(--sidebar-active);
+    border-left-color: var(--sidebar-active-border);
+    color: #fff;
+    font-weight: 600;
+  }
+
+  .folder-icon { font-size: 15px; width: 20px; text-align: center; flex-shrink: 0; }
+
+  .folder-badge {
+    margin-left: auto;
+    background: var(--sidebar-badge);
+    color: #fff;
+    font-size: 11px;
+    font-weight: 700;
+    min-width: 18px;
+    height: 18px;
+    border-radius: 9px;
+    display: flex; align-items: center; justify-content: center;
+    padding: 0 5px;
+  }
+
+  .sidebar-divider { height: 1px; background: rgba(255,255,255,0.07); margin: 6px 8px; }
+
+  /* ── Top bar ── */
+  .topbar {
+    grid-area: topbar;
+    background: var(--topbar-bg);
+    border-bottom: 1px solid var(--topbar-border);
+    padding: 0 16px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    height: 48px;
+  }
+
+  .topbar-title {
+    font-weight: 600;
+    font-size: 15px;
+    color: var(--text-primary);
+    margin-right: auto;
+  }
+
+  .btn {
+    display: inline-flex; align-items: center; gap: 5px;
+    padding: 6px 12px;
+    border: none;
+    border-radius: var(--border-radius);
+    font-size: 13px;
+    font-weight: 500;
+    cursor: pointer;
+    text-decoration: none;
+    transition: background 0.12s, box-shadow 0.12s;
+  }
+  .btn-ghost {
+    background: transparent;
+    color: var(--text-secondary);
+    border: 1px solid var(--list-border);
+  }
+  .btn-ghost:hover { background: var(--list-item-hover); }
+  .btn-primary {
+    background: var(--btn-primary);
+    color: #fff;
+  }
+  .btn-primary:hover { background: var(--btn-primary-hover); }
+  .btn-danger {
+    background: var(--btn-danger);
+    color: #fff;
+  }
+  .btn-danger:hover { background: var(--btn-danger-hover); }
+  .btn-sm { padding: 4px 9px; font-size: 12px; }
+  .btn-icon { padding: 5px 7px; }
+
+  .toolbar-sep { width: 1px; height: 20px; background: var(--list-border); margin: 0 4px; }
+
+  /* ── Content area ── */
+  .content {
+    grid-area: content;
+    display: grid;
+    grid-template-rows: 1fr 1fr;
+    overflow: hidden;
+    border-left: 1px solid var(--list-border);
+  }
+
+  /* ── Message list ── */
+  .message-list {
+    background: var(--list-bg);
+    overflow-y: auto;
+    border-bottom: 2px solid var(--list-border);
+  }
+
+  .message-item {
+    display: grid;
+    grid-template-columns: 24px 1fr auto;
+    grid-template-rows: auto auto;
+    gap: 1px 8px;
+    padding: 10px 16px;
+    border-bottom: 1px solid var(--list-border);
+    cursor: pointer;
+    position: relative;
+    transition: background 0.1s;
+  }
+  .message-item:hover { background: var(--list-item-hover); }
+  .message-item.active {
+    background: var(--list-item-active-bg);
+    border-left: 3px solid var(--list-item-active-border);
+    padding-left: 13px;
+  }
+  .message-item.unread .msg-from,
+  .message-item.unread .msg-subject { font-weight: var(--unread-weight); }
+  .message-item.unread::before {
+    content: '';
+    position: absolute; left: 4px; top: 50%; transform: translateY(-50%);
+    width: 7px; height: 7px;
+    background: var(--btn-primary);
+    border-radius: 50%;
+  }
+  .message-item.active::before { left: 1px; }
+
+  .msg-checkbox { grid-column: 1; grid-row: 1 / 3; display: flex; align-items: center; }
+  .msg-checkbox input { cursor: pointer; }
+  .msg-from { grid-column: 2; grid-row: 1; font-size: 13.5px; color: var(--text-primary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .msg-date  { grid-column: 3; grid-row: 1; font-size: 12px; color: var(--text-muted); white-space: nowrap; padding-top: 1px; }
+  .msg-subject { grid-column: 2; grid-row: 2; font-size: 13px; color: var(--text-secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .msg-snippet { display: none; }
+  .msg-flags { grid-column: 3; grid-row: 2; display: flex; gap: 4px; align-items: center; justify-content: flex-end; }
+  .flag-star { color: #f59e0b; font-size: 14px; }
+  .flag-attach { color: var(--text-muted); font-size: 13px; }
+
+  /* ── Message detail ── */
+  .message-detail {
+    background: var(--detail-bg);
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+  }
+
+  .detail-header {
+    padding: 14px 20px 12px;
+    border-bottom: 1px solid var(--list-border);
+    background: #fff;
+    position: sticky; top: 0; z-index: 1;
+  }
+
+  .detail-subject {
+    font-size: 18px;
+    font-weight: 600;
+    color: var(--text-primary);
+    margin-bottom: 10px;
+    line-height: 1.3;
+  }
+
+  .detail-meta {
+    display: grid;
+    grid-template-columns: auto 1fr;
+    gap: 3px 10px;
+    font-size: 13px;
+    color: var(--text-secondary);
+  }
+  .detail-meta-label { color: var(--text-muted); font-weight: 500; white-space: nowrap; }
+  .detail-meta-value { color: var(--text-primary); }
+
+  .detail-actions {
+    display: flex;
+    gap: 6px;
+    flex-wrap: wrap;
+    padding: 10px 20px;
+    border-bottom: 1px solid var(--list-border);
+    background: #fafafa;
+  }
+
+  .detail-body-toggle {
+    display: flex; align-items: center; gap: 8px;
+    padding: 8px 20px;
+    border-bottom: 1px solid var(--list-border);
+    background: #fafbfc;
+    font-size: 12px;
+    color: var(--text-muted);
+  }
+  .toggle-btn {
+    display: inline-flex; gap: 0;
+    border: 1px solid var(--list-border);
+    border-radius: 4px;
+    overflow: hidden;
+  }
+  .toggle-btn button {
+    padding: 3px 9px;
+    border: none;
+    background: #fff;
+    font-size: 12px;
+    cursor: pointer;
+    color: var(--text-secondary);
+  }
+  .toggle-btn button.active {
+    background: var(--btn-primary);
+    color: #fff;
+  }
+
+  .detail-body {
+    padding: 20px;
+    flex: 1;
+  }
+
+  .detail-iframe-wrapper {
+    border: 1px solid var(--list-border);
+    border-radius: var(--border-radius);
+    overflow: hidden;
+    background: #fff;
+  }
+  .detail-iframe-wrapper iframe {
+    width: 100%;
+    height: 320px;
+    border: none;
+    display: block;
+  }
+
+  .detail-attachments {
+    padding: 12px 20px;
+    border-top: 1px solid var(--list-border);
+    background: #fafafa;
+  }
+  .detail-attachments-label {
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    margin-bottom: 8px;
+  }
+  .attachment-list { display: flex; flex-wrap: wrap; gap: 8px; }
+  .attachment-chip {
+    display: inline-flex; align-items: center; gap: 5px;
+    padding: 5px 10px;
+    border: 1px solid var(--list-border);
+    border-radius: var(--border-radius);
+    background: #fff;
+    font-size: 12px;
+    color: var(--text-secondary);
+    text-decoration: none;
+    cursor: pointer;
+    transition: background 0.1s;
+  }
+  .attachment-chip:hover { background: var(--list-item-hover); }
+  .attachment-icon { font-size: 15px; }
+  .attachment-size { color: var(--text-muted); }
+
+  /* ── Bottom bar ── */
+  .bottombar {
+    grid-area: bottombar;
+    background: var(--topbar-bg);
+    border-top: 1px solid var(--topbar-border);
+    padding: 8px 16px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+
+  .search-bar {
+    flex: 1;
+    position: relative;
+    max-width: 480px;
+  }
+  .search-bar input {
+    width: 100%;
+    padding: 7px 12px 7px 34px;
+    border: 1px solid var(--list-border);
+    border-radius: 20px;
+    font-size: 13px;
+    background: var(--list-bg);
+    color: var(--text-primary);
+    outline: none;
+    transition: border-color 0.15s, box-shadow 0.15s;
+  }
+  .search-bar input:focus {
+    border-color: var(--btn-primary);
+    box-shadow: 0 0 0 3px rgba(59,130,246,0.12);
+    background: #fff;
+  }
+  .search-bar .search-icon {
+    position: absolute; left: 11px; top: 50%; transform: translateY(-50%);
+    color: var(--text-muted); font-size: 14px; pointer-events: none;
+  }
+
+  .compose-btn {
+    display: inline-flex; align-items: center; gap: 6px;
+    padding: 7px 16px;
+    background: var(--btn-primary);
+    color: #fff;
+    border: none;
+    border-radius: 20px;
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background 0.12s;
+    white-space: nowrap;
+  }
+  .compose-btn:hover { background: var(--btn-primary-hover); }
+
+  .bottombar-right {
+    margin-left: auto;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 12px;
+    color: var(--text-muted);
+  }
+  .settings-link {
+    display: inline-flex; align-items: center; gap: 4px;
+    color: var(--text-muted); text-decoration: none;
+    font-size: 13px;
+    padding: 5px 8px;
+    border-radius: 4px;
+    transition: background 0.12s;
+  }
+  .settings-link:hover { background: var(--list-item-hover); color: var(--text-secondary); }
+
+  /* ── Thread indicator ── */
+  .thread-badge {
+    display: inline-flex;
+    align-items: center;
+    background: #e0e7ef;
+    color: #4a6280;
+    font-size: 11px;
+    font-weight: 600;
+    padding: 1px 6px;
+    border-radius: 10px;
+    margin-left: 6px;
+    vertical-align: middle;
+  }
+
+  /* ── Snooze modal overlay (annotation) ── */
+  .annotation {
+    position: fixed;
+    bottom: 20px; right: 20px;
+    background: #fff;
+    border: 1px solid var(--list-border);
+    border-radius: 8px;
+    padding: 12px 16px;
+    font-size: 12px;
+    color: var(--text-muted);
+    box-shadow: 0 4px 20px rgba(0,0,0,0.12);
+    max-width: 240px;
+    line-height: 1.5;
+  }
+  .annotation strong { color: var(--text-primary); display: block; margin-bottom: 4px; }
+
+  .dark-mode-note {
+    font-size: 11px; color: var(--text-muted); font-style: italic; margin-top: 4px;
+  }
+</style>
+</head>
+<body>
+
+<div class="app">
+
+  <!-- ── Sidebar ── -->
+  <nav class="sidebar">
+    <div class="sidebar-header">
+      <div class="logo-icon">✉</div>
+      mymail
+    </div>
+
+    <div class="sidebar-section-label">Mailboxes</div>
+    <ul class="folder-list">
+      <li class="folder-item active">
+        <a href="#">
+          <span class="folder-icon">📥</span>
+          Inbox
+          <span class="folder-badge">3</span>
+        </a>
+      </li>
+      <li class="folder-item">
+        <a href="#">
+          <span class="folder-icon">📤</span>
+          Sent
+        </a>
+      </li>
+      <li class="folder-item">
+        <a href="#">
+          <span class="folder-icon">📝</span>
+          Drafts
+          <span class="folder-badge" style="background:#94a3b8">2</span>
+        </a>
+      </li>
+      <li class="folder-item">
+        <a href="#">
+          <span class="folder-icon">🕐</span>
+          Scheduled
+          <span class="folder-badge" style="background:#8b5cf6">1</span>
+        </a>
+      </li>
+      <li class="folder-item">
+        <a href="#">
+          <span class="folder-icon">💤</span>
+          Snoozed
+        </a>
+      </li>
+    </ul>
+
+    <div class="sidebar-divider"></div>
+
+    <ul class="folder-list">
+      <li class="folder-item">
+        <a href="#">
+          <span class="folder-icon">🗑</span>
+          Trash
+        </a>
+      </li>
+      <li class="folder-item">
+        <a href="#">
+          <span class="folder-icon">⚠️</span>
+          Junk
+        </a>
+      </li>
+    </ul>
+
+    <div class="sidebar-section-label">My Folders</div>
+    <ul class="folder-list">
+      <li class="folder-item">
+        <a href="#">
+          <span class="folder-icon">📁</span>
+          Work
+        </a>
+      </li>
+      <li class="folder-item">
+        <a href="#">
+          <span class="folder-icon">📁</span>
+          Personal
+        </a>
+      </li>
+      <li class="folder-item">
+        <a href="#">
+          <span class="folder-icon">📁</span>
+          Newsletters
+        </a>
+      </li>
+      <li class="folder-item">
+        <a href="#" style="color: var(--sidebar-muted); font-size:12px;">
+          <span class="folder-icon" style="font-size:13px;">＋</span>
+          New Folder
+        </a>
+      </li>
+    </ul>
+  </nav>
+
+  <!-- ── Top bar ── -->
+  <header class="topbar">
+    <span class="topbar-title">Inbox</span>
+    <button class="btn btn-ghost btn-sm">☑ Select all</button>
+    <button class="btn btn-ghost btn-sm">✔ Mark all read</button>
+    <div class="toolbar-sep"></div>
+    <span style="font-size:12px;color:var(--text-muted)">24 messages, 3 unread</span>
+  </header>
+
+  <!-- ── Content ── -->
+  <main class="content">
+
+    <!-- Message List -->
+    <div class="message-list">
+
+      <!-- Unread selected message -->
+      <div class="message-item unread active">
+        <div class="msg-checkbox"><input type="checkbox"></div>
+        <div class="msg-from">Alice Müller</div>
+        <div class="msg-date">10:42 am</div>
+        <div class="msg-subject">Q2 Budget Review — action needed <span class="thread-badge">4</span></div>
+        <div class="msg-flags"><span class="flag-star">★</span><span class="flag-attach">📎</span></div>
+      </div>
+
+      <!-- Unread message -->
+      <div class="message-item unread">
+        <div class="msg-checkbox"><input type="checkbox"></div>
+        <div class="msg-from">GitHub</div>
+        <div class="msg-date">9:15 am</div>
+        <div class="msg-subject">[mymail] PR #42: Add contact autocomplete — approved</div>
+        <div class="msg-flags"></div>
+      </div>
+
+      <!-- Unread message -->
+      <div class="message-item unread">
+        <div class="msg-checkbox"><input type="checkbox"></div>
+        <div class="msg-from">newsletter@example.com</div>
+        <div class="msg-date">8:03 am</div>
+        <div class="msg-subject">Weekly Digest: Top stories this week</div>
+        <div class="msg-flags"><span class="flag-attach">📎</span></div>
+      </div>
+
+      <!-- Read messages -->
+      <div class="message-item">
+        <div class="msg-checkbox"><input type="checkbox"></div>
+        <div class="msg-from">Bob Chen</div>
+        <div class="msg-date">Yesterday</div>
+        <div class="msg-subject">Re: Team offsite planning — venue confirmed ✓</div>
+        <div class="msg-flags"><span class="flag-star">★</span></div>
+      </div>
+
+      <div class="message-item">
+        <div class="msg-checkbox"><input type="checkbox"></div>
+        <div class="msg-from">security@accounts.example.com</div>
+        <div class="msg-date">Yesterday</div>
+        <div class="msg-subject">New sign-in detected on your account</div>
+        <div class="msg-flags"></div>
+      </div>
+
+      <div class="message-item">
+        <div class="msg-checkbox"><input type="checkbox"></div>
+        <div class="msg-from">Carol Navarro</div>
+        <div class="msg-date">Mon</div>
+        <div class="msg-subject">Fwd: Invoice #INV-2024-089 — please review before Thursday <span class="thread-badge">2</span></div>
+        <div class="msg-flags"><span class="flag-attach">📎</span></div>
+      </div>
+
+      <div class="message-item">
+        <div class="msg-checkbox"><input type="checkbox"></div>
+        <div class="msg-from">David Park &lt;d.park@corp.io&gt;</div>
+        <div class="msg-date">Mon</div>
+        <div class="msg-subject">Project Orion — kick-off call notes</div>
+        <div class="msg-flags"></div>
+      </div>
+
+      <div class="message-item">
+        <div class="msg-checkbox"><input type="checkbox"></div>
+        <div class="msg-from">noreply@cloudservice.net</div>
+        <div class="msg-date">Sun</div>
+        <div class="msg-subject">Your monthly usage report — March 2026</div>
+        <div class="msg-flags"></div>
+      </div>
+
+      <div class="message-item">
+        <div class="msg-checkbox"><input type="checkbox"></div>
+        <div class="msg-from">Eve Kowalski</div>
+        <div class="msg-date">Mar 28</div>
+        <div class="msg-subject">Lunch tomorrow?</div>
+        <div class="msg-flags"></div>
+      </div>
+
+      <div class="message-item">
+        <div class="msg-checkbox"><input type="checkbox"></div>
+        <div class="msg-from">Frank Osei</div>
+        <div class="msg-date">Mar 27</div>
+        <div class="msg-subject">Re: Draft proposal — looks great, minor edits attached</div>
+        <div class="msg-flags"><span class="flag-attach">📎</span></div>
+      </div>
+
+      <div class="message-item">
+        <div class="msg-checkbox"><input type="checkbox"></div>
+        <div class="msg-from">IT Helpdesk</div>
+        <div class="msg-date">Mar 25</div>
+        <div class="msg-subject">Scheduled maintenance window — Sat 2am–4am UTC</div>
+        <div class="msg-flags"></div>
+      </div>
+
+    </div>
+
+    <!-- Message Detail -->
+    <div class="message-detail">
+
+      <div class="detail-header">
+        <div class="detail-subject">Q2 Budget Review — action needed</div>
+        <div class="detail-meta">
+          <span class="detail-meta-label">From</span>
+          <span class="detail-meta-value">Alice Müller &lt;alice.mueller@corp.example.com&gt;</span>
+          <span class="detail-meta-label">To</span>
+          <span class="detail-meta-value">me &lt;me@example.com&gt;, Bob Chen &lt;bob@corp.example.com&gt;</span>
+          <span class="detail-meta-label">Date</span>
+          <span class="detail-meta-value">Friday, 3 April 2026, 10:42 AM</span>
+          <span class="detail-meta-label">Thread</span>
+          <span class="detail-meta-value">4 messages &nbsp;<a href="#" style="font-size:12px;color:var(--btn-primary)">View thread →</a></span>
+        </div>
+      </div>
+
+      <div class="detail-actions">
+        <button class="btn btn-ghost btn-sm">↩ Reply</button>
+        <button class="btn btn-ghost btn-sm">↩↩ Reply All</button>
+        <button class="btn btn-ghost btn-sm">↗ Forward</button>
+        <div class="toolbar-sep"></div>
+        <button class="btn btn-ghost btn-sm">📁 Move</button>
+        <button class="btn btn-ghost btn-sm">💤 Snooze</button>
+        <button class="btn btn-ghost btn-sm">⚠ Mark as junk</button>
+        <button class="btn btn-ghost btn-sm">⬇ Download raw</button>
+        <div class="toolbar-sep"></div>
+        <button class="btn btn-danger btn-sm">🗑 Delete</button>
+      </div>
+
+      <div class="detail-body-toggle">
+        <span>View as:</span>
+        <div class="toggle-btn">
+          <button class="active">HTML</button>
+          <button>Plain text</button>
+        </div>
+        <span style="margin-left:auto;font-size:11px;">2 attachments</span>
+      </div>
+
+      <div class="detail-body">
+        <div class="detail-iframe-wrapper">
+          <iframe srcdoc="
+            &lt;!DOCTYPE html&gt;&lt;html&gt;&lt;head&gt;
+            &lt;style&gt;body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;font-size:14px;color:#1e293b;padding:16px;line-height:1.6;}&lt;/style&gt;
+            &lt;/head&gt;&lt;body&gt;
+            &lt;p&gt;Hi team,&lt;/p&gt;
+            &lt;p&gt;I've finished the first pass of the Q2 budget spreadsheet. Before we submit to finance on &lt;strong&gt;Monday&lt;/strong&gt;, I need each department lead to review their section and add a brief justification for any line items over $5,000.&lt;/p&gt;
+            &lt;p&gt;Key changes from Q1:&lt;/p&gt;
+            &lt;ul&gt;
+              &lt;li&gt;Cloud infrastructure: +18% (new DR region)&lt;/li&gt;
+              &lt;li&gt;Travel &amp; entertainment: −30% (hybrid policy)&lt;/li&gt;
+              &lt;li&gt;Headcount: 2 open reqs added&lt;/li&gt;
+            &lt;/ul&gt;
+            &lt;p&gt;Please add your comments directly in the sheet (link in attachment). &lt;strong&gt;Deadline: Friday EOD.&lt;/strong&gt;&lt;/p&gt;
+            &lt;p&gt;Thanks,&lt;br&gt;Alice&lt;/p&gt;
+            &lt;hr style='border:none;border-top:1px solid #e2e8f0;margin:16px 0'&gt;
+            &lt;p style='font-size:12px;color:#94a3b8'&gt;Alice Müller | Finance Director | Corp Example Inc&lt;br&gt;alice.mueller@corp.example.com&lt;/p&gt;
+            &lt;/body&gt;&lt;/html&gt;"
+            sandbox
+            title="Email body"
+          ></iframe>
+        </div>
+      </div>
+
+      <div class="detail-attachments">
+        <div class="detail-attachments-label">📎 Attachments</div>
+        <div class="attachment-list">
+          <a href="#" class="attachment-chip">
+            <span class="attachment-icon">📊</span>
+            Q2-Budget-Draft.xlsx
+            <span class="attachment-size">(142 KB)</span>
+          </a>
+          <a href="#" class="attachment-chip">
+            <span class="attachment-icon">📄</span>
+            Budget-Guidelines-2026.pdf
+            <span class="attachment-size">(38 KB)</span>
+          </a>
+        </div>
+      </div>
+
+    </div><!-- /message-detail -->
+
+  </main>
+
+  <!-- ── Bottom bar ── -->
+  <footer class="bottombar">
+    <button class="compose-btn">✏ Compose</button>
+    <div class="search-bar">
+      <span class="search-icon">🔍</span>
+      <input type="search" placeholder="Search all mail…">
+    </div>
+    <div class="bottombar-right">
+      <a href="mockup-settings.html" class="settings-link">⚙ Settings</a>
+    </div>
+  </footer>
+
+</div><!-- /app -->
+
+<div class="annotation">
+  <strong>Mockup notes</strong>
+  • Unread messages are bold with a blue dot<br>
+  • Thread count badge on subject line<br>
+  • Starred (⭐) and attached (📎) flags<br>
+  • HTML body in sandboxed iframe<br>
+  • Plain text / HTML toggle saved to localStorage<br>
+  <span class="dark-mode-note">Dark mode toggle available via Settings</span>
+</div>
+
+</body>
+</html>
