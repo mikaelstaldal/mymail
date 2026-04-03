@@ -726,23 +726,28 @@ Identical to mycal. See mycal's `internal/auth/` for the htpasswd implementation
 
 ### CSRF Protection
 
-All state-changing HTTP methods (POST, PUT, PATCH, DELETE) are protected by two layers:
+CSRF is a browser-specific threat: a malicious site exploiting the browser's automatic cookie/credential forwarding to make cross-origin requests on behalf of an authenticated user. Native clients (mobile apps, CLI tools) manage their own HTTP sessions and are not subject to this attack.
+
+CSRF protection therefore applies **only to browser-originated requests**, identified by the presence of an `Origin` or `Referer` header. Requests without either header (typical of native clients) bypass CSRF checks entirely.
+
+All state-changing HTTP methods (POST, PUT, PATCH, DELETE) from browser clients are protected by two layers:
 
 **Layer 1 — Origin / Referer validation:**
-The server rejects any state-changing request whose `Origin` header (or, if absent, the origin derived from the `Referer` header) does not match the server's own origin (`scheme://host:port`). Requests with neither header are also rejected. GET requests are exempt (they must be side-effect-free).
+The server rejects any state-changing request whose `Origin` header (or, if absent, the origin derived from the `Referer` header) does not match the server's own origin (`scheme://host:port`). GET requests are exempt (they must be side-effect-free).
 
 **Layer 2 — CSRF token:**
 - On startup the server generates a cryptographically random 32-byte token (hex-encoded, 64 characters). It is held in memory and regenerated on each restart.
 - The token is embedded in the main HTML page as `<meta name="csrf-token" content="...">` so that the JavaScript UI can read it.
-- Every state-changing API request from the UI must include the header `X-CSRF-Token: <token>`.
-- The server validates this header on every state-changing request. A missing or incorrect token returns `403 Forbidden`.
+- Every state-changing API request from the browser UI must include the header `X-CSRF-Token: <token>`.
+- The server validates this header on every state-changing request that carries an `Origin` or `Referer` header. A missing or incorrect token returns `403 Forbidden`.
+- Requests without an `Origin` or `Referer` header (native clients) are exempt from the token check.
 - The LDA mode and GET requests are fully exempt.
 
 The token endpoint itself:
 
 #### `GET /api/v1/csrf-token`
 
-Returns the current CSRF token. Used by the UI on startup (as a fallback if the meta tag is unavailable). Subject to the same Basic Auth rules as all other endpoints.
+Returns the current CSRF token. Used by the browser UI on startup (as a fallback if the meta tag is unavailable). Subject to the same Basic Auth rules as all other endpoints. Native clients do not need to call this endpoint.
 
 Response `200`:
 ```json

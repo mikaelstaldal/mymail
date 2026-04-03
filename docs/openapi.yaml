@@ -1408,7 +1408,7 @@ paths:
   /csrf-token:
     get:
       summary: Get CSRF token
-      description: Returns the current in-memory CSRF token. Used by the UI on startup as a fallback if the meta tag is unavailable. Subject to the same Basic Auth rules as all other endpoints.
+      description: Returns the current in-memory CSRF token. Used by the browser UI on startup as a fallback if the meta tag is unavailable. Native clients do not need to call this endpoint (they are exempt from CSRF checks). Subject to the same Basic Auth rules as all other endpoints.
       responses:
         '200':
           description: OK
