@@ -164,19 +164,19 @@
       <li class="folder-item"><a href="mockup-main.html"><span class="folder-icon">📥</span>Inbox<span class="folder-badge">3</span></a></li>
       <li class="folder-item"><a href="#"><span class="folder-icon">📤</span>Sent</a></li>
       <li class="folder-item"><a href="#"><span class="folder-icon">📝</span>Drafts<span class="folder-badge" style="background:#94a3b8">2</span></a></li>
-      <li class="folder-item" id="sidebar-scheduled"><a href="#"><span class="folder-icon">🕐</span>Scheduled<span class="folder-badge" style="background:#8b5cf6">1</span></a></li>
-      <li class="folder-item" id="sidebar-snoozed"><a href="#"><span class="folder-icon">💤</span>Snoozed</a></li>
+      <li class="folder-item" id="sidebar-scheduled"><a href="#scheduled" onclick="switchView('scheduled');return false"><span class="folder-icon">🕐</span>Scheduled<span class="folder-badge" style="background:#8b5cf6">1</span></a></li>
+      <li class="folder-item" id="sidebar-snoozed"><a href="#snoozed" onclick="switchView('snoozed');return false"><span class="folder-icon">💤</span>Snoozed</a></li>
     </ul>
     <div class="sidebar-divider"></div>
     <ul class="folder-list">
-      <li class="folder-item" id="sidebar-trash"><a href="#"><span class="folder-icon">🗑</span>Trash</a></li>
-      <li class="folder-item" id="sidebar-junk"><a href="#"><span class="folder-icon">⚠️</span>Junk<span class="folder-badge" style="background:#ef4444">5</span></a></li>
+      <li class="folder-item" id="sidebar-trash"><a href="#trash" onclick="switchView('trash');return false"><span class="folder-icon">🗑</span>Trash</a></li>
+      <li class="folder-item" id="sidebar-junk"><a href="#junk" onclick="switchView('junk');return false"><span class="folder-icon">⚠️</span>Junk<span class="folder-badge" style="background:#ef4444">5</span></a></li>
     </ul>
     <div class="sidebar-section-label">My Folders</div>
     <ul class="folder-list">
-      <li class="folder-item"><a href="#"><span class="folder-icon">📁</span>Work</a></li>
-      <li class="folder-item"><a href="#"><span class="folder-icon">📁</span>Personal</a></li>
-      <li class="folder-item"><a href="#"><span class="folder-icon">📁</span>Newsletters</a></li>
+      <li class="folder-item"><a href="mockup-main.html"><span class="folder-icon">📁</span>Work</a></li>
+      <li class="folder-item"><a href="mockup-main.html"><span class="folder-icon">📁</span>Personal</a></li>
+      <li class="folder-item"><a href="mockup-main.html"><span class="folder-icon">📁</span>Newsletters</a></li>
     </ul>
   </nav>
 
@@ -435,7 +435,10 @@
       <span class="search-icon">🔍</span>
       <input type="search" placeholder="Search all mail…" value="budget" id="search-input">
     </div>
-    <div style="margin-left:auto"><a href="mockup-settings.html" class="settings-link">⚙ Settings</a></div>
+    <div style="margin-left:auto;display:flex;gap:4px">
+      <a href="index.html" class="settings-link" style="font-size:12px;color:var(--text-muted)">≡ Index</a>
+      <a href="mockup-settings.html" class="settings-link">⚙ Settings</a>
+    </div>
   </footer>
 
 </div><!-- /app -->
@@ -496,6 +499,8 @@
 const views = ['search', 'scheduled', 'snoozed', 'junk', 'trash', 'snooze-modal', 'move-modal'];
 
 function switchView(v) {
+  // Update URL hash without triggering hashchange re-entry
+  if (location.hash !== '#' + v) history.pushState(null, '', '#' + v);
   document.querySelectorAll('.view-btn').forEach((b, i) => b.classList.toggle('active', views[i] === v));
 
   // Hide all content views
@@ -528,6 +533,15 @@ function switchView(v) {
 function hideModal(which) {
   document.getElementById('modal-' + which).style.display = 'none';
 }
+
+// Hash-based navigation: support links like mockup-special-views.html#scheduled
+const hashView = location.hash.replace('#', '');
+if (views.includes(hashView)) switchView(hashView);
+
+window.addEventListener('popstate', () => {
+  const v = location.hash.replace('#', '');
+  if (views.includes(v)) switchView(v);
+});
 </script>
 
 </body>

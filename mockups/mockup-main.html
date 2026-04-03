@@ -480,27 +480,27 @@
         </a>
       </li>
       <li class="folder-item">
-        <a href="#">
+        <a href="mockup-main.html">
           <span class="folder-icon">📤</span>
           Sent
         </a>
       </li>
       <li class="folder-item">
-        <a href="#">
+        <a href="mockup-main.html">
           <span class="folder-icon">📝</span>
           Drafts
           <span class="folder-badge" style="background:#94a3b8">2</span>
         </a>
       </li>
       <li class="folder-item">
-        <a href="#">
+        <a href="mockup-special-views.html#scheduled">
           <span class="folder-icon">🕐</span>
           Scheduled
           <span class="folder-badge" style="background:#8b5cf6">1</span>
         </a>
       </li>
       <li class="folder-item">
-        <a href="#">
+        <a href="mockup-special-views.html#snoozed">
           <span class="folder-icon">💤</span>
           Snoozed
         </a>
@@ -511,13 +511,13 @@
 
     <ul class="folder-list">
       <li class="folder-item">
-        <a href="#">
+        <a href="mockup-special-views.html#trash">
           <span class="folder-icon">🗑</span>
           Trash
         </a>
       </li>
       <li class="folder-item">
-        <a href="#">
+        <a href="mockup-special-views.html#junk">
           <span class="folder-icon">⚠️</span>
           Junk
         </a>
@@ -527,19 +527,19 @@
     <div class="sidebar-section-label">My Folders</div>
     <ul class="folder-list">
       <li class="folder-item">
-        <a href="#">
+        <a href="mockup-main.html">
           <span class="folder-icon">📁</span>
           Work
         </a>
       </li>
       <li class="folder-item">
-        <a href="#">
+        <a href="mockup-main.html">
           <span class="folder-icon">📁</span>
           Personal
         </a>
       </li>
       <li class="folder-item">
-        <a href="#">
+        <a href="mockup-main.html">
           <span class="folder-icon">📁</span>
           Newsletters
         </a>
@@ -680,9 +680,9 @@
       </div>
 
       <div class="detail-actions">
-        <button class="btn btn-ghost btn-sm">↩ Reply</button>
-        <button class="btn btn-ghost btn-sm">↩↩ Reply All</button>
-        <button class="btn btn-ghost btn-sm">↗ Forward</button>
+        <button class="btn btn-ghost btn-sm" onclick="window.location='mockup-compose.html'">↩ Reply</button>
+        <button class="btn btn-ghost btn-sm" onclick="window.location='mockup-compose.html'">↩↩ Reply All</button>
+        <button class="btn btn-ghost btn-sm" onclick="window.location='mockup-compose.html'">↗ Forward</button>
         <div class="toolbar-sep"></div>
         <button class="btn btn-ghost btn-sm">📁 Move</button>
         <button class="btn btn-ghost btn-sm">💤 Snooze</button>
@@ -748,12 +748,13 @@
 
   <!-- ── Bottom bar ── -->
   <footer class="bottombar">
-    <button class="compose-btn">✏ Compose</button>
-    <div class="search-bar">
+    <button class="compose-btn" onclick="window.location='mockup-compose.html'">✏ Compose</button>
+    <div class="search-bar" onclick="window.location='mockup-special-views.html#search'" style="cursor:pointer">
       <span class="search-icon">🔍</span>
-      <input type="search" placeholder="Search all mail…">
+      <input type="search" placeholder="Search all mail…" onclick="event.stopPropagation();window.location='mockup-special-views.html#search'">
     </div>
     <div class="bottombar-right">
+      <a href="index.html" class="settings-link" style="font-size:12px;color:var(--text-muted)">≡ Index</a>
       <a href="mockup-settings.html" class="settings-link">⚙ Settings</a>
     </div>
   </footer>
