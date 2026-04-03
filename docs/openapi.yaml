@@ -121,6 +121,15 @@ components:
         send_error:
           type: string
           nullable: true
+        snoozed_until:
+          type: string
+          format: date-time
+          nullable: true
+          description: Non-null when the message is in the Snoozed folder. Displayed in the detail pane so the user can see when it will reappear.
+        snooze_folder_id:
+          type: integer
+          nullable: true
+          description: The folder the message will return to when the snooze expires. Non-null when snoozed_until is non-null.
         created_at:
           type: string
           format: date-time
@@ -1393,6 +1402,24 @@ paths:
                   updated:
                     type: integer
                 required: [updated]
+
+  # ── CSRF Token ─────────────────────────────────────────────────────────────
+
+  /csrf-token:
+    get:
+      summary: Get CSRF token
+      description: Returns the current in-memory CSRF token. Used by the UI on startup as a fallback if the meta tag is unavailable. Subject to the same Basic Auth rules as all other endpoints.
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  token:
+                    type: string
+                required: [token]
 
   # ── Contacts ───────────────────────────────────────────────────────────────
 
