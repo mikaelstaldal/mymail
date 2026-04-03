@@ -46,6 +46,7 @@ Follows the same layered architecture as mycal:
 ```
 mymail [flags]
 mymail -lda [flags]
+mymail -import -data <dir> <mapping>...
 ```
 
 ### Server mode (default)
@@ -135,7 +136,7 @@ v = PRAGMA user_version
 if v == 0:
     -- create all tables, indexes, triggers, seed built-in folders
     PRAGMA user_version = 0   -- already at 0; explicit for clarity
-if v < 1:
+else if v < 1:
     -- future migration example: ALTER TABLE messages ADD COLUMN foo TEXT
     PRAGMA user_version = 1
 ...
@@ -279,7 +280,7 @@ CREATE TABLE IF NOT EXISTS identities (
 - Exactly one identity has `is_default=1`. When a new identity is created with `is_default=true`, all other rows are set to `is_default=0` in the same transaction. When the default identity is deleted, the identity with the lowest `position` (then lowest `id`) becomes the new default.
 - `address` must be a syntactically valid email address (RFC 5322 `addr-spec`).
 
-The first identity is created interactively or via CLI (see §3). There is no seeded default.
+The first identity is created via the web UI on first use (the compose view prompts the user if no identities exist). There is no seeded default.
 
 ### 4.6 `contacts`
 
@@ -309,7 +310,7 @@ CREATE TABLE IF NOT EXISTS filters (
     match_to      TEXT    NOT NULL DEFAULT '',  -- substring match on To or Cc
     match_subject TEXT    NOT NULL DEFAULT '',  -- substring match on Subject
     -- action
-    action        TEXT    NOT NULL,             -- "move", "trash", "mark_read"
+    action        TEXT    NOT NULL,             -- "move", "trash", "mark_read", "drop"
     folder_id     INTEGER REFERENCES folders(id), -- required when action="move"
     stop          INTEGER NOT NULL DEFAULT 1   -- 0=continue to next filter, 1=stop
 );
@@ -398,7 +399,7 @@ Response `201`: folder object.
 
 #### `PATCH /api/v1/folders/{id}`
 
-Update folder name and/or position. Built-in folders (id 1–4) may have their `position` updated but not their `name`.
+Update folder name and/or position. Built-in folders (ids 1–7) may have their `position` updated but not their `name`.
 
 Request (all fields optional):
 ```json
@@ -506,6 +507,7 @@ Response `200`:
   "from_addr": "Alice <alice@example.com>",
   "to_addr": "Bob <bob@example.com>",
   "cc_addr": "",
+  "bcc_addr": "",
   "reply_to_addr": "",
   "subject": "Hello",
   "date": "2026-03-29T10:00:00Z",
@@ -525,7 +527,7 @@ Response `200`:
 }
 ```
 
-Fetching a message automatically marks it as read (sets `read=1`). The HTML body is sanitized (see §7).
+Fetching a message automatically marks it as read (sets `read=1`). The HTML body is sanitized (see §10).
 
 #### `GET /api/v1/messages/{id}/raw`
 
@@ -603,12 +605,14 @@ Response `200`:
 
 Delete all messages in a folder. Applies the same two-step semantics as single delete: messages not already in Trash are moved to Trash; messages already in Trash are permanently deleted. This means "Empty Trash" (`DELETE /api/v1/folders/4/messages`) permanently deletes everything in Trash, while "Empty Junk" (`DELETE /api/v1/folders/7/messages`) moves all Junk messages to Trash.
 
-Returns `400` for hidden folders (Scheduled, Snoozed).
+Returns `400` for system-managed folders (Scheduled, Snoozed), as their contents are controlled by the scheduler and not subject to bulk user deletion.
 
 Response `200`:
 ```json
 { "deleted": 42 }
 ```
+
+`deleted` is the total number of messages processed (both those moved to Trash and those permanently deleted). It does not distinguish between the two outcomes.
 
 #### `POST /api/v1/messages/send`
 
@@ -682,7 +686,7 @@ Response `201`:
 
 ### 5.3 Draft Management
 
-Drafts are regular messages in the Drafts folder (`folder_id=3`). The compose UI saves drafts via `PATCH /api/v1/messages/{id}` (updating the stored draft) or creates new ones via a simplified endpoint:
+Drafts are regular messages in the Drafts folder (`folder_id=3`). The compose UI creates a new draft via `POST /api/v1/drafts` (or the `-with-attachments` variant) and subsequently updates it via `PUT /api/v1/drafts/{id}` (or the `-with-attachments` variant).
 
 #### `POST /api/v1/drafts`
 
@@ -702,6 +706,26 @@ Response `201`:
 { "id": 28, "updated_at": "2026-03-30T12:00:00Z" }
 ```
 
+#### `PUT /api/v1/drafts/{id}`
+
+Replace the content of an existing draft. Same request body as `POST /api/v1/drafts`. The message identified by `{id}` must exist and must be in the Drafts folder; returns `404` if not found, `400` if the message is not a draft.
+
+All content fields (subject, body, recipients, etc.) are fully replaced by the supplied values. `updated_at` is set to the current time.
+
+Response `200`:
+```json
+{ "id": 27, "updated_at": "2026-03-30T12:00:35Z" }
+```
+
+#### `PUT /api/v1/drafts-with-attachments/{id}`
+
+Same as `PUT /api/v1/drafts/{id}` but uses `multipart/form-data` (same encoding as `POST /api/v1/drafts-with-attachments`). The existing attachments for the draft are replaced wholesale by the file parts supplied in this request; any previously stored attachments not present in the new upload are deleted.
+
+Response `200`:
+```json
+{ "id": 28, "updated_at": "2026-03-30T12:00:35Z" }
+```
+
 #### `DELETE /api/v1/drafts/{id}`
 
 Permanently delete a draft (no Trash step).
@@ -716,7 +740,7 @@ Snoozing a message temporarily hides it from the Inbox and returns it at a speci
 
 #### `POST /api/v1/messages/{id}/snooze`
 
-Snooze a message. The message must currently be in Inbox (or a user folder — snoozing is not valid for Sent, Drafts, Trash, Scheduled, or Snoozed). Returns `400` otherwise.
+Snooze a message. The message must currently be in Inbox (or a user folder — snoozing is not valid for Sent, Drafts, Trash, Scheduled, Snoozed, or Junk). Returns `400` otherwise.
 
 Request:
 ```json
@@ -1089,7 +1113,7 @@ When invoked as `mymail -lda`, the program:
 4. Duplicate detection: if a `Message-ID` is present and a message with the same `Message-ID` already exists anywhere in the database, exit `0` silently. This prevents double-storage when the MTA retries delivery after a transient failure that was actually recovered.
 5. Applies spam detection and user-defined filters (see §6.1).
 6. Inserts the message record and attachments in a single transaction.
-7. Upserts the sender into the `contacts` table: lower-case the `From` address; insert if not present, otherwise update `name` only if the existing `name` is empty.
+7. Upserts the sender into the `contacts` table: lower-case the `From` address; insert if not present, otherwise update `name` only if the existing `name` is empty. Only the `From` address is upserted for incoming mail — To and Cc recipients are not auto-added (to avoid polluting contacts with mailing list addresses).
 8. Exits `0`.
 
 ### 6.1 Filter Application
@@ -1275,6 +1299,7 @@ The send flow in the service layer:
    - `Date`: current time (RFC 5322 format)
    - `Message-ID`: generate `<uuid@domain>` where `domain` is the domain part of the selected sender's `From` address (e.g. if the identity's address is `alice@example.com`, use `example.com`)
    - `MIME-Version: 1.0`
+   - `Reply-To`: if `reply_to_addr` is non-empty, add a `Reply-To` header with that value; omit the header otherwise.
    - Body: `multipart/alternative` with `text/plain` and/or `text/html` parts.
    - If attachments present: wrap in `multipart/mixed`.
    - Encode non-ASCII headers as RFC 2047 encoded words.
@@ -1440,7 +1465,7 @@ The Scheduled folder is shown in the sidebar so the user can review and cancel p
 
 1. **Folder view** — paginated message list for selected folder. Unread messages shown in bold. Click to open message detail. A **Mark all as read** button in the toolbar sends `PATCH /api/v1/messages` with all message IDs in the folder and `"read": true`.
 2. **Message detail** — full headers, body, attachment download links. Shows thread if `references` chain exists. Reply/Reply All/Forward/Move/Delete/Snooze buttons. The **Snooze** button opens a small picker with quick presets (later today, tomorrow morning, next week) and a custom date/time option; submits `POST /api/v1/messages/{id}/snooze`. When a message has both `body_html` and `body_text`, the body is shown according to the user's **preferred view** setting (see Client-Side Storage), defaulting to HTML. A **Plain text / HTML** toggle button switches the view for the current message and updates the stored preference. If only one body type is present it is shown directly with no toggle. HTML is rendered in a sandboxed iframe (see §13 HTML Body Display); plain text is rendered as preformatted text.
-3. **Compose / Reply / Reply All / Forward** — form with a **From** selector (dropdown of all identities, pre-selected to the default; or, when replying, to the identity whose address matches the original To/Cc), To, Cc, Bcc, Subject, plain-text body, optional HTML body toggle. File upload for attachments. A **Send later** toggle reveals a date/time picker for `send_at`; when set, the Send button becomes "Schedule". Auto-save to Drafts on a 30-second timer (scheduled messages auto-save to Drafts until explicitly scheduled). The To, Cc, and Bcc fields offer address autocomplete: as the user types, the UI queries `GET /api/v1/contacts?q=<input>` and shows a dropdown of matching name + address suggestions.
+3. **Compose / Reply / Reply All / Forward** — form with a **From** selector (dropdown of all identities, pre-selected to the default; or, when replying, to the identity whose address matches the original To/Cc), To, Cc, Bcc, Subject, plain-text body, optional HTML body toggle. File upload for attachments. A **Send later** toggle reveals a date/time picker for `send_at`; when set, the Send button becomes "Schedule". Auto-save to Drafts on a 30-second timer: on the first save `POST /api/v1/drafts` (or `-with-attachments`) is called and the returned `id` is stored; subsequent saves call `PUT /api/v1/drafts/{id}` (or `-with-attachments`) to update the existing draft. Scheduled messages auto-save to Drafts until explicitly scheduled. The To, Cc, and Bcc fields offer address autocomplete: as the user types, the UI queries `GET /api/v1/contacts?q=<input>` and shows a dropdown of matching name + address suggestions.
 
    Pre-population rules per action:
 
@@ -1489,7 +1514,7 @@ Polling is suspended while the browser tab is hidden (`document.visibilityState 
 
 Using `localStorage`:
 - Selected folder
-- Compose draft state (as fallback) — stored as a JSON object containing all compose field values, the server-assigned draft `id` (if one exists), and a `savedAt` RFC 3339 UTC timestamp written each time the auto-save fires. **Draft recovery on page reload:** if a `savedAt` timestamp is present in `localStorage` and a server draft `id` is recorded, the UI fetches the server draft and compares its `updated_at` with `savedAt`; whichever is newer is loaded into the compose form silently (no prompt). If only one source exists it is used directly. If neither exists, the compose form opens blank.
+- Compose draft state (as fallback) — stored as a JSON object containing all compose field values, the server-assigned draft `id` (if one exists), and a `savedAt` RFC 3339 UTC timestamp written each time the auto-save fires. **Draft recovery on page reload:** if a `savedAt` timestamp is present in `localStorage` and a server draft `id` is recorded, the UI fetches the server draft and compares its `updated_at` with `savedAt`; whichever is newer is loaded into the compose form silently (no prompt). If the server returns `404` (e.g. the draft was sent or deleted in another tab), the `localStorage` state is used as the draft content and the stale `id` is cleared so the next auto-save creates a fresh server draft. If only one source exists it is used directly. If neither exists, the compose form opens blank.
 - Dark mode toggle
 - Message list density preference
 - Notification permission state (cached to avoid repeated `Notification.permission` lookups)
