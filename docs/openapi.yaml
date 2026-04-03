@@ -1,0 +1,1509 @@
+openapi: 3.1.0
+info:
+  title: mymail API
+  description: REST API for mymail — a self-hosted personal email client.
+  version: 1.0.0
+
+servers:
+  - url: /api/v1
+
+components:
+  schemas:
+    Error:
+      type: object
+      properties:
+        error:
+          type: string
+      required: [error]
+
+    Folder:
+      type: object
+      properties:
+        id:
+          type: integer
+        name:
+          type: string
+        slug:
+          type: string
+        position:
+          type: integer
+        unread_count:
+          type: integer
+      required: [id, name, slug, position, unread_count]
+
+    MessageSummary:
+      type: object
+      properties:
+        id:
+          type: integer
+        folder_id:
+          type: integer
+        message_id:
+          type: string
+          nullable: true
+        from_addr:
+          type: string
+        to_addr:
+          type: string
+        subject:
+          type: string
+        date:
+          type: string
+          format: date-time
+        read:
+          type: boolean
+        flagged:
+          type: boolean
+        has_attachments:
+          type: boolean
+        created_at:
+          type: string
+          format: date-time
+      required: [id, folder_id, from_addr, to_addr, subject, date, read, flagged, has_attachments, created_at]
+
+    AttachmentMeta:
+      type: object
+      properties:
+        id:
+          type: integer
+        filename:
+          type: string
+        content_type:
+          type: string
+        size:
+          type: integer
+      required: [id, filename, content_type, size]
+
+    MessageDetail:
+      type: object
+      properties:
+        id:
+          type: integer
+        folder_id:
+          type: integer
+        message_id:
+          type: string
+          nullable: true
+        in_reply_to:
+          type: string
+          nullable: true
+        references:
+          type: array
+          items:
+            type: string
+        from_addr:
+          type: string
+        to_addr:
+          type: string
+        cc_addr:
+          type: string
+        bcc_addr:
+          type: string
+        reply_to_addr:
+          type: string
+        subject:
+          type: string
+        date:
+          type: string
+          format: date-time
+        body_text:
+          type: string
+        body_html:
+          type: string
+        read:
+          type: boolean
+        flagged:
+          type: boolean
+        send_at:
+          type: string
+          format: date-time
+          nullable: true
+        send_error:
+          type: string
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+        attachments:
+          type: array
+          items:
+            $ref: '#/components/schemas/AttachmentMeta'
+      required: [id, folder_id, from_addr, to_addr, cc_addr, bcc_addr, reply_to_addr, subject, date, body_text, body_html, read, flagged, created_at, attachments]
+
+    SendRequest:
+      type: object
+      properties:
+        identity_id:
+          type: integer
+          description: If absent, the default identity is used.
+        to_addr:
+          type: string
+        cc_addr:
+          type: string
+        bcc_addr:
+          type: string
+        reply_to_addr:
+          type: string
+        subject:
+          type: string
+        body_text:
+          type: string
+        body_html:
+          type: string
+        in_reply_to:
+          type: string
+        references:
+          type: array
+          items:
+            type: string
+        send_at:
+          type: string
+          format: date-time
+          nullable: true
+          description: If present and in the future (≥1 min), schedule instead of sending immediately.
+      required: [to_addr]
+
+    Filter:
+      type: object
+      properties:
+        id:
+          type: integer
+        position:
+          type: integer
+        name:
+          type: string
+        match_from:
+          type: string
+        match_to:
+          type: string
+        match_subject:
+          type: string
+        action:
+          type: string
+          enum: [move, trash, mark_read, drop]
+        folder_id:
+          type: integer
+          nullable: true
+          description: Required when action is "move".
+        stop:
+          type: boolean
+      required: [id, position, name, match_from, match_to, match_subject, action, stop]
+
+    FilterRequest:
+      type: object
+      properties:
+        position:
+          type: integer
+        name:
+          type: string
+        match_from:
+          type: string
+        match_to:
+          type: string
+        match_subject:
+          type: string
+        action:
+          type: string
+          enum: [move, trash, mark_read, drop]
+        folder_id:
+          type: integer
+          nullable: true
+        stop:
+          type: boolean
+      required: [action]
+
+    SpamFilterSettings:
+      type: object
+      properties:
+        enabled:
+          type: boolean
+        score_header:
+          type: string
+        score_threshold:
+          type: number
+      required: [enabled, score_header, score_threshold]
+
+    Identity:
+      type: object
+      properties:
+        id:
+          type: integer
+        name:
+          type: string
+        address:
+          type: string
+        is_default:
+          type: boolean
+        position:
+          type: integer
+        signature:
+          type: string
+      required: [id, name, address, is_default, position, signature]
+
+    IdentityRequest:
+      type: object
+      properties:
+        name:
+          type: string
+        address:
+          type: string
+        is_default:
+          type: boolean
+        position:
+          type: integer
+        signature:
+          type: string
+      required: [name, address]
+
+    Contact:
+      type: object
+      properties:
+        id:
+          type: integer
+        address:
+          type: string
+        name:
+          type: string
+      required: [id, address, name]
+
+  responses:
+    NotFound:
+      description: Not found
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    BadRequest:
+      description: Validation error
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    Conflict:
+      description: Conflict
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    InternalError:
+      description: Internal server error
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+
+paths:
+  # ── Folders ────────────────────────────────────────────────────────────────
+
+  /folders:
+    get:
+      summary: List folders
+      description: Returns all non-hidden folders ordered by position.
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Folder'
+    post:
+      summary: Create folder
+      description: Create a user-defined folder. The slug is derived from the name.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name:
+                  type: string
+                position:
+                  type: integer
+              required: [name]
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Folder'
+        '409':
+          $ref: '#/components/responses/Conflict'
+
+  /folders/{id}:
+    patch:
+      summary: Update folder
+      description: Update folder name and/or position. Built-in folders (ids 1–7) may only have their position updated.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name:
+                  type: string
+                position:
+                  type: integer
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Folder'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    delete:
+      summary: Delete folder
+      description: Delete a user-created folder. Messages are moved to Trash first. Returns 400 for built-in folders.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '204':
+          description: Deleted
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /folders/{folder_id}/messages:
+    get:
+      summary: List messages in folder
+      description: List messages in a folder, ordered by date descending.
+      parameters:
+        - name: folder_id
+          in: path
+          required: true
+          schema:
+            type: integer
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 50
+            maximum: 200
+        - name: offset
+          in: query
+          schema:
+            type: integer
+            default: 0
+        - name: unread
+          in: query
+          schema:
+            type: boolean
+        - name: flagged
+          in: query
+          schema:
+            type: boolean
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  total:
+                    type: integer
+                  messages:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/MessageSummary'
+                required: [total, messages]
+        '404':
+          $ref: '#/components/responses/NotFound'
+    delete:
+      summary: Delete all messages in folder
+      description: |
+        Delete all messages in a folder using two-step semantics: messages not in Trash are moved
+        to Trash; messages already in Trash are permanently deleted. Returns 400 for Scheduled and Snoozed folders.
+      parameters:
+        - name: folder_id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  deleted:
+                    type: integer
+                required: [deleted]
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  # ── Messages ───────────────────────────────────────────────────────────────
+
+  /messages/search:
+    get:
+      summary: Search messages
+      description: Full-text search across all folders using FTS5 syntax. Results ordered by relevance.
+      parameters:
+        - name: q
+          in: query
+          required: true
+          schema:
+            type: string
+        - name: folder_id
+          in: query
+          schema:
+            type: integer
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 50
+            maximum: 200
+        - name: offset
+          in: query
+          schema:
+            type: integer
+            default: 0
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  total:
+                    type: integer
+                  messages:
+                    type: array
+                    items:
+                      allOf:
+                        - $ref: '#/components/schemas/MessageSummary'
+                        - type: object
+                          properties:
+                            snippet:
+                              type: string
+                required: [total, messages]
+
+  /messages/send:
+    post:
+      summary: Send or schedule a message
+      description: |
+        Compose and send a new message, or schedule it for future delivery.
+        If `send_at` is absent or null, the message is sent immediately (response 201).
+        If `send_at` is a future timestamp (≥1 min), the message is scheduled (response 202).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SendRequest'
+      responses:
+        '201':
+          description: Sent immediately
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id:
+                    type: integer
+                required: [id]
+        '202':
+          description: Scheduled for future delivery
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id:
+                    type: integer
+                  send_at:
+                    type: string
+                    format: date-time
+                required: [id, send_at]
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /messages/send-with-attachments:
+    post:
+      summary: Send or schedule a message with attachments
+      description: Same as /messages/send but uses multipart/form-data. JSON fields in a "message" part; each attachment is a separate file part.
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                message:
+                  $ref: '#/components/schemas/SendRequest'
+                attachments:
+                  type: array
+                  items:
+                    type: string
+                    format: binary
+      responses:
+        '201':
+          description: Sent immediately
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id:
+                    type: integer
+                required: [id]
+        '202':
+          description: Scheduled
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id:
+                    type: integer
+                  send_at:
+                    type: string
+                    format: date-time
+                required: [id, send_at]
+        '400':
+          $ref: '#/components/responses/BadRequest'
+
+  /messages/import:
+    post:
+      summary: Import a raw message
+      description: Store a raw RFC 5322 message directly into a folder. Filters are not applied.
+      parameters:
+        - name: folder_id
+          in: query
+          schema:
+            type: integer
+            default: 1
+            description: Target folder (default Inbox).
+      requestBody:
+        required: true
+        content:
+          message/rfc822:
+            schema:
+              type: string
+              format: binary
+      responses:
+        '201':
+          description: Imported
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id:
+                    type: integer
+                required: [id]
+        '400':
+          $ref: '#/components/responses/BadRequest'
+
+  /messages/{id}:
+    get:
+      summary: Get message details
+      description: Get full message including body and attachment list. Automatically marks the message as read.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MessageDetail'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    patch:
+      summary: Update message metadata
+      description: |
+        Partial update of folder_id, read, or flagged. Moving to/from Scheduled or Snoozed
+        folders is rejected; use the dedicated snooze and scheduled endpoints instead.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                folder_id:
+                  type: integer
+                read:
+                  type: boolean
+                flagged:
+                  type: boolean
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MessageSummary'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    delete:
+      summary: Delete message
+      description: If not in Trash, moves to Trash. If already in Trash, permanently deletes.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '204':
+          description: OK
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /messages:
+    patch:
+      summary: Bulk update messages
+      description: Apply the same patch to multiple messages. Same move restrictions as single PATCH.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                ids:
+                  type: array
+                  items:
+                    type: integer
+                folder_id:
+                  type: integer
+                read:
+                  type: boolean
+                flagged:
+                  type: boolean
+              required: [ids]
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  updated:
+                    type: integer
+                required: [updated]
+        '400':
+          $ref: '#/components/responses/BadRequest'
+    delete:
+      summary: Bulk delete messages
+      description: Same two-step semantics as single delete.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                ids:
+                  type: array
+                  items:
+                    type: integer
+              required: [ids]
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  deleted:
+                    type: integer
+                required: [deleted]
+
+  /messages/{id}/raw:
+    get:
+      summary: Download raw message
+      description: Download the original RFC 5322 message file.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: OK
+          headers:
+            Content-Disposition:
+              schema:
+                type: string
+                example: 'attachment; filename="message.eml"'
+          content:
+            message/rfc822:
+              schema:
+                type: string
+                format: binary
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /messages/{id}/thread:
+    get:
+      summary: Get thread
+      description: Returns all messages in the same thread, ordered by date ascending.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  messages:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/MessageSummary'
+                required: [messages]
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /messages/{id}/snooze:
+    post:
+      summary: Snooze a message
+      description: |
+        Temporarily hide a message until a future time. The message must be in Inbox or a user folder.
+        `until` must be a future timestamp at least 1 minute ahead.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                until:
+                  type: string
+                  format: date-time
+              required: [until]
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id:
+                    type: integer
+                  folder_id:
+                    type: integer
+                  snoozed_until:
+                    type: string
+                    format: date-time
+                required: [id, folder_id, snoozed_until]
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    delete:
+      summary: Cancel snooze
+      description: Cancel a snooze early, returning the message to its original folder immediately.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id:
+                    type: integer
+                  folder_id:
+                    type: integer
+                required: [id, folder_id]
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /messages/{id}/mark-junk:
+    post:
+      summary: Mark message as junk
+      description: Moves the message to the Junk folder and marks it as read. Returns 400 if already in Junk.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id:
+                    type: integer
+                  folder_id:
+                    type: integer
+                required: [id, folder_id]
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /messages/{id}/mark-not-junk:
+    post:
+      summary: Mark message as not junk
+      description: Moves the message from Junk to Inbox and marks it as unread. Returns 400 if not in Junk.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id:
+                    type: integer
+                  folder_id:
+                    type: integer
+                required: [id, folder_id]
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  # ── Attachments ────────────────────────────────────────────────────────────
+
+  /attachments/{id}:
+    get:
+      summary: Download attachment
+      description: Download attachment data with appropriate Content-Type and Content-Disposition headers.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: OK
+          headers:
+            Content-Disposition:
+              schema:
+                type: string
+          content:
+            application/octet-stream:
+              schema:
+                type: string
+                format: binary
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  # ── Scheduled ──────────────────────────────────────────────────────────────
+
+  /scheduled/{id}:
+    delete:
+      summary: Cancel scheduled message
+      description: Cancel a scheduled message and move it to Drafts. Returns 400 if already sent.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id:
+                    type: integer
+                  folder_id:
+                    type: integer
+                required: [id, folder_id]
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  # ── Drafts ─────────────────────────────────────────────────────────────────
+
+  /drafts:
+    post:
+      summary: Save new draft
+      description: Save a new draft. Nothing is sent. `send_at`, if supplied, is stored but not acted upon.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SendRequest'
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id:
+                    type: integer
+                  updated_at:
+                    type: string
+                    format: date-time
+                required: [id, updated_at]
+        '400':
+          $ref: '#/components/responses/BadRequest'
+
+  /drafts-with-attachments:
+    post:
+      summary: Save new draft with attachments
+      description: Same as POST /drafts but uses multipart/form-data.
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                message:
+                  $ref: '#/components/schemas/SendRequest'
+                attachments:
+                  type: array
+                  items:
+                    type: string
+                    format: binary
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id:
+                    type: integer
+                  updated_at:
+                    type: string
+                    format: date-time
+                required: [id, updated_at]
+        '400':
+          $ref: '#/components/responses/BadRequest'
+
+  /drafts/{id}:
+    put:
+      summary: Replace draft content
+      description: |
+        Replace an existing draft entirely. All content fields are replaced; if `send_at` is absent
+        or null, any previously stored value is cleared.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SendRequest'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id:
+                    type: integer
+                  updated_at:
+                    type: string
+                    format: date-time
+                required: [id, updated_at]
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    delete:
+      summary: Delete draft
+      description: Permanently delete a draft (no Trash step).
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '204':
+          description: Deleted
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /drafts-with-attachments/{id}:
+    put:
+      summary: Replace draft content with attachments
+      description: Same as PUT /drafts/{id} but uses multipart/form-data. Existing attachments are replaced wholesale.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                message:
+                  $ref: '#/components/schemas/SendRequest'
+                attachments:
+                  type: array
+                  items:
+                    type: string
+                    format: binary
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id:
+                    type: integer
+                  updated_at:
+                    type: string
+                    format: date-time
+                required: [id, updated_at]
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  # ── Filters ────────────────────────────────────────────────────────────────
+
+  /filters:
+    get:
+      summary: List filters
+      description: Returns all filters ordered by position.
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Filter'
+    post:
+      summary: Create filter
+      description: Create a filter. At least one of match_from, match_to, match_subject must be non-empty.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/FilterRequest'
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Filter'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+
+  /filters/{id}:
+    put:
+      summary: Replace filter
+      description: Replace a filter entirely.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/FilterRequest'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Filter'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    delete:
+      summary: Delete filter
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '204':
+          description: Deleted
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /filters/reorder:
+    post:
+      summary: Reorder filters
+      description: Update position values for multiple filters at once. The supplied order becomes the new position sequence (0, 1, 2, …).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                ids:
+                  type: array
+                  items:
+                    type: integer
+              required: [ids]
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  updated:
+                    type: integer
+                required: [updated]
+
+  # ── Spam Filter ────────────────────────────────────────────────────────────
+
+  /spam-filter:
+    get:
+      summary: Get spam filter settings
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SpamFilterSettings'
+    put:
+      summary: Replace spam filter settings
+      description: |
+        Replace spam filter settings entirely. `score_threshold` must be positive;
+        `score_header` must be non-empty.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SpamFilterSettings'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SpamFilterSettings'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+
+  # ── Identities ─────────────────────────────────────────────────────────────
+
+  /identities:
+    get:
+      summary: List identities
+      description: Returns all identities ordered by position, then id.
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Identity'
+    post:
+      summary: Create identity
+      description: |
+        Create an identity. `address` must be a valid RFC 5322 addr-spec.
+        If `is_default` is true, all other identities are set to is_default=false.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/IdentityRequest'
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Identity'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '409':
+          $ref: '#/components/responses/Conflict'
+
+  /identities/{id}:
+    put:
+      summary: Replace identity
+      description: Replace an identity entirely. Same validation as POST.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/IdentityRequest'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Identity'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+    delete:
+      summary: Delete identity
+      description: Delete an identity. Returns 400 if it is the only identity. If the default is deleted, the next identity by position/id is promoted.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '204':
+          description: Deleted
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /identities/reorder:
+    post:
+      summary: Reorder identities
+      description: Update position values for multiple identities at once. The supplied order becomes the new position sequence (0, 1, 2, …).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                ids:
+                  type: array
+                  items:
+                    type: integer
+              required: [ids]
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  updated:
+                    type: integer
+                required: [updated]
+
+  # ── Contacts ───────────────────────────────────────────────────────────────
+
+  /contacts:
+    get:
+      summary: List contacts
+      description: List contacts ordered by name (empty names last), then address. Supports autocomplete filtering.
+      parameters:
+        - name: q
+          in: query
+          schema:
+            type: string
+          description: Case-insensitive substring filter on name or address.
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 50
+            maximum: 200
+        - name: offset
+          in: query
+          schema:
+            type: integer
+            default: 0
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  total:
+                    type: integer
+                  contacts:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Contact'
+                required: [total, contacts]
+    post:
+      summary: Create contact
+      description: Create a contact. `address` must be a valid RFC 5322 addr-spec.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                address:
+                  type: string
+                name:
+                  type: string
+              required: [address]
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Contact'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '409':
+          $ref: '#/components/responses/Conflict'
+
+  /contacts/{id}:
+    put:
+      summary: Replace contact
+      description: Replace a contact entirely. Returns 409 if the new address conflicts with a different existing contact.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                address:
+                  type: string
+                name:
+                  type: string
+              required: [address]
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Contact'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+    delete:
+      summary: Delete contact
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '204':
+          description: Deleted
+        '404':
+          $ref: '#/components/responses/NotFound'
