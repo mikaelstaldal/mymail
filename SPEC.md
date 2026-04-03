@@ -5,7 +5,7 @@ Designed to run on a Linux server alongside a mail system such as Postfix.
 
 ---
 
-## 1. Overview
+## Overview
 
 mymail stores, organizes, and presents email. It does **not** speak IMAP/POP3 or SMTP directly. Instead:
 
@@ -15,7 +15,7 @@ mymail stores, organizes, and presents email. It does **not** speak IMAP/POP3 or
 
 ---
 
-## 2. Project Structure
+## Project Structure
 
 ```
 mymail/
@@ -41,7 +41,7 @@ Follows the same layered architecture as mycal:
 
 ---
 
-## 3. Command-Line Interface
+## Command-Line Interface
 
 ```
 mymail [flags]
@@ -59,7 +59,7 @@ mymail -import -data <dir> <mapping>...
 | `-basic-auth-file`  | ``                  | Path to htpasswd file; if set, enables HTTP Basic Auth |
 | `-basic-auth-realm` | `mymail`            | Auth realm shown to clients                            |
 
-Identities are managed entirely through the REST API (§5.8) and the web UI. There is no CLI flag for the initial identity; the first identity is created via the web UI on first use (the compose view prompts the user if no identities exist).
+Identities are managed entirely through the REST API (Identities) and the web UI. There is no CLI flag for the initial identity; the first identity is created via the web UI on first use (the compose view prompts the user if no identities exist).
 
 ### Import mode (`-import`)
 
@@ -72,7 +72,7 @@ Each `<mapping>` argument is a colon-separated triplet `<folder>:<format>:<path>
 | Part       | Values                                                      | Description                                                          |
 |------------|-------------------------------------------------------------|----------------------------------------------------------------------|
 | `<folder>` | `inbox`, `sent`, `drafts`, `trash`, or any user-folder name | Target folder in mymail. Created automatically if it does not exist. |
-| `<format>` | `mbox`, `maildir`                                           | Source format (see §7 for details)                                   |
+| `<format>` | `mbox`, `maildir`                                           | Source format (see Batch Import for details)                                   |
 | `<path>`   | file or directory path                                      | Source mbox file or Maildir root directory                           |
 
 Example — import from a Thunderbird profile:
@@ -112,7 +112,7 @@ Exit codes follow standard LDA conventions:
 
 ---
 
-## 4. Database Schema
+## Database Schema
 
 File: `<data>/mymail.sqlite`
 
@@ -127,24 +127,24 @@ user_version 0  →  fresh database: run all CREATE TABLE / CREATE INDEX / CREAT
 user_version 1  →  (reserved for first future migration)
 ```
 
-**Current schema version: 0** (initial schema; no migrations beyond table creation yet).
+**Current schema version: 1** (initial schema applied; no further migrations yet).
 
 The migration runner pseudocode:
 
 ```
 v = PRAGMA user_version
-if v == 0:
+if v < 1:
     -- create all tables, indexes, triggers, seed built-in folders
-    PRAGMA user_version = 0   -- already at 0; explicit for clarity
-else if v < 1:
-    -- future migration example: ALTER TABLE messages ADD COLUMN foo TEXT
     PRAGMA user_version = 1
+if v < 2:
+    -- future migration example: ALTER TABLE messages ADD COLUMN foo TEXT
+    PRAGMA user_version = 2
 ...
 ```
 
-Because `PRAGMA user_version` is set inside the same transaction as the DDL statements, a crash mid-migration leaves the version unchanged and the migration will be retried on next startup.
+Each `if` block is checked independently (not `else if`), so a single startup can apply multiple sequential migrations. Because `PRAGMA user_version` is set inside the same transaction as the DDL statements, a crash mid-migration leaves the version unchanged and the migration will be retried on next startup.
 
-### 4.1 `folders`
+### `folders`
 
 ```sql
 CREATE TABLE IF NOT EXISTS folders (
@@ -158,21 +158,21 @@ CREATE TABLE IF NOT EXISTS folders (
 
 **Built-in folders** (created on first run, protected from deletion):
 
-| id | name      | slug      | hidden | Notes                                                                  |
-|----|-----------|-----------|--------|------------------------------------------------------------------------|
-| 1  | Inbox     | inbox     | 0      |                                                                        |
-| 2  | Sent      | sent      | 0      |                                                                        |
-| 3  | Drafts    | drafts    | 0      |                                                                        |
-| 4  | Trash     | trash     | 0      |                                                                        |
-| 5  | Scheduled | scheduled | 0      | Visible in sidebar; messages awaiting deferred send                    |
-| 6  | Snoozed   | snoozed   | 0      | Visible in sidebar; messages awaiting snooze expiry                    |
-| 7  | Junk      | junk      | 0      | Spam messages; visible in sidebar                                      |
+| id | name      | slug      | position | hidden | Notes                                                               |
+|----|-----------|-----------|----------|--------|---------------------------------------------------------------------|
+| 1  | Inbox     | inbox     | 0        | 0      |                                                                     |
+| 2  | Sent      | sent      | 1        | 0      |                                                                     |
+| 3  | Drafts    | drafts    | 2        | 0      |                                                                     |
+| 4  | Trash     | trash     | 3        | 0      |                                                                     |
+| 5  | Scheduled | scheduled | 4        | 0      | Visible in sidebar; messages awaiting deferred send                 |
+| 6  | Snoozed   | snoozed   | 5        | 0      | Visible in sidebar; messages awaiting snooze expiry                 |
+| 7  | Junk      | junk      | 6        | 0      | Spam messages; visible in sidebar                                   |
 
 "Hidden" folders (`hidden=1`) are not returned by `GET /api/v1/folders` in the normal listing and cannot be targeted by user-defined filters or manual `PATCH` moves. They are managed exclusively by the scheduler.
 
 User-created folders have `id >= 100`.
 
-### 4.2 `messages`
+### `messages`
 
 ```sql
 CREATE TABLE IF NOT EXISTS messages (
@@ -210,7 +210,7 @@ CREATE INDEX IF NOT EXISTS idx_messages_send_at      ON messages(send_at) WHERE 
 CREATE INDEX IF NOT EXISTS idx_messages_snoozed_until ON messages(snoozed_until) WHERE snoozed_until IS NOT NULL;
 ```
 
-### 4.3 `messages_fts` (FTS5)
+### `messages_fts` (FTS5)
 
 ```sql
 CREATE VIRTUAL TABLE IF NOT EXISTS messages_fts USING fts5(
@@ -245,9 +245,9 @@ CREATE TRIGGER IF NOT EXISTS messages_fts_update AFTER UPDATE ON messages BEGIN
 END;
 ```
 
-### 4.4 `attachments`
+### `attachments`
 
-Only MIME parts with `Content-Disposition: attachment` (or with no `Content-Disposition` and a non-displayable `Content-Type`) are stored here. Inline image parts referenced by `cid:` URLs in the HTML body are **not** stored as attachments; they are embedded as `data:` URIs directly into `body_html` at storage time (see §6 and §10). This avoids storing the same bytes twice.
+Only MIME parts with `Content-Disposition: attachment` (or with no `Content-Disposition` and a non-displayable `Content-Type`) are stored here. Inline image parts referenced by `cid:` URLs in the HTML body are **not** stored as attachments; they are embedded as `data:` URIs directly into `body_html` at storage time (see Local Delivery Agent (LDA) and HTML Sanitization). This avoids storing the same bytes twice.
 
 ```sql
 CREATE TABLE IF NOT EXISTS attachments (
@@ -262,7 +262,7 @@ CREATE TABLE IF NOT EXISTS attachments (
 CREATE INDEX IF NOT EXISTS idx_attachments_message_id ON attachments(message_id);
 ```
 
-### 4.5 `identities`
+### `identities`
 
 ```sql
 CREATE TABLE IF NOT EXISTS identities (
@@ -282,7 +282,7 @@ CREATE TABLE IF NOT EXISTS identities (
 
 The first identity is created via the web UI on first use (the compose view prompts the user if no identities exist). There is no seeded default.
 
-### 4.6 `contacts`
+### `contacts`
 
 ```sql
 CREATE TABLE IF NOT EXISTS contacts (
@@ -298,7 +298,7 @@ CREATE INDEX IF NOT EXISTS idx_contacts_address ON contacts(address);
 
 Contacts are upserted automatically on message receipt (From address) and on send (To, Cc, Bcc addresses). On auto-upsert, `address` is inserted if not present; if a row already exists, `name` is updated only when the stored `name` is empty (so a manually set name is never overwritten automatically). `address` is lower-cased before storage to ensure case-insensitive deduplication.
 
-### 4.7 `filters`
+### `filters`
 
 ```sql
 CREATE TABLE IF NOT EXISTS filters (
@@ -316,6 +316,8 @@ CREATE TABLE IF NOT EXISTS filters (
 );
 ```
 
+**Note:** `match_to` performs a case-insensitive substring match against **both** the `To` and the `Cc` headers of the incoming message. A filter matches if the substring is found in either header.
+
 **Actions:**
 - `move` — deliver to `folder_id` instead of Inbox
 - `trash` — deliver directly to Trash
@@ -324,7 +326,7 @@ CREATE TABLE IF NOT EXISTS filters (
 
 Multiple criteria within a filter are ANDed. Filters are evaluated in `position` order. When `stop=1` (default) the first matching filter wins and evaluation halts.
 
-### 4.8 `spam_filter_settings`
+### `spam_filter_settings`
 
 ```sql
 CREATE TABLE IF NOT EXISTS spam_filter_settings (
@@ -341,7 +343,7 @@ Spam detection also recognises the `X-Spam-Flag` header (value `YES`, case-insen
 
 ---
 
-## 5. REST API
+## REST API
 
 **Base path:** `/api/v1`
 
@@ -362,7 +364,7 @@ HTTP status codes:
 - `409` — conflict (e.g. duplicate folder name)
 - `500` — internal error
 
-### 5.1 Folders
+### Folders
 
 #### `GET /api/v1/folders`
 
@@ -419,7 +421,7 @@ Response `204`.
 
 ---
 
-### 5.2 Messages
+### Messages
 
 #### `GET /api/v1/folders/{folder_id}/messages`
 
@@ -515,6 +517,8 @@ Response `200`:
   "body_html": "<p>Hi Bob,</p>...",
   "read": true,
   "flagged": false,
+  "send_at": null,
+  "send_error": null,
   "created_at": "2026-03-29T10:01:05Z",
   "attachments": [
     {
@@ -527,7 +531,7 @@ Response `200`:
 }
 ```
 
-Fetching a message automatically marks it as read (sets `read=1`). The HTML body is sanitized (see §10).
+Fetching a message automatically marks it as read (sets `read=1`). The HTML body is sanitized (see HTML Sanitization).
 
 #### `GET /api/v1/messages/{id}/raw`
 
@@ -561,11 +565,15 @@ Request (all fields optional):
 }
 ```
 
+**Move restrictions:** if `folder_id` is supplied, the following moves are rejected with `400`:
+- Target is Scheduled (id=5) or Snoozed (id=6) — these folders are system-managed.
+- Source (current `folder_id`) is Scheduled or Snoozed — use `DELETE /api/v1/scheduled/{id}` or `DELETE /api/v1/messages/{id}/snooze` instead.
+
 Response `200`: updated message summary (same shape as list item).
 
 #### `PATCH /api/v1/messages`
 
-Bulk update. Apply the same patch to multiple messages.
+Bulk update. Apply the same patch to multiple messages. The same move restrictions as the single-message PATCH apply: if `folder_id` targets Scheduled or Snoozed, or any of the specified messages currently reside in Scheduled or Snoozed, the entire request is rejected with `400`.
 
 Request:
 ```json
@@ -638,9 +646,9 @@ Request:
 - `identity_id` is optional; if absent, the default identity is used. Returns `400` if the supplied ID does not exist.
 - The `From` header is constructed as `"Name" <address>` from the chosen identity.
 - At least one of `body_text` or `body_html` must be non-empty.
-- Attachments in the send flow are handled via a separate endpoint (see §5.3).
+- Attachments in the send flow are handled via a separate endpoint (see Draft Management).
 - **If `send_at` is absent or null**: send immediately. The handler builds and pipes the message to `sendmail -t -oi`. If `sendmail` exits non-zero, return `500` with captured stderr. The stored copy goes to Sent with `read=true`.
-- **If `send_at` is a future RFC 3339 timestamp**: do not send now. Store the message in the Scheduled folder with `send_at` set. The background scheduler will send it at the specified time (see §7). Returns `202 Accepted`. `send_at` must be at least 1 minute in the future; returns `400` otherwise.
+- **If `send_at` is a future RFC 3339 timestamp**: do not send now. Store the message in the Scheduled folder with `send_at` set. The background scheduler will send it at the specified time (see Background Scheduler). Returns `202 Accepted`. `send_at` must be at least 1 minute in the future; returns `400` otherwise.
 
 Response `201` (sent immediately):
 ```json
@@ -684,13 +692,15 @@ Response `201`:
 
 ---
 
-### 5.3 Draft Management
+### Draft Management
 
 Drafts are regular messages in the Drafts folder (`folder_id=3`). The compose UI creates a new draft via `POST /api/v1/drafts` (or the `-with-attachments` variant) and subsequently updates it via `PUT /api/v1/drafts/{id}` (or the `-with-attachments` variant).
 
+If `send_at` is present in a draft request, it is stored in `messages.send_at` but has no effect while the message remains in the Drafts folder — the scheduler only processes messages in the Scheduled folder (id=5). This allows the compose UI to preserve the intended send time across page reloads. The stored `send_at` is included in the `GET /api/v1/messages/{id}` response so the UI can restore it. When the user clicks **Schedule**, the UI calls `POST /api/v1/messages/send` (which moves the message to the Scheduled folder and activates the scheduler); at that point the `send_at` validation (must be ≥ 1 minute in the future) is applied.
+
 #### `POST /api/v1/drafts`
 
-Save a new draft. Same request body as `/messages/send` but nothing is sent.
+Save a new draft. Same request body as `/messages/send` but nothing is sent. `send_at`, if supplied, is stored but not acted upon (see above).
 
 Response `201`:
 ```json
@@ -710,7 +720,7 @@ Response `201`:
 
 Replace the content of an existing draft. Same request body as `POST /api/v1/drafts`. The message identified by `{id}` must exist and must be in the Drafts folder; returns `404` if not found, `400` if the message is not a draft.
 
-All content fields (subject, body, recipients, etc.) are fully replaced by the supplied values. `updated_at` is set to the current time.
+All content fields (subject, body, recipients, `send_at`, etc.) are fully replaced by the supplied values. If `send_at` is absent or null in the request, any previously stored `send_at` is cleared. `updated_at` is set to the current time.
 
 Response `200`:
 ```json
@@ -734,7 +744,7 @@ Response `204`.
 
 ---
 
-### 5.4 Snooze
+### Snooze
 
 Snoozing a message temporarily hides it from the Inbox and returns it at a specified future time, triggering the same new-message notification as a freshly delivered message.
 
@@ -774,7 +784,7 @@ Response `200`:
 
 ---
 
-### 5.5 Filters
+### Filters
 
 #### `GET /api/v1/filters`
 
@@ -845,7 +855,7 @@ Response `200`:
 
 ---
 
-### 5.6 Spam Filter
+### Spam Filter
 
 #### `GET /api/v1/spam-filter`
 
@@ -902,7 +912,7 @@ Response `200`:
 
 ---
 
-### 5.7 Thread View
+### Thread View
 
 A thread is a group of messages linked by `In-Reply-To` / `References` headers. The API does not store threads explicitly; they are computed on demand.
 
@@ -951,7 +961,7 @@ Thread reconstruction algorithm:
 
 ---
 
-### 5.8 Identities
+### Identities
 
 #### `GET /api/v1/identities`
 
@@ -1035,7 +1045,7 @@ Response `200`:
 
 ---
 
-### 5.9 Contacts
+### Contacts
 
 #### `GET /api/v1/contacts`
 
@@ -1095,7 +1105,7 @@ Response `204`.
 
 ---
 
-## 6. Local Delivery Agent (LDA)
+## Local Delivery Agent (LDA)
 
 When invoked as `mymail -lda`, the program:
 
@@ -1106,17 +1116,17 @@ When invoked as `mymail -lda`, the program:
    - Decodes MIME structure:
      - Finds `text/plain` part → `body_text`
      - Finds `text/html` part → `body_html` (inline `cid:` images resolved and sanitized before storage — see below)
-     - Collects inline image parts (MIME parts with a `Content-ID` header referenced by `cid:` in the HTML body) and embeds them into `body_html` as `data:` URIs (see §10). These parts are **not** stored in the `attachments` table.
+     - Collects inline image parts (MIME parts with a `Content-ID` header referenced by `cid:` in the HTML body) and embeds them into `body_html` as `data:` URIs (see HTML Sanitization). These parts are **not** stored in the `attachments` table.
      - Collects remaining `attachment` parts (Content-Disposition: attachment, or non-displayable parts without a Content-ID reference) → stored in `attachments` table
    - Falls back: if no `Date` header, use current time. If no `Message-ID`, generate one.
    - Handles encoded words (RFC 2047) in headers.
 4. Duplicate detection: if a `Message-ID` is present and a message with the same `Message-ID` already exists anywhere in the database, exit `0` silently. This prevents double-storage when the MTA retries delivery after a transient failure that was actually recovered.
-5. Applies spam detection and user-defined filters (see §6.1).
+5. Applies spam detection and user-defined filters (see Filter Application).
 6. Inserts the message record and attachments in a single transaction.
 7. Upserts the sender into the `contacts` table: lower-case the `From` address; insert if not present, otherwise update `name` only if the existing `name` is empty. Only the `From` address is upserted for incoming mail — To and Cc recipients are not auto-added (to avoid polluting contacts with mailing list addresses).
 8. Exits `0`.
 
-### 6.1 Filter Application
+### Filter Application
 
 Delivery proceeds in two phases:
 
@@ -1149,7 +1159,7 @@ The final `folder_id` after both phases determines where the message is stored. 
 
 `mark_read` does not alter the folder chosen by the spam filter; it only sets the read flag.
 
-### 6.2 LDA Error Handling
+### LDA Error Handling
 
 - Database locked (SQLite `SQLITE_BUSY`): retry up to 30 seconds with exponential backoff, then exit `75` (temporary failure — MTA will re-deliver).
 - Parse failure: log to stderr, exit `1` (permanent failure — message bounces; prevents silent loss).
@@ -1157,11 +1167,11 @@ The final `folder_id` after both phases determines where the message is stored. 
 
 ---
 
-## 7. Background Scheduler
+## Background Scheduler
 
 The server starts a single background goroutine on startup that processes deferred sends and snooze expiries. It wakes up every 60 seconds, queries the database for due items, and processes them.
 
-### 7.1 Deferred Send
+### Deferred Send
 
 ```sql
 SELECT id FROM messages
@@ -1172,12 +1182,12 @@ ORDER BY send_at ASC;
 
 For each result, in order:
 
-1. Build the RFC 5322 message from the stored fields (same logic as immediate send in §9).
+1. Build the RFC 5322 message from the stored fields (same logic as immediate send in Outgoing Mail).
 2. Pipe to `sendmail -t -oi`.
 3. **On success**: set `folder_id = 2` (Sent), `read = 1`, `send_at = NULL`, `send_error = NULL`, `send_failure_count = 0`.
 4. **On failure** (non-zero sendmail exit): increment `send_failure_count`, set `send_error` to captured stderr (max 4 KB). Leave the message in the Scheduled folder. The scheduler will retry on the next tick. After 3 consecutive failures (`send_failure_count >= 3`), the message is moved to Drafts and `send_at` is cleared, so it is no longer retried. The `send_error` text remains visible in the message detail so the user knows what happened.
 
-### 7.2 Snooze Expiry
+### Snooze Expiry
 
 ```sql
 SELECT id, snooze_folder FROM messages
@@ -1191,9 +1201,9 @@ For each result:
 1. Set `folder_id = snooze_folder`, `snoozed_until = NULL`, `snooze_folder = NULL`, `read = 0`.
 2. Mark as unread (`read = 0`) so the polling notification logic treats it as a new arrival.
 
-Setting `read = 0` means the next poll of `GET /api/v1/folders` will see an increased `unread_count` for the target folder (typically Inbox), triggering the same browser notification as a freshly delivered message (see §12).
+Setting `read = 0` means the next poll of `GET /api/v1/folders` will see an increased `unread_count` for the target folder (typically Inbox), triggering the same browser notification as a freshly delivered message (see New Message Notifications).
 
-### 7.3 Scheduler Robustness
+### Scheduler Robustness
 
 - The scheduler holds the SQLite write lock only for the duration of each individual UPDATE, not across the full tick. This keeps the database available to the HTTP server between updates.
 - If the server is offline when a `send_at` or `snoozed_until` deadline passes, the scheduler processes the overdue items on the next startup/tick. Deferred sends may go out late; snoozed messages will reappear late. This is acceptable given the "simple, let the MTA handle reliability" design philosophy.
@@ -1201,9 +1211,9 @@ Setting `read = 0` means the next poll of `GET /api/v1/folders` will see an incr
 
 ---
 
-## 8. Batch Import
+## Batch Import
 
-### 8.1 Supported Formats
+### Supported Formats
 
 #### mbox
 
@@ -1238,7 +1248,7 @@ There is no public formal specification, no maintained Go library, and it is onl
 
 Reference: [MBX format description — faisal.com](https://www.faisal.com/docs/mbx.html)
 
-### 8.2 Individual Message Format
+### Individual Message Format
 
 Each message inside an mbox file or Maildir directory is an RFC 5322 Internet Message Format document.
 
@@ -1246,7 +1256,7 @@ Reference: [RFC 5322 — Internet Message Format](https://datatracker.ietf.org/d
 
 Parsing uses the Go standard library's [`net/mail`](https://pkg.go.dev/net/mail) package for individual messages (header decoding, address parsing) combined with a third-party mbox reader for file-level splitting.
 
-### 8.3 Go Libraries
+### Go Libraries
 
 #### mbox reading — `github.com/emersion/go-mbox`
 
@@ -1270,7 +1280,7 @@ If auto-detection of all four variants is needed (e.g. files from SVR4-derived c
 - API: `maildir.Dir(path)` → iterate with `Keys()`, open each with `Message(key) (io.Reader, error)`. Handles `new/` and `cur/` subdirectories. Flag parsing (Seen, Replied, Flagged, etc.) available via `Flags(key)`.
 - Maildir++ subdirectories: each subfolder is a separate `maildir.Dir`; the caller is responsible for enumerating them by listing directories prefixed with `.`.
 
-### 8.4 Import Implementation Notes
+### Import Implementation Notes
 
 - Open the database and run schema migrations before importing.
 - Wrap each source file/directory import in a single SQLite transaction for atomicity (if it fails mid-way, nothing from that source is partially committed).
@@ -1279,7 +1289,7 @@ If auto-detection of all four variants is needed (e.g. files from SVR4-derived c
 - mbox files can be large (multi-GB). Use the streaming `NextMessage()` API; do not load the entire file into memory.
 - Preserve the original `Date` header as the message's `date` field. If absent, fall back to the mtime of the Maildir file (for Maildir) or the timestamp on the `From ` separator line (for mbox).
 
-### 8.5 Pre-conversion with System Tools
+### Pre-conversion with System Tools
 
 Users with MBX files or other unsupported formats can pre-convert using standard Linux tools:
 
@@ -1291,7 +1301,7 @@ Users with MBX files or other unsupported formats can pre-convert using standard
 
 ---
 
-## 9. Outgoing Mail
+## Outgoing Mail
 
 The send flow in the service layer:
 
@@ -1313,7 +1323,7 @@ The send flow in the service layer:
 
 ---
 
-## 10. HTML Sanitization
+## HTML Sanitization
 
 Incoming HTML bodies and the HTML part of outgoing messages are sanitized using a library equivalent to [microcosm-cc/bluemonday](https://github.com/microcosm-cc/bluemonday) with a strict email-appropriate policy:
 
@@ -1377,7 +1387,7 @@ This step runs at storage time (LDA and import), so `body_html` is stored with `
 
 ---
 
-## 11. Security Headers
+## Security Headers
 
 All HTTP responses include:
 
@@ -1385,14 +1395,14 @@ All HTTP responses include:
 X-Content-Type-Options: nosniff
 X-Frame-Options: DENY
 Referrer-Policy: same-origin
-Content-Security-Policy: default-src 'self'; img-src 'self' https:; style-src 'self' 'unsafe-inline'
+Content-Security-Policy: default-src 'self'; img-src 'self' https: data:; style-src 'self' 'unsafe-inline'
 ```
 
 The CSP allows HTTPS images (for email HTML bodies rendered in the UI) but restricts scripts to `'self'`.
 
 ---
 
-## 12. Authentication
+## Authentication
 
 Identical to mycal. See mycal's `internal/auth/` for the htpasswd implementation.
 
@@ -1402,7 +1412,7 @@ Identical to mycal. See mycal's `internal/auth/` for the htpasswd implementation
 - The LDA mode ignores authentication entirely (no HTTP involved).
 - Creating the htpasswd file: `htpasswd -Bc htpasswd myuser`
 
-### 12.1 CSRF Protection
+### CSRF Protection
 
 All state-changing HTTP methods (POST, PUT, PATCH, DELETE) are protected by two layers:
 
@@ -1429,7 +1439,7 @@ Response `200`:
 
 ---
 
-## 13. Web UI
+## Web UI
 
 ### Technology Stack
 
@@ -1464,7 +1474,7 @@ The Scheduled folder is shown in the sidebar so the user can review and cancel p
 ### Views
 
 1. **Folder view** — paginated message list for selected folder. Unread messages shown in bold. Click to open message detail. A **Mark all as read** button in the toolbar sends `PATCH /api/v1/messages` with all message IDs in the folder and `"read": true`.
-2. **Message detail** — full headers, body, attachment download links. Shows thread if `references` chain exists. Reply/Reply All/Forward/Move/Delete/Snooze buttons. The **Snooze** button opens a small picker with quick presets (later today, tomorrow morning, next week) and a custom date/time option; submits `POST /api/v1/messages/{id}/snooze`. When a message has both `body_html` and `body_text`, the body is shown according to the user's **preferred view** setting (see Client-Side Storage), defaulting to HTML. A **Plain text / HTML** toggle button switches the view for the current message and updates the stored preference. If only one body type is present it is shown directly with no toggle. HTML is rendered in a sandboxed iframe (see §13 HTML Body Display); plain text is rendered as preformatted text.
+2. **Message detail** — full headers, body, attachment download links. Shows thread if `references` chain exists. Reply/Reply All/Forward/Move/Delete/Snooze buttons. The **Snooze** button opens a small picker with quick presets (later today, tomorrow morning, next week) and a custom date/time option; submits `POST /api/v1/messages/{id}/snooze`. When a message has both `body_html` and `body_text`, the body is shown according to the user's **preferred view** setting (see Client-Side Storage), defaulting to HTML. A **Plain text / HTML** toggle button switches the view for the current message and updates the stored preference. If only one body type is present it is shown directly with no toggle. HTML is rendered in a sandboxed iframe (see HTML Body Display); plain text is rendered as preformatted text.
 3. **Compose / Reply / Reply All / Forward** — form with a **From** selector (dropdown of all identities, pre-selected to the default; or, when replying, to the identity whose address matches the original To/Cc), To, Cc, Bcc, Subject, plain-text body, optional HTML body toggle. File upload for attachments. A **Send later** toggle reveals a date/time picker for `send_at`; when set, the Send button becomes "Schedule". Auto-save to Drafts on a 30-second timer: on the first save `POST /api/v1/drafts` (or `-with-attachments`) is called and the returned `id` is stored; subsequent saves call `PUT /api/v1/drafts/{id}` (or `-with-attachments`) to update the existing draft. Scheduled messages auto-save to Drafts until explicitly scheduled. The To, Cc, and Bcc fields offer address autocomplete: as the user types, the UI queries `GET /api/v1/contacts?q=<input>` and shows a dropdown of matching name + address suggestions.
 
    Pre-population rules per action:
@@ -1522,7 +1532,7 @@ Using `localStorage`:
 
 ---
 
-## 14. Go Dependencies
+## Go Dependencies
 
 ```
 modernc.org/sqlite                  # Pure-Go SQLite (no CGO)
@@ -1538,7 +1548,7 @@ Building the binary: `go build -tags netgo` produces a single static binary with
 
 ---
 
-## 15. `go.mod`
+## `go.mod`
 
 ```go
 module github.com/mikaelstaldal/mymail
@@ -1556,7 +1566,7 @@ require (
 
 ---
 
-## 16. Key Design Decisions
+## Key Design Decisions
 
 ### No IMAP/POP3
 The application relies entirely on the host MTA for mail retrieval. This keeps the codebase simple and lets Postfix handle TLS, authentication, queuing, and delivery retries.
@@ -1595,7 +1605,7 @@ Spam detection runs in Phase 1 (before user filters) so that user filters run wi
 
 ---
 
-## 17. Production Deployment
+## Production Deployment
 
 mymail binds plain HTTP and delegates TLS termination, rate limiting, and access control to the operator's infrastructure. A separate `docs/deployment.md` document should be created covering:
 
@@ -1605,7 +1615,7 @@ mymail binds plain HTTP and delegates TLS termination, rate limiting, and access
 
 ---
 
-## 18. Out of scope
+## Out of scope
 
 - **Multiple mailboxes**: currently one SQLite file = one mailbox. Multi-user support would require either per-user databases or a `user_id` column throughout.
 - **PGP/S-MIME**: not in scope for v1.
