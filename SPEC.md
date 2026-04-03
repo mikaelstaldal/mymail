@@ -151,24 +151,21 @@ CREATE TABLE IF NOT EXISTS folders (
     id         INTEGER PRIMARY KEY AUTOINCREMENT,
     name       TEXT    NOT NULL UNIQUE,   -- display name, e.g. "Work"
     slug       TEXT    NOT NULL UNIQUE,   -- URL-safe key, e.g. "work"
-    position   INTEGER NOT NULL DEFAULT 0, -- display order
-    hidden     INTEGER NOT NULL DEFAULT 0  -- 1 = hidden from normal folder listing
+    position   INTEGER NOT NULL DEFAULT 0  -- display order
 );
 ```
 
 **Built-in folders** (created on first run, protected from deletion):
 
-| id | name      | slug      | position | hidden | Notes                                                               |
-|----|-----------|-----------|----------|--------|---------------------------------------------------------------------|
-| 1  | Inbox     | inbox     | 0        | 0      |                                                                     |
-| 2  | Sent      | sent      | 1        | 0      |                                                                     |
-| 3  | Drafts    | drafts    | 2        | 0      |                                                                     |
-| 4  | Trash     | trash     | 3        | 0      |                                                                     |
-| 5  | Scheduled | scheduled | 4        | 0      | Visible in sidebar; messages awaiting deferred send                 |
-| 6  | Snoozed   | snoozed   | 5        | 0      | Visible in sidebar; messages awaiting snooze expiry                 |
-| 7  | Junk      | junk      | 6        | 0      | Spam messages; visible in sidebar                                   |
-
-"Hidden" folders (`hidden=1`) are not returned by `GET /api/v1/folders` in the normal listing and cannot be targeted by user-defined filters or manual `PATCH` moves. They are managed exclusively by the scheduler.
+| id | name      | slug      | position | Notes                                               |
+|----|-----------|-----------|----------|-----------------------------------------------------|
+| 1  | Inbox     | inbox     | 0        |                                                     |
+| 2  | Sent      | sent      | 1        |                                                     |
+| 3  | Drafts    | drafts    | 2        |                                                     |
+| 4  | Trash     | trash     | 3        |                                                     |
+| 5  | Scheduled | scheduled | 4        | Visible in sidebar; messages awaiting deferred send |
+| 6  | Snoozed   | snoozed   | 5        | Visible in sidebar; messages awaiting snooze expiry |
+| 7  | Junk      | junk      | 6        | Spam messages; visible in sidebar                   |
 
 User-created folders have `id >= 100`.
 
@@ -357,7 +354,7 @@ Spam detection also recognises the `X-Spam-Flag` header (value `YES`, case-insen
 ### Endpoint summary
 
 #### Folders
-- `GET /api/v1/folders` — list all non-hidden folders
+- `GET /api/v1/folders` — list all folders
 - `POST /api/v1/folders` — create a user-defined folder
 - `PATCH /api/v1/folders/{id}` — update folder name and/or position
 - `DELETE /api/v1/folders/{id}` — delete a user-created folder (messages moved to Trash)
