@@ -32,11 +32,11 @@ mymail/
 ├── web/
 │   ├── embed.go              # //go:embed directive
 │   └── static/               # Frontend assets (HTML, JS, CSS)
-├── docs/                     # API documentation
+├── docs/                     # documentation
 └── data/                     # Runtime data directory (default)
 ```
 
-Follows the same layered architecture as mycal:
+Follows this layered architecture:
 `handler → service → repository → SQLite`
 
 ---
@@ -343,7 +343,9 @@ Spam detection also recognises the `X-Spam-Flag` header (value `YES`, case-insen
 ## REST API
 
 **Base path:** `/api/v1`
-**Full specification:** [`docs/openapi.yaml`](docs/openapi.yaml)
+**Full specification:** [`openapi.yaml`](openapi.yaml)
+
+Use the OpenAPI specification as the source of truth and generate Go server stubs using [ogen](https://ogen.dev/).  
 
 **Content type:** `application/json` for all request and response bodies, except attachment download endpoints.
 
@@ -716,10 +718,8 @@ The CSP allows HTTPS images (for email HTML bodies rendered in the UI) but restr
 
 ## Authentication
 
-Identical to mycal. See mycal's `internal/auth/` for the htpasswd implementation.
-
 - Optional HTTP Basic Auth over all endpoints (API + static UI).
-- Passwords stored as bcrypt hashes in an htpasswd file.
+- Passwords stored as bcrypt hashes in an htpasswd file, use Go library github.com/mikaelstaldal/go-server-common to read it.
 - If `-basic-auth-file` is not set, all requests are accepted without authentication.
 - The LDA mode ignores authentication entirely (no HTTP involved).
 - Creating the htpasswd file: `htpasswd -Bc htpasswd myuser`
@@ -760,9 +760,8 @@ Response `200`:
 
 ### Technology Stack
 
-Same approach as mycal:
-- **No build step.** ES6 modules, import maps.
-- **Preact** + **HTM** for reactive components (vendored).
+- TypeScript with only `tsc` as build setp, ES6 modules, import maps.
+- **Preact** + **JSX** for reactive components (vendored).
 - Plain CSS for styling.
 - All assets embedded in the binary via `//go:embed`.
 
@@ -853,11 +852,14 @@ Using `localStorage`:
 ## Go Dependencies
 
 ```
-modernc.org/sqlite                  # Pure-Go SQLite (no CGO)
-github.com/microcosm-cc/bluemonday  # HTML sanitization
-golang.org/x/crypto                 # bcrypt for htpasswd
-github.com/emersion/go-mbox         # mbox file reading (batch import)
-github.com/emersion/go-maildir      # Maildir reading (batch import)
+modernc.org/sqlite                         # Pure-Go SQLite (no CGO)
+github.com/microcosm-cc/bluemonday         # HTML sanitization
+github.com/mikaelstaldal/go-server-common  # htpasswd parsing
+github.com/emersion/go-mbox                # mbox file reading (batch import)
+github.com/emersion/go-maildir             # Maildir reading (batch import)
+github.com/ogen-go/ogen                    # Generate server stubs from OpenAPI specification
+github.com/go-faster/errors                # Needed by ogen
+github.com/go-faster/jx                    # Needed by ogen
 ```
 
 Parsing individual RFC 5322 messages: Go standard library (`net/mail`, `mime`, `mime/multipart`, `mime/quotedprintable`) — no third-party MIME library needed.
@@ -868,17 +870,20 @@ Building the binary: `go build -tags netgo` produces a single static binary with
 
 ## `go.mod`
 
-```go
+```
 module github.com/mikaelstaldal/mymail
 
-go 1.24
+go 1.25.8
 
 require (
+    github.com/go-faster/errors v0.7.1
+    github.com/go-faster/jx v1.2.0
     github.com/emersion/go-maildir v0.6.0
     github.com/emersion/go-mbox v1.0.4
     github.com/microcosm-cc/bluemonday v1.0.27
-    golang.org/x/crypto v0.x.x
-    modernc.org/sqlite v1.x.x
+    github.com/mikaelstaldal/go-server-common v1.0.0
+    github.com/ogen-go/ogen v1.20.2
+    modernc.org/sqlite v1.48.1
 )
 ```
 
@@ -940,3 +945,9 @@ mymail binds plain HTTP and delegates TLS termination, rate limiting, and access
 - **Push notifications** (browser): not in scope for v1; polling the message list every 30 seconds is sufficient.
 - **Offline support / PWA**: not in scope.
 - **Large attachment threshold**: if attachments > N MB become a problem, move to disk storage. Threshold TBD.
+
+---
+
+## Inspiration
+
+Use the project *mycal* as inspiration for structure and patterns, see ../mycal
