@@ -57,10 +57,13 @@ components:
           type: boolean
         has_attachments:
           type: boolean
+        send_failed:
+          type: boolean
+          description: True when the message is in the Scheduled folder and has at least one failed send attempt (send_failure_count > 0). Allows the UI to show a warning badge in the message list without fetching the full detail.
         created_at:
           type: string
           format: date-time
-      required: [id, folder_id, from_addr, to_addr, subject, date, read, flagged, has_attachments, created_at]
+      required: [id, folder_id, from_addr, to_addr, subject, date, read, flagged, has_attachments, send_failed, created_at]
 
     AttachmentMeta:
       type: object
@@ -469,9 +472,13 @@ paths:
               schema:
                 type: object
                 properties:
-                  deleted:
+                  moved_to_trash:
                     type: integer
-                required: [deleted]
+                    description: Number of messages moved to Trash (were not already in Trash).
+                  permanently_deleted:
+                    type: integer
+                    description: Number of messages permanently deleted (were already in Trash).
+                required: [moved_to_trash, permanently_deleted]
         '400':
           $ref: '#/components/responses/BadRequest'
         '404':
@@ -719,6 +726,7 @@ paths:
       description: |
         Apply the same patch to multiple messages. Same move restrictions as single PATCH.
         Returns 404 if any of the provided IDs does not exist; no changes are made in that case.
+        Maximum 1000 IDs per request.
       requestBody:
         required: true
         content:
@@ -730,6 +738,7 @@ paths:
                   type: array
                   items:
                     type: integer
+                  maxItems: 1000
                 folder_id:
                   type: integer
                 read:
@@ -757,6 +766,7 @@ paths:
       description: |
         Same two-step semantics as single delete.
         Returns 404 if any of the provided IDs does not exist; no changes are made in that case.
+        Maximum 1000 IDs per request.
       requestBody:
         required: true
         content:
@@ -768,6 +778,7 @@ paths:
                   type: array
                   items:
                     type: integer
+                  maxItems: 1000
               required: [ids]
       responses:
         '200':
@@ -983,7 +994,11 @@ paths:
   /attachments/{id}:
     get:
       summary: Download attachment
-      description: Download attachment data with appropriate Content-Type and Content-Disposition headers.
+      description: |
+        Download attachment data. Always served as `application/octet-stream` regardless of the
+        stored `content_type` (which originates from the untrusted sender). The
+        `Content-Disposition: attachment; filename="..."` header uses the stored filename with
+        CR, LF, and NUL characters stripped to prevent header injection.
       parameters:
         - name: id
           in: path
@@ -997,6 +1012,7 @@ paths:
             Content-Disposition:
               schema:
                 type: string
+                example: 'attachment; filename="report.pdf"'
           content:
             application/octet-stream:
               schema:
@@ -1481,24 +1497,6 @@ paths:
                     type: integer
                 required: [updated]
 
-  # ── CSRF Token ─────────────────────────────────────────────────────────────
-
-  /csrf-token:
-    get:
-      summary: Get CSRF token
-      description: Returns the current in-memory CSRF token. Used by the browser UI on startup as a fallback if the meta tag is unavailable. Native clients do not need to call this endpoint (they are exempt from CSRF checks). Subject to the same Basic Auth rules as all other endpoints.
-      responses:
-        '200':
-          description: OK
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  token:
-                    type: string
-                required: [token]
-
   # ── Contacts ───────────────────────────────────────────────────────────────
 
   /contacts:
@@ -1563,6 +1561,30 @@ paths:
           $ref: '#/components/responses/BadRequest'
         '409':
           $ref: '#/components/responses/Conflict'
+
+  # ── Health ─────────────────────────────────────────────────────────────────
+
+  /health:
+    get:
+      summary: Liveness check
+      description: |
+        Returns 200 when the server is ready to serve requests. Intended for reverse proxy health
+        checks and container readiness probes. Does not require authentication. Does not perform a
+        database query — it only checks that the HTTP server is running.
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    enum: [ok]
+                required: [status]
+
+  # ── Contacts ───────────────────────────────────────────────────────────────
 
   /contacts/{id}:
     put:

@@ -54,10 +54,15 @@ mymail -import -data <dir> <mapping>...
 | Flag                | Default             | Description                                            |
 |---------------------|---------------------|--------------------------------------------------------|
 | `-port`             | `8080`              | HTTP listen port (1–65535)                             |
-| `-addr`             | `` (all interfaces) | Bind address                                           |
+| `-addr`             | `127.0.0.1`         | Bind address                                           |
 | `-data`             | `data/`             | Data directory (stores `mymail.sqlite`)                |
 | `-basic-auth-file`  | ``                  | Path to htpasswd file; if set, enables HTTP Basic Auth |
 | `-basic-auth-realm` | `mymail`            | Auth realm shown to clients                            |
+| `-sendmail`         | `sendmail`          | Path to the sendmail binary (looked up via PATH if not absolute) |
+
+> **Security note:** If `-basic-auth-file` is not set, all requests are accepted without authentication. This mode is only safe when `-addr` is bound to a loopback address (`127.0.0.1` or `::1`), which is the default. Binding to any public interface without authentication exposes all email data to the network.
+>
+> **TLS and reverse proxy note:** mymail does not terminate TLS itself. For any deployment that is not loopback-only, place mymail behind a TLS-terminating reverse proxy (nginx, Caddy, etc.). HTTP Basic Auth transmits credentials in cleartext; it must not be used over plain HTTP on a non-loopback interface. Rate limiting (for brute-force protection, send abuse, etc.) is also the responsibility of the reverse proxy layer, not mymail itself.
 
 Identities are managed entirely through the REST API (Identities) and the web UI. There is no CLI flag for the initial identity; the first identity is created via the web UI on first use (the compose view prompts the user if no identities exist).
 
@@ -115,6 +120,10 @@ Exit codes follow standard LDA conventions:
 ## Database Schema
 
 File: `<data>/mymail.sqlite`
+
+**File permissions:** The data directory and the database file must be readable only by the user running mymail. On first run, mymail creates the data directory with mode `0700` and the database file with mode `0600`. Operators should verify these permissions if the data directory is pre-existing.
+
+**SQLite configuration:** The server opens the database with `PRAGMA journal_mode=WAL` (Write-Ahead Logging) so that readers and writers can proceed concurrently. The LDA opens the database with a 30-second busy timeout (`PRAGMA busy_timeout=30000`) to handle contention with the HTTP server. The HTTP server uses a 5-second busy timeout.
 
 All timestamps are stored as UTC RFC 3339 strings.
 
@@ -175,7 +184,7 @@ User-created folders have `id >= 100`.
 CREATE TABLE IF NOT EXISTS messages (
     id            INTEGER PRIMARY KEY AUTOINCREMENT,
     folder_id     INTEGER NOT NULL REFERENCES folders(id),
-    message_id    TEXT,                    -- RFC 5322 Message-ID header value
+    message_id    TEXT UNIQUE,             -- RFC 5322 Message-ID header value (NULL rows are excluded from the UNIQUE constraint by SQLite semantics)
     in_reply_to   TEXT,                    -- In-Reply-To header value
     references    TEXT,                    -- References header value (space-separated); serialized as JSON array by the API
     from_addr     TEXT    NOT NULL,        -- From header (display name + address)
@@ -185,18 +194,19 @@ CREATE TABLE IF NOT EXISTS messages (
     reply_to_addr TEXT    NOT NULL DEFAULT '',
     subject       TEXT    NOT NULL DEFAULT '',
     date          TEXT    NOT NULL,        -- RFC 3339 UTC timestamp (from Date header)
-    body_text     TEXT    NOT NULL DEFAULT '', -- plain-text part
+    body_text     TEXT    NOT NULL DEFAULT '', -- plain-text part (if absent, derived from body_html by stripping tags)
     body_html     TEXT    NOT NULL DEFAULT '', -- HTML part (sanitized on storage)
     raw           BLOB    NOT NULL,        -- original raw RFC 5322 message
     read          INTEGER NOT NULL DEFAULT 0, -- 0=unread, 1=read
     flagged       INTEGER NOT NULL DEFAULT 0, -- 0=normal, 1=starred/flagged
+    has_attachments INTEGER NOT NULL DEFAULT 0, -- denormalized; 1 if any rows exist in attachments for this message
     send_at       TEXT,                    -- RFC 3339 UTC; non-NULL = deferred send, message sits in Scheduled folder
     snoozed_until TEXT,                    -- RFC 3339 UTC; non-NULL = snoozed, message sits in Snoozed folder
     snooze_folder INTEGER,                 -- folder_id to return to when snooze expires (usually Inbox=1)
     send_error    TEXT,                    -- last sendmail error for a scheduled message that failed to send
     send_failure_count INTEGER NOT NULL DEFAULT 0, -- consecutive send failures; message moved to Drafts after 3
     created_at    TEXT    NOT NULL,        -- RFC 3339 UTC, time of storage
-    updated_at    TEXT    NOT NULL         -- RFC 3339 UTC, time of last modification (set equal to created_at on insert; updated on every PATCH)
+    updated_at    TEXT    NOT NULL         -- RFC 3339 UTC, time of last modification (set equal to created_at on insert)
 );
 
 CREATE INDEX IF NOT EXISTS idx_messages_folder_id    ON messages(folder_id);
@@ -205,6 +215,21 @@ CREATE INDEX IF NOT EXISTS idx_messages_message_id   ON messages(message_id);
 CREATE INDEX IF NOT EXISTS idx_messages_read         ON messages(read);
 CREATE INDEX IF NOT EXISTS idx_messages_send_at      ON messages(send_at) WHERE send_at IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_messages_snoozed_until ON messages(snoozed_until) WHERE snoozed_until IS NOT NULL;
+
+-- Keep updated_at current on every write
+CREATE TRIGGER IF NOT EXISTS messages_updated_at AFTER UPDATE ON messages BEGIN
+    UPDATE messages SET updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now') WHERE id = new.id;
+END;
+
+-- Maintain has_attachments denormalized flag
+CREATE TRIGGER IF NOT EXISTS attachments_insert_flag AFTER INSERT ON attachments BEGIN
+    UPDATE messages SET has_attachments = 1 WHERE id = new.message_id;
+END;
+CREATE TRIGGER IF NOT EXISTS attachments_delete_flag AFTER DELETE ON attachments BEGIN
+    UPDATE messages SET has_attachments = (
+        SELECT CASE WHEN EXISTS (SELECT 1 FROM attachments WHERE message_id = old.message_id) THEN 1 ELSE 0 END
+    ) WHERE id = old.message_id;
+END;
 ```
 
 ### `messages_fts` (FTS5)
@@ -219,6 +244,10 @@ CREATE VIRTUAL TABLE IF NOT EXISTS messages_fts USING fts5(
     content='messages',
     content_rowid='id'
 );
+
+-- Note: body_html is not indexed directly. When a message has no plain-text part, body_text is
+-- populated by stripping HTML tags from body_html at storage time (see LDA section), so all
+-- message content is searchable via body_text regardless of the original MIME structure.
 ```
 
 Maintained by triggers:
@@ -234,7 +263,9 @@ CREATE TRIGGER IF NOT EXISTS messages_fts_delete AFTER DELETE ON messages BEGIN
     VALUES ('delete', old.id, old.from_addr, old.to_addr, old.cc_addr, old.subject, old.body_text);
 END;
 
-CREATE TRIGGER IF NOT EXISTS messages_fts_update AFTER UPDATE ON messages BEGIN
+-- Note: the messages_updated_at trigger fires AFTER this trigger. FTS sync therefore uses
+-- the pre-update body_text to delete and the post-update body_text to insert.
+CREATE TRIGGER IF NOT EXISTS messages_fts_update AFTER UPDATE OF from_addr, to_addr, cc_addr, subject, body_text ON messages BEGIN
     INSERT INTO messages_fts(messages_fts, rowid, from_addr, to_addr, cc_addr, subject, body_text)
     VALUES ('delete', old.id, old.from_addr, old.to_addr, old.cc_addr, old.subject, old.body_text);
     INSERT INTO messages_fts(rowid, from_addr, to_addr, cc_addr, subject, body_text)
@@ -308,7 +339,7 @@ CREATE TABLE IF NOT EXISTS filters (
     match_subject TEXT    NOT NULL DEFAULT '',  -- substring match on Subject
     -- action
     action        TEXT    NOT NULL,             -- "move", "trash", "mark_read", "drop"
-    folder_id     INTEGER REFERENCES folders(id), -- required when action="move"
+    folder_id     INTEGER REFERENCES folders(id) ON DELETE SET NULL, -- required when action="move"; NULL after the target folder is deleted
     stop          INTEGER NOT NULL DEFAULT 1   -- 0=continue to next filter, 1=stop
 );
 ```
@@ -316,7 +347,7 @@ CREATE TABLE IF NOT EXISTS filters (
 **Note:** `match_to` performs a case-insensitive substring match against **both** the `To` and the `Cc` headers of the incoming message. A filter matches if the substring is found in either header.
 
 **Actions:**
-- `move` — deliver to `folder_id` instead of Inbox
+- `move` — deliver to `folder_id` instead of Inbox. If `folder_id` is NULL (because the target folder was deleted), the filter is skipped and a warning is logged; delivery continues to Inbox.
 - `trash` — deliver directly to Trash
 - `mark_read` — deliver to Inbox but mark as read
 - `drop` — discard the message entirely; nothing is stored in the database
@@ -351,7 +382,11 @@ Use the OpenAPI specification as the source of truth and generate Go server stub
 
 **Max request body:** 32 MB (to accommodate raw message uploads; typical JSON operations limited to 1 MB).
 
+**Bulk operation ID limits:** Bulk endpoints (`PATCH /api/v1/messages`, `DELETE /api/v1/messages`) accept at most 1000 message IDs per request. Requests exceeding this limit return 400.
+
 **Error responses:** `{ "error": "human-readable message" }` with status `400`, `401`, `404`, `409`, or `500`.
+
+**FTS search input:** The `q` parameter on `GET /api/v1/messages/search` is passed directly to SQLite FTS5. The server wraps the query in a phrase-safe form that prevents malformed FTS5 syntax from causing 500 errors: the raw query string is wrapped using FTS5's `fts5_tokenize()` helper or, if the query is syntactically invalid, the server falls back to a literal phrase match (wrapping the entire input in double quotes, with internal double quotes escaped).
 
 ### Endpoint summary
 
@@ -383,6 +418,8 @@ Use the OpenAPI specification as the source of truth and generate Go server stub
 #### Attachments
 - `GET /api/v1/attachments/{id}` — download attachment data
 - `POST /api/v1/messages/{id}/copy-attachments` — server-side copy of a message's attachments to a draft
+
+**Attachment download security:** The response always uses `Content-Type: application/octet-stream` regardless of the stored `content_type` value (which comes from the untrusted sender and may be attacker-controlled). The `Content-Disposition: attachment; filename="..."` header is included using the sanitized filename: any CR (`\r`), LF (`\n`), and NUL (`\0`) characters are stripped from the filename before it is placed in the header to prevent response header injection.
 
 #### Scheduled messages
 - `DELETE /api/v1/scheduled/{id}` — cancel a scheduled message (moves to Drafts)
@@ -418,6 +455,9 @@ Use the OpenAPI specification as the source of truth and generate Go server stub
 - `PUT /api/v1/contacts/{id}` — replace a contact
 - `DELETE /api/v1/contacts/{id}` — delete a contact
 
+#### Health
+- `GET /api/v1/health` — liveness check; returns 200 when the server is ready to serve requests
+
 ### Thread Algorithm
 
 `GET /api/v1/messages/{id}/thread` determines membership using (in order):
@@ -440,11 +480,12 @@ When invoked as `mymail -lda`, the program:
    - Decodes MIME structure:
      - Finds `text/plain` part → `body_text`
      - Finds `text/html` part → `body_html` (inline `cid:` images resolved and sanitized before storage — see below)
+     - If no `text/plain` part is found but a `text/html` part is present, derive `body_text` by stripping HTML tags from the sanitized `body_html` (using the same bluemonday library in strip-all mode). This ensures all message content is full-text searchable regardless of MIME structure.
      - Collects inline image parts (MIME parts with a `Content-ID` header referenced by `cid:` in the HTML body) and embeds them into `body_html` as `data:` URIs (see HTML Sanitization). These parts are **not** stored in the `attachments` table.
      - Collects remaining `attachment` parts (Content-Disposition: attachment, or non-displayable parts without a Content-ID reference) → stored in `attachments` table
    - Falls back: if no `Date` header, use current time. If no `Message-ID`, generate one.
    - Handles encoded words (RFC 2047) in headers.
-4. Duplicate detection: if a `Message-ID` is present and a message with the same `Message-ID` already exists anywhere in the database, exit `0` silently. This prevents double-storage when the MTA retries delivery after a transient failure that was actually recovered.
+4. Duplicate detection: if a `Message-ID` is present, the INSERT uses `INSERT OR IGNORE` on the `messages` table (which has a UNIQUE constraint on `message_id`). If the row already exists, the INSERT is silently ignored and the LDA exits `0`. This is atomic and race-safe: two concurrent LDA processes cannot both insert the same `Message-ID`. Messages without a `Message-ID` are always inserted (the UNIQUE constraint ignores NULL values).
 5. Applies spam detection and user-defined filters (see Filter Application).
 6. Inserts the message record and attachments in a single transaction.
 7. Upserts the sender into the `contacts` table: lower-case the `From` address; insert if not present, otherwise update `name` only if the existing `name` is empty. Only the `From` address is upserted for incoming mail — To and Cc recipients are not auto-added (to avoid polluting contacts with mailing list addresses).
@@ -530,6 +571,8 @@ Setting `read = 0` means the next poll of `GET /api/v1/folders` will see an incr
 ### Scheduler Robustness
 
 - The scheduler holds the SQLite write lock only for the duration of each individual UPDATE, not across the full tick. This keeps the database available to the HTTP server between updates.
+- **Re-entrance guard:** The scheduler uses a mutex so that if a tick takes longer than 60 seconds (e.g. `sendmail` is slow), the next tick is skipped entirely rather than running concurrently. This prevents double-sends.
+- **Conditional UPDATE:** Before sending, the scheduler UPDATE uses `WHERE send_at IS NOT NULL AND folder_id = 5` so that a message cancelled concurrently by the HTTP handler (which clears `send_at` and moves it to Drafts) is not sent.
 - If the server is offline when a `send_at` or `snoozed_until` deadline passes, the scheduler processes the overdue items on the next startup/tick. Deferred sends may go out late; snoozed messages will reappear late. This is acceptable given the "simple, let the MTA handle reliability" design philosophy.
 - The scheduler goroutine is stopped cleanly on server shutdown via a context cancellation.
 
@@ -607,7 +650,8 @@ If auto-detection of all four variants is needed (e.g. files from SVR4-derived c
 ### Import Implementation Notes
 
 - Open the database and run schema migrations before importing.
-- Wrap each source file/directory import in a single SQLite transaction for atomicity (if it fails mid-way, nothing from that source is partially committed).
+- Each source file/directory is imported using batched transactions: commit every 500 messages. This bounds the WAL file size and prevents the write lock from being held for the full duration of large imports. If a batch fails, only that batch is rolled back; previously committed batches are retained. A warning is printed for the failed batch.
+- The full LDA parsing pipeline runs for each imported message: HTML sanitization, `cid:` inline image resolution, `body_text` derivation from `body_html` when no plain-text part exists, and attachment extraction. The only steps skipped are spam detection and user-defined filter application (messages go directly to the target folder specified in the mapping argument).
 - For Maildir, map the `S` (Seen) flag from the message filename to `read=1`.
 - The mbox `From ` separator line is **not** part of the RFC 5322 message and must be stripped before storing the `raw` BLOB.
 - mbox files can be large (multi-GB). Use the streaming `NextMessage()` API; do not load the entire file into memory.
@@ -638,6 +682,7 @@ The send flow in the service layer:
    - If attachments present: wrap in `multipart/mixed`.
    - Encode non-ASCII headers as RFC 2047 encoded words.
    - Encode attachment data as base64.
+   - **Header sanitization:** Before encoding, strip any CR (`\r`), LF (`\n`), and NUL (`\0`) characters from all user-supplied header values (subject, to_addr, cc_addr, bcc_addr, reply_to_addr). These control characters could otherwise inject spurious headers into the constructed MIME message.
 2. Open a pipe to `sendmail -t -oi` (the `-t` flag reads recipients from headers; `-oi` prevents a lone `.` line from ending the message).
 3. Write the raw message to the pipe.
 4. Close the pipe and wait for the process to exit.
@@ -720,9 +765,10 @@ X-Content-Type-Options: nosniff
 X-Frame-Options: DENY
 Referrer-Policy: same-origin
 Content-Security-Policy: default-src 'self'; img-src 'self' https: data:; style-src 'self' 'unsafe-inline'
+Strict-Transport-Security: max-age=31536000
 ```
 
-The CSP allows HTTPS images (for email HTML bodies rendered in the UI) but restricts scripts to `'self'`.
+The CSP allows HTTPS images (for email HTML bodies rendered in the UI) but restricts scripts to `'self'`. The `Strict-Transport-Security` header instructs browsers to use HTTPS for all subsequent requests; it is harmless over HTTP (browsers ignore it) but enforced when deployed behind a TLS proxy.
 
 ---
 
@@ -730,39 +776,22 @@ The CSP allows HTTPS images (for email HTML bodies rendered in the UI) but restr
 
 - Optional HTTP Basic Auth over all endpoints (API + static UI).
 - Passwords stored as bcrypt hashes in an htpasswd file, use Go library github.com/mikaelstaldal/go-server-common to read it.
-- If `-basic-auth-file` is not set, all requests are accepted without authentication.
+- If `-basic-auth-file` is not set, all requests are accepted without authentication. **This mode must only be used when the server is bound to a loopback address.** See the security note in the CLI section.
 - The LDA mode ignores authentication entirely (no HTTP involved).
 - Creating the htpasswd file: `htpasswd -Bc htpasswd myuser`
 
 ### CSRF Protection
 
-CSRF is a browser-specific threat: a malicious site exploiting the browser's automatic cookie/credential forwarding to make cross-origin requests on behalf of an authenticated user. Native clients (mobile apps, CLI tools) manage their own HTTP sessions and are not subject to this attack.
+CSRF is a browser-specific threat: a malicious site exploiting the browser's automatic credential forwarding to make cross-origin requests on behalf of an authenticated user. Native clients (mobile apps, CLI tools) manage their own HTTP sessions and are not subject to this attack.
 
-CSRF protection therefore applies **only to browser-originated requests**, identified by the presence of an `Origin` or `Referer` header. Requests without either header (typical of native clients) bypass CSRF checks entirely.
+Note: HTTP Basic Auth has lower inherent CSRF risk than cookie-based auth because browsers do not automatically attach cached Basic Auth credentials to cross-origin form submissions or `fetch()` requests in the same way as cookies.
 
-All state-changing HTTP methods (POST, PUT, PATCH, DELETE) from browser clients are protected by two layers:
+CSRF protection applies to all state-changing HTTP methods (POST, PUT, PATCH, DELETE) via Origin / Referer validation:
 
-**Layer 1 — Origin / Referer validation:**
-The server rejects any state-changing request whose `Origin` header (or, if absent, the origin derived from the `Referer` header) does not match the server's own origin (`scheme://host:port`). GET requests are exempt (they must be side-effect-free).
-
-**Layer 2 — CSRF token:**
-- On startup the server generates a cryptographically random 32-byte token (hex-encoded, 64 characters). It is held in memory and regenerated on each restart.
-- The token is embedded in the main HTML page as `<meta name="csrf-token" content="...">` so that the JavaScript UI can read it.
-- Every state-changing API request from the browser UI must include the header `X-CSRF-Token: <token>`.
-- The server validates this header on every state-changing request that carries an `Origin` or `Referer` header. A missing or incorrect token returns `403 Forbidden`.
-- Requests without an `Origin` or `Referer` header (native clients) are exempt from the token check.
-- The LDA mode and GET requests are fully exempt.
-
-The token endpoint itself:
-
-#### `GET /api/v1/csrf-token`
-
-Returns the current CSRF token. Used by the browser UI on startup (as a fallback if the meta tag is unavailable). Subject to the same Basic Auth rules as all other endpoints. Native clients do not need to call this endpoint.
-
-Response `200`:
-```json
-{ "token": "a3f8...e91c" }
-```
+- The server rejects any state-changing request whose `Origin` header (or, if absent, the origin derived from the `Referer` header) does not match the server's own origin (`scheme://host:port`).
+- `Origin: null` is explicitly rejected (browsers send this from sandboxed iframes, `file://` pages, and cross-origin redirects).
+- Requests without either header are typical of native clients and bypass the check; GET requests are fully exempt (they must be side-effect-free).
+- The LDA mode is fully exempt.
 
 ---
 
@@ -781,15 +810,18 @@ Hash-based routing (`/#/inbox`, `/#/message/123`). The server always serves the 
 
 Route scheme:
 
-| Hash pattern              | View shown                              |
-|---------------------------|-----------------------------------------|
-| `/#/` or `/#/inbox`       | Inbox folder view                       |
-| `/#/folder/:slug`         | Named folder message list               |
-| `/#/message/:id`          | Message detail for the given id         |
-| `/#/compose`              | New compose form                        |
-| `/#/search?q=...`         | Search results                          |
-| `/#/settings`             | Settings page (defaults to first tab)   |
-| `/#/settings/:tab`        | Settings page at a specific tab         |
+| Hash pattern                    | View shown                                                          |
+|---------------------------------|---------------------------------------------------------------------|
+| `/#/` or `/#/inbox`             | Inbox folder view                                                   |
+| `/#/folder/:slug`               | Named folder message list                                           |
+| `/#/message/:id`                | Message detail for the given id                                     |
+| `/#/compose`                    | New compose form (blank)                                            |
+| `/#/compose?reply=:id`          | Compose pre-populated for reply to message `:id`                    |
+| `/#/compose?replyall=:id`       | Compose pre-populated for reply-all to message `:id`                |
+| `/#/compose?forward=:id`        | Compose pre-populated for forward of message `:id`                  |
+| `/#/search?q=...`               | Search results                                                      |
+| `/#/settings`                   | Settings page (defaults to first tab)                               |
+| `/#/settings/:tab`              | Settings page at a specific tab                                     |
 
 On first load the UI reads `localStorage` for the last selected folder and navigates there; if absent it navigates to `/#/inbox`.
 
@@ -817,11 +849,13 @@ The Scheduled folder is shown in the sidebar so the user can review and cancel p
 
 ### Views
 
-1. **Folder view** — paginated message list for selected folder. Unread messages shown in bold. Click to open message detail. A **Mark all as read** button in the toolbar sends `PATCH /api/v1/messages` with all message IDs in the folder and `"read": true`.
+1. **Folder view** — paginated message list for selected folder. Unread messages shown in bold. Click to open message detail. A **Mark all as read** button in the toolbar marks all messages in the folder as read: the UI fetches message IDs in batches of 200 using `GET /api/v1/folders/{id}/messages?limit=200&unread=true&offset=0` until all unread IDs are collected, then sends one or more `PATCH /api/v1/messages` requests each containing up to 200 IDs with `"read": true`. Loading indicator is shown while this is in progress.
 2. **Message detail** — full headers, body, attachment download links. Reply/Reply All/Forward/Move/Delete/Snooze buttons. When the UI opens a message that is currently unread, it immediately sends `PATCH /api/v1/messages/{id}` with `"read": true` to mark it as read. The **Snooze** button is shown only when the message is in Inbox or a user folder (not in system folders such as Sent, Trash, Junk, Scheduled, or Snoozed). It opens a small picker with quick presets (later today, tomorrow morning, next week) and a custom date/time option; submits `POST /api/v1/messages/{id}/snooze`. When a message has both `body_html` and `body_text`, the body is shown according to the user's **preferred view** setting (see Client-Side Storage), defaulting to HTML. A **Plain text / HTML** toggle button switches the view for the current message and updates the stored preference. If only one body type is present it is shown directly with no toggle. HTML is rendered in a sandboxed iframe (see HTML Body Display); plain text is rendered as preformatted text.
 
    **Thread display:** When the message has a non-empty `references` list or `in_reply_to`, the UI calls `GET /api/v1/messages/{id}/thread`. If the result contains more than one message, a collapsed conversation strip is shown below the current message body. Each entry shows the sender, date, and subject snippet; clicking an entry expands it inline to show the full body (fetches `GET /api/v1/messages/{entryId}` on first expand). The current message is always shown expanded. Entries are ordered oldest-first. If the thread contains only the current message, no strip is shown.
-3. **Compose / Reply / Reply All / Forward** — form with a **From** selector (dropdown of all identities, pre-selected to the default; or, when replying, to the identity whose address matches the original To/Cc), To, Cc, Bcc, Subject, plain-text body, file upload for attachments, and an **Add HTML body** toggle button. When toggled on, a raw HTML `<textarea>` appears below the plain-text body for users who want to craft an HTML version manually (power-user feature). The plain-text body is always required; the HTML body is optional. If the HTML textarea is empty when sending, `body_html` is omitted from the request. A **Send later** toggle reveals a date/time picker for `send_at`; when set, the Send button becomes "Schedule". Auto-save to Drafts on a 30-second timer: on the first save `POST /api/v1/drafts` (or `-with-attachments`) is called and the returned `id` is stored; subsequent saves call `PUT /api/v1/drafts/{id}` (or `-with-attachments`) to update the existing draft. Drafts are always stored with `read = 1` so they never contribute to the unread badge on the Drafts folder. Scheduled messages auto-save to Drafts until explicitly scheduled. The To, Cc, and Bcc fields offer address autocomplete: as the user types, the UI queries `GET /api/v1/contacts?q=<input>` and shows a dropdown of matching name + address suggestions.
+3. **Compose / Reply / Reply All / Forward** — form with a **From** selector (dropdown of all identities, pre-selected to the default; or, when replying, to the identity whose address matches the original To/Cc), To, Cc, Bcc, Reply-To (optional, collapsed by default behind an "Add Reply-To" link), Subject, plain-text body, file upload for attachments, and an **Add HTML body** toggle button. When toggled on, a raw HTML `<textarea>` appears below the plain-text body for users who want to craft an HTML version manually (power-user feature). The plain-text body is always required; the HTML body is optional. If the HTML textarea is empty when sending, `body_html` is omitted from the request. A **Send later** toggle reveals a date/time picker for `send_at`; when set, the Send button becomes "Schedule". Auto-save to Drafts on a 30-second timer: on the first save `POST /api/v1/drafts` (or `-with-attachments`) is called and the returned `id` is stored; subsequent saves call `PUT /api/v1/drafts/{id}` (or `-with-attachments`) to update the existing draft. **Navigate-away behavior:** when the user navigates away from a compose form that has unsaved content, an immediate draft save is triggered before navigation proceeds. Drafts are always stored with `read = 1` so they never contribute to the unread badge on the Drafts folder. Scheduled messages auto-save to Drafts until explicitly scheduled. The To, Cc, and Bcc fields offer address autocomplete: as the user types, the UI queries `GET /api/v1/contacts?q=<input>` and shows a dropdown of matching name + address suggestions.
+
+   **Send button behavior:** The Send button is disabled and shows a spinner while the send request is in-flight. If `POST /api/v1/messages/send` returns an error (including HTTP 500 from a `sendmail` failure), the compose form remains open with all content intact and the error is displayed inline below the Send button (not as a toast). The auto-save timer ensures a draft copy exists in the Drafts folder before the send attempt fires, so content is recoverable from Drafts even if the user closes the tab after a send failure.
 
    Pre-population rules per action:
 
@@ -905,7 +939,7 @@ The web UI polls `GET /api/v1/folders` every 30 seconds. When the `unread_count`
 2. Updates the `document.title` to include the unread count (e.g. `(3) mymail`).
 3. If the user has granted the [Notifications API](https://developer.mozilla.org/en-US/docs/Web/API/Notifications_API) permission, fires a browser notification: title `New mail`, body `You have N unread messages in Inbox`.
 
-Permission is requested the first time the user opens the UI (a prompt is shown explaining why). If permission is denied, steps 1 and 2 still apply; only the browser notification is skipped. The permission state is not re-requested after an explicit denial.
+Permission is requested only when the user explicitly enables browser notifications in the Preferences panel (the notifications toggle calls `Notification.requestPermission()` on click, which satisfies the browser's requirement for a user gesture). If permission is denied, steps 1 and 2 still apply; only the browser notification is skipped. The permission state is not re-requested after an explicit denial.
 
 Polling is suspended while the browser tab is hidden (`document.visibilityState === 'hidden'`) and resumes immediately when the tab becomes visible again.
 
