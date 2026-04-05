@@ -39,8 +39,9 @@ components:
         folder_id:
           type: integer
         message_id:
-          type: string
-          nullable: true
+          type:
+            - string
+            - "null"
         from_addr:
           type: string
         to_addr:
@@ -82,11 +83,13 @@ components:
         folder_id:
           type: integer
         message_id:
-          type: string
-          nullable: true
+          type:
+            - string
+            - "null"
         in_reply_to:
-          type: string
-          nullable: true
+          type:
+            - string
+            - "null"
         references:
           type: array
           items:
@@ -115,20 +118,24 @@ components:
         flagged:
           type: boolean
         send_at:
-          type: string
+          type:
+            - string
+            - "null"
           format: date-time
-          nullable: true
         send_error:
-          type: string
-          nullable: true
+          type:
+            - string
+            - "null"
         snoozed_until:
-          type: string
+          type:
+            - string
+            - "null"
           format: date-time
-          nullable: true
           description: Non-null when the message is in the Snoozed folder. Displayed in the detail pane so the user can see when it will reappear.
         snooze_folder_id:
-          type: integer
-          nullable: true
+          type:
+            - integer
+            - "null"
           description: The folder the message will return to when the snooze expires. Non-null when snoozed_until is non-null.
         created_at:
           type: string
@@ -169,9 +176,10 @@ components:
           items:
             type: string
         send_at:
-          type: string
+          type:
+            - string
+            - "null"
           format: date-time
-          nullable: true
           description: If present and in the future (≥1 min), schedule instead of sending immediately.
       required: [to_addr]
 
@@ -194,8 +202,9 @@ components:
           type: string
           enum: [move, trash, mark_read, drop]
         folder_id:
-          type: integer
-          nullable: true
+          type:
+            - integer
+            - "null"
           description: Required when action is "move".
         stop:
           type: boolean
@@ -218,8 +227,9 @@ components:
           type: string
           enum: [move, trash, mark_read, drop]
         folder_id:
-          type: integer
-          nullable: true
+          type:
+            - integer
+            - "null"
         stop:
           type: boolean
       required: [action]
@@ -706,7 +716,9 @@ paths:
   /messages:
     patch:
       summary: Bulk update messages
-      description: Apply the same patch to multiple messages. Same move restrictions as single PATCH.
+      description: |
+        Apply the same patch to multiple messages. Same move restrictions as single PATCH.
+        Returns 404 if any of the provided IDs does not exist; no changes are made in that case.
       requestBody:
         required: true
         content:
@@ -738,9 +750,13 @@ paths:
                 required: [updated]
         '400':
           $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
     delete:
       summary: Bulk delete messages
-      description: Same two-step semantics as single delete.
+      description: |
+        Same two-step semantics as single delete.
+        Returns 404 if any of the provided IDs does not exist; no changes are made in that case.
       requestBody:
         required: true
         content:
@@ -764,6 +780,8 @@ paths:
                   deleted:
                     type: integer
                 required: [deleted]
+        '404':
+          $ref: '#/components/responses/NotFound'
 
   /messages/{id}/raw:
     get:
@@ -836,7 +854,9 @@ paths:
     post:
       summary: Snooze a message
       description: |
-        Temporarily hide a message until a future time. The message must be in Inbox or a user folder.
+        Temporarily hide a message until a future time. The message must be in Inbox or a user
+        folder. System folders (Sent, Trash, Junk, Scheduled, Snoozed) are not allowed because
+        each has its own specific semantics that would conflict with snooze behaviour.
         `until` must be a future timestamp at least 1 minute ahead.
       parameters:
         - name: id
@@ -982,6 +1002,46 @@ paths:
               schema:
                 type: string
                 format: binary
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /messages/{id}/copy-attachments:
+    post:
+      summary: Copy attachments to a draft
+      description: |
+        Server-side copy of all attachments from the source message into a target draft.
+        Used when forwarding a message to pre-populate the draft with the original attachments
+        without requiring the client to download and re-upload each file.
+        Returns 400 if `to_draft_id` does not refer to a message in the Drafts folder.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+          description: Source message ID whose attachments are copied.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                to_draft_id:
+                  type: integer
+                  description: ID of the target draft message that will receive the attachment copies.
+              required: [to_draft_id]
+      responses:
+        '200':
+          description: OK. Returns the list of newly created attachment copies.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/AttachmentMeta'
+        '400':
+          $ref: '#/components/responses/BadRequest'
         '404':
           $ref: '#/components/responses/NotFound'
 
