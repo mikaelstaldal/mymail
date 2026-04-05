@@ -1,4 +1,4 @@
-openapi: 3.1.0
+openapi: 3.0.3
 info:
   title: mymail API
   description: REST API for mymail — a self-hosted personal email client.
@@ -39,9 +39,8 @@ components:
         folder_id:
           type: integer
         message_id:
-          type:
-            - string
-            - "null"
+          type: string
+          nullable: true
         from_addr:
           type: string
         to_addr:
@@ -86,13 +85,11 @@ components:
         folder_id:
           type: integer
         message_id:
-          type:
-            - string
-            - "null"
+          type: string
+          nullable: true
         in_reply_to:
-          type:
-            - string
-            - "null"
+          type: string
+          nullable: true
         references:
           type: array
           items:
@@ -121,24 +118,20 @@ components:
         flagged:
           type: boolean
         send_at:
-          type:
-            - string
-            - "null"
+          type: string
           format: date-time
+          nullable: true
         send_error:
-          type:
-            - string
-            - "null"
+          type: string
+          nullable: true
         snoozed_until:
-          type:
-            - string
-            - "null"
+          type: string
           format: date-time
+          nullable: true
           description: Non-null when the message is in the Snoozed folder. Displayed in the detail pane so the user can see when it will reappear.
         snooze_folder_id:
-          type:
-            - integer
-            - "null"
+          type: integer
+          nullable: true
           description: The folder the message will return to when the snooze expires. Non-null when snoozed_until is non-null.
         created_at:
           type: string
@@ -179,10 +172,9 @@ components:
           items:
             type: string
         send_at:
-          type:
-            - string
-            - "null"
+          type: string
           format: date-time
+          nullable: true
           description: If present and in the future (≥1 min), schedule instead of sending immediately.
       required: [to_addr]
 
@@ -205,9 +197,8 @@ components:
           type: string
           enum: [move, trash, mark_read, drop]
         folder_id:
-          type:
-            - integer
-            - "null"
+          type: integer
+          nullable: true
           description: Required when action is "move".
         stop:
           type: boolean
@@ -230,9 +221,8 @@ components:
           type: string
           enum: [move, trash, mark_read, drop]
         folder_id:
-          type:
-            - integer
-            - "null"
+          type: integer
+          nullable: true
         stop:
           type: boolean
       required: [action]
