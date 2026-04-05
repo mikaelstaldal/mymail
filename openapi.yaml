@@ -634,7 +634,7 @@ paths:
   /messages/{id}:
     get:
       summary: Get message details
-      description: Get full message including body and attachment list. Automatically marks the message as read.
+      description: Get full message including body and attachment list. Does not alter read state.
       parameters:
         - name: id
           in: path
@@ -791,7 +791,22 @@ paths:
   /messages/{id}/thread:
     get:
       summary: Get thread
-      description: Returns all messages in the same thread, ordered by date ascending.
+      description: |
+        Returns all messages in the same thread, ordered by date ascending.
+
+        **Thread membership algorithm (applied in order):**
+        1. **Header-based (primary):** Build a directed graph where message A links to message B if
+           B's `Message-ID` appears in A's `In-Reply-To` or A's `References` list. Take the transitive
+           closure of this graph to find all messages connected to the requested message. The requested
+           message itself is always included.
+        2. **Subject-based fallback:** If a message has no `Message-ID`, `In-Reply-To`, or `References`
+           headers (or they do not connect to any other message), group by normalised subject: strip
+           leading `Re:`, `Fwd:`, `Fw:` prefixes (any combination, case-insensitive) and compare the
+           remainder case-insensitively. Subject-based grouping is only used when header-based grouping
+           yields a single message (i.e. there are no header links at all).
+
+        The endpoint includes messages from all folders (Inbox, Sent, Trash, Snoozed, etc.) so the
+        full conversation is always visible.
       parameters:
         - name: id
           in: path

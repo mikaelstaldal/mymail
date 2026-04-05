@@ -365,7 +365,7 @@ Use the OpenAPI specification as the source of truth and generate Go server stub
 #### Messages
 - `GET /api/v1/folders/{folder_id}/messages` — list messages in a folder
 - `GET /api/v1/messages/search` — full-text search across all folders
-- `GET /api/v1/messages/{id}` — get full message details (auto-marks as read)
+- `GET /api/v1/messages/{id}` — get full message details
 - `GET /api/v1/messages/{id}/raw` — download original RFC 5322 message
 - `GET /api/v1/messages/{id}/thread` — get all messages in the same thread
 - `PATCH /api/v1/messages/{id}` — update message metadata (folder, read, flagged)
@@ -416,6 +416,15 @@ Use the OpenAPI specification as the source of truth and generate Go server stub
 - `POST /api/v1/contacts` — create a contact
 - `PUT /api/v1/contacts/{id}` — replace a contact
 - `DELETE /api/v1/contacts/{id}` — delete a contact
+
+### Thread Algorithm
+
+`GET /api/v1/messages/{id}/thread` determines membership using (in order):
+
+1. **Header-based (primary):** Build a directed graph where message A links to message B if B's `Message-ID` appears in A's `In-Reply-To` or A's `References` header. Take the transitive closure to find all messages in the same connected component as the requested message.
+2. **Subject-based fallback:** If header-based grouping yields only the single requested message (no links found), group by normalised subject: strip leading `Re:`, `Fwd:`, `Fw:` prefixes (any combination, case-insensitive) and compare the remainder case-insensitively.
+
+Thread results include messages from all folders (Inbox, Sent, Trash, etc.) ordered by `date ASC`.
 
 ---
 
@@ -765,6 +774,24 @@ Response `200`:
 - Plain CSS for styling.
 - All assets embedded in the binary via `//go:embed`.
 
+### URL Routing
+
+Hash-based routing (`/#/inbox`, `/#/message/123`). The server always serves the same `index.html` for all requests to non-API paths; the hash fragment is interpreted entirely by the client.
+
+Route scheme:
+
+| Hash pattern              | View shown                              |
+|---------------------------|-----------------------------------------|
+| `/#/` or `/#/inbox`       | Inbox folder view                       |
+| `/#/folder/:slug`         | Named folder message list               |
+| `/#/message/:id`          | Message detail for the given id         |
+| `/#/compose`              | New compose form                        |
+| `/#/search?q=...`         | Search results                          |
+| `/#/settings`             | Settings page (defaults to first tab)   |
+| `/#/settings/:tab`        | Settings page at a specific tab         |
+
+On first load the UI reads `localStorage` for the last selected folder and navigates there; if absent it navigates to `/#/inbox`.
+
 ### Layout
 
 ```
@@ -790,8 +817,10 @@ The Scheduled folder is shown in the sidebar so the user can review and cancel p
 ### Views
 
 1. **Folder view** — paginated message list for selected folder. Unread messages shown in bold. Click to open message detail. A **Mark all as read** button in the toolbar sends `PATCH /api/v1/messages` with all message IDs in the folder and `"read": true`.
-2. **Message detail** — full headers, body, attachment download links. Shows thread if `references` chain exists. Reply/Reply All/Forward/Move/Delete/Snooze buttons. The **Snooze** button opens a small picker with quick presets (later today, tomorrow morning, next week) and a custom date/time option; submits `POST /api/v1/messages/{id}/snooze`. When a message has both `body_html` and `body_text`, the body is shown according to the user's **preferred view** setting (see Client-Side Storage), defaulting to HTML. A **Plain text / HTML** toggle button switches the view for the current message and updates the stored preference. If only one body type is present it is shown directly with no toggle. HTML is rendered in a sandboxed iframe (see HTML Body Display); plain text is rendered as preformatted text.
-3. **Compose / Reply / Reply All / Forward** — form with a **From** selector (dropdown of all identities, pre-selected to the default; or, when replying, to the identity whose address matches the original To/Cc), To, Cc, Bcc, Subject, plain-text body, optional HTML body toggle. File upload for attachments. A **Send later** toggle reveals a date/time picker for `send_at`; when set, the Send button becomes "Schedule". Auto-save to Drafts on a 30-second timer: on the first save `POST /api/v1/drafts` (or `-with-attachments`) is called and the returned `id` is stored; subsequent saves call `PUT /api/v1/drafts/{id}` (or `-with-attachments`) to update the existing draft. Drafts are always stored with `read = 1` so they never contribute to the unread badge on the Drafts folder. Scheduled messages auto-save to Drafts until explicitly scheduled. The To, Cc, and Bcc fields offer address autocomplete: as the user types, the UI queries `GET /api/v1/contacts?q=<input>` and shows a dropdown of matching name + address suggestions.
+2. **Message detail** — full headers, body, attachment download links. Reply/Reply All/Forward/Move/Delete/Snooze buttons. When the UI opens a message that is currently unread, it immediately sends `PATCH /api/v1/messages/{id}` with `"read": true` to mark it as read. The **Snooze** button opens a small picker with quick presets (later today, tomorrow morning, next week) and a custom date/time option; submits `POST /api/v1/messages/{id}/snooze`. When a message has both `body_html` and `body_text`, the body is shown according to the user's **preferred view** setting (see Client-Side Storage), defaulting to HTML. A **Plain text / HTML** toggle button switches the view for the current message and updates the stored preference. If only one body type is present it is shown directly with no toggle. HTML is rendered in a sandboxed iframe (see HTML Body Display); plain text is rendered as preformatted text.
+
+   **Thread display:** When the message has a non-empty `references` list or `in_reply_to`, the UI calls `GET /api/v1/messages/{id}/thread`. If the result contains more than one message, a collapsed conversation strip is shown below the current message body. Each entry shows the sender, date, and subject snippet; clicking an entry expands it inline to show the full body (fetches `GET /api/v1/messages/{entryId}` on first expand). The current message is always shown expanded. Entries are ordered oldest-first. If the thread contains only the current message, no strip is shown.
+3. **Compose / Reply / Reply All / Forward** — form with a **From** selector (dropdown of all identities, pre-selected to the default; or, when replying, to the identity whose address matches the original To/Cc), To, Cc, Bcc, Subject, plain-text body, file upload for attachments, and an **Add HTML body** toggle button. When toggled on, a raw HTML `<textarea>` appears below the plain-text body for users who want to craft an HTML version manually (power-user feature). The plain-text body is always required; the HTML body is optional. If the HTML textarea is empty when sending, `body_html` is omitted from the request. A **Send later** toggle reveals a date/time picker for `send_at`; when set, the Send button becomes "Schedule". Auto-save to Drafts on a 30-second timer: on the first save `POST /api/v1/drafts` (or `-with-attachments`) is called and the returned `id` is stored; subsequent saves call `PUT /api/v1/drafts/{id}` (or `-with-attachments`) to update the existing draft. Drafts are always stored with `read = 1` so they never contribute to the unread badge on the Drafts folder. Scheduled messages auto-save to Drafts until explicitly scheduled. The To, Cc, and Bcc fields offer address autocomplete: as the user types, the UI queries `GET /api/v1/contacts?q=<input>` and shows a dropdown of matching name + address suggestions.
 
    Pre-population rules per action:
 
@@ -816,6 +845,48 @@ The Scheduled folder is shown in the sidebar so the user can review and cancel p
 9. **Spam filter settings** — toggle to enable/disable the spam filter, numeric field for the score threshold, and text field for the score header name. Submits `PUT /api/v1/spam-filter`.
 10. **Contact management** — paginated list of all contacts with name and address. Supports adding, editing, and deleting contacts. Queries `GET /api/v1/contacts`, `POST /api/v1/contacts`, `PUT /api/v1/contacts/{id}`, and `DELETE /api/v1/contacts/{id}`.
 11. **Preferences** — UI panel (tab in Settings) for client-side display preferences stored in `localStorage`. Contains: dark mode toggle, message list density (Compact / Normal / Relaxed radio group), default body view (HTML / Plain text radio group; mirrors the per-message toggle), and browser notifications toggle (requests `Notification` API permission on enable; shows current permission state).
+
+### Settings Navigation
+
+A **gear icon** in the sidebar footer opens the Settings page at `/#/settings`. The page uses a tabbed layout with the following tabs (in order):
+
+| Tab slug       | Content view                                      |
+|----------------|---------------------------------------------------|
+| `identities`   | Identity management (view 8)                      |
+| `folders`      | Folder management (view 7)                        |
+| `filters`      | Filter management (view 6)                        |
+| `spam`         | Spam filter settings (view 9)                     |
+| `contacts`     | Contact management (view 10)                      |
+| `preferences`  | Preferences panel (view 11)                       |
+
+Navigating to `/#/settings` defaults to the `identities` tab. Deep-linking to a specific tab (e.g. `/#/settings/spam`) opens that tab directly.
+
+None of the settings views appear as top-level sidebar entries; they are all accessed exclusively through the Settings page.
+
+### Date and Time Display
+
+All timestamps are displayed in the **browser's local timezone** (no user-configurable override).
+
+Display format is adaptive based on how old the message is relative to "now":
+
+| Age                    | Format                       | Example            |
+|------------------------|------------------------------|--------------------|
+| < 1 hour               | Relative ("X minutes ago")   | "42 minutes ago"   |
+| 1 hour – 23:59         | Time only (HH:MM, 24-hour)   | "14:32"            |
+| Yesterday              | "Yesterday HH:MM"            | "Yesterday 09:15"  |
+| 2–6 days ago           | Weekday + time               | "Mon 14:32"        |
+| 7 days – same year     | Short date + time            | "Apr 3, 14:32"     |
+| Previous years         | Short date with year         | "Apr 3, 2023"      |
+
+In the message list (compact view), only the condensed part is shown (time only for today, date only for older). In the message detail header, the full `date` field is always shown in the "Apr 3, 14:32" or "Apr 3, 2023" form with the timezone abbreviation appended (e.g. "Apr 3, 14:32 CEST").
+
+### Error Handling UX
+
+- **Transient API errors** (non-network, non-form): shown as a toast/snackbar in the bottom-right corner. Auto-dismisses after 5 seconds. At most one toast is shown at a time; a new error replaces the previous one. The toast includes the HTTP status code and the `error` field from the response body.
+- **Form validation errors** (400 responses from create/update forms): shown as an inline error message below the submit button, not as a toast. The `error` field from the response body is used verbatim.
+- **Network failures** (fetch throws, or status 0): the UI retries once automatically after 2 seconds. If the retry also fails, a persistent toast is shown with a **Retry** button. The toast does not auto-dismiss until the user clicks Retry or dismisses it manually.
+- **404 on message/folder navigation**: show an inline "Not found" message in the detail pane; do not navigate away from the current folder.
+- **Auth failure (401)**: redirect to the login prompt (browser's built-in Basic Auth dialog, triggered by the `WWW-Authenticate` header from the server). No custom UI needed.
 
 **Junk folder:** shown in the folder sidebar between Trash and user-created folders. The message detail view for messages in the Junk folder shows a **Not junk** button (calls `POST /api/v1/messages/{id}/mark-not-junk`) instead of the normal move controls. All other message views show a **Mark as junk** button (calls `POST /api/v1/messages/{id}/mark-junk`).
 
