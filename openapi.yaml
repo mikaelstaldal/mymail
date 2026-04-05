@@ -489,7 +489,7 @@ paths:
   /messages/search:
     get:
       summary: Search messages
-      description: Full-text search across all folders using FTS5 syntax. Results ordered by relevance.
+      description: Full-text search across all folders using FTS5 syntax. Results ordered by relevance. Optionally filtered by date range.
       parameters:
         - name: q
           in: query
@@ -500,6 +500,18 @@ paths:
           in: query
           schema:
             type: integer
+        - name: date_from
+          in: query
+          description: Inclusive lower bound (ISO 8601 date or date-time). Only messages with date >= date_from are returned.
+          schema:
+            type: string
+            format: date-time
+        - name: date_to
+          in: query
+          description: Inclusive upper bound (ISO 8601 date or date-time). Only messages with date <= date_to are returned.
+          schema:
+            type: string
+            format: date-time
         - name: limit
           in: query
           schema:
@@ -1203,6 +1215,32 @@ paths:
       responses:
         '204':
           description: Deleted
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /drafts/{id}/attachments/{attachment_id}:
+    delete:
+      summary: Remove a single attachment from a draft
+      description: |
+        Delete one attachment from an existing draft without affecting the other attachments
+        or any other draft fields. Returns 404 if the draft or attachment does not exist, or
+        400 if the attachment does not belong to the specified draft.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+        - name: attachment_id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '204':
+          description: Attachment deleted
+        '400':
+          $ref: '#/components/responses/BadRequest'
         '404':
           $ref: '#/components/responses/NotFound'
 

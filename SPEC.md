@@ -399,7 +399,7 @@ Use the OpenAPI specification as the source of truth and generate Go server stub
 
 #### Messages
 - `GET /api/v1/folders/{folder_id}/messages` — list messages in a folder
-- `GET /api/v1/messages/search` — full-text search across all folders
+- `GET /api/v1/messages/search` — full-text search across all folders (supports optional `date_from`/`date_to` filters)
 - `GET /api/v1/messages/{id}` — get full message details
 - `GET /api/v1/messages/{id}/raw` — download original RFC 5322 message
 - `GET /api/v1/messages/{id}/thread` — get all messages in the same thread
@@ -430,6 +430,7 @@ Use the OpenAPI specification as the source of truth and generate Go server stub
 - `PUT /api/v1/drafts/{id}` — replace draft content
 - `PUT /api/v1/drafts-with-attachments/{id}` — replace draft content with `multipart/form-data`
 - `DELETE /api/v1/drafts/{id}` — permanently delete a draft
+- `DELETE /api/v1/drafts/{id}/attachments/{attachment_id}` — remove a single attachment from a draft
 
 #### Filters
 - `GET /api/v1/filters` — list all filters
@@ -853,7 +854,9 @@ The Scheduled folder is shown in the sidebar so the user can review and cancel p
 2. **Message detail** — full headers, body, attachment download links. Reply/Reply All/Forward/Move/Delete/Snooze buttons. When the UI opens a message that is currently unread, it immediately sends `PATCH /api/v1/messages/{id}` with `"read": true` to mark it as read. The **Snooze** button is shown only when the message is in Inbox or a user folder (not in system folders such as Sent, Trash, Junk, Scheduled, or Snoozed). It opens a small picker with quick presets (later today, tomorrow morning, next week) and a custom date/time option; submits `POST /api/v1/messages/{id}/snooze`. When a message has both `body_html` and `body_text`, the body is shown according to the user's **preferred view** setting (see Client-Side Storage), defaulting to HTML. A **Plain text / HTML** toggle button switches the view for the current message and updates the stored preference. If only one body type is present it is shown directly with no toggle. HTML is rendered in a sandboxed iframe (see HTML Body Display); plain text is rendered as preformatted text.
 
    **Thread display:** When the message has a non-empty `references` list or `in_reply_to`, the UI calls `GET /api/v1/messages/{id}/thread`. If the result contains more than one message, a collapsed conversation strip is shown below the current message body. Each entry shows the sender, date, and subject snippet; clicking an entry expands it inline to show the full body (fetches `GET /api/v1/messages/{entryId}` on first expand). The current message is always shown expanded. Entries are ordered oldest-first. If the thread contains only the current message, no strip is shown.
-3. **Compose / Reply / Reply All / Forward** — form with a **From** selector (dropdown of all identities, pre-selected to the default; or, when replying, to the identity whose address matches the original To/Cc), To, Cc, Bcc, Reply-To (optional, collapsed by default behind an "Add Reply-To" link), Subject, plain-text body, file upload for attachments, and an **Add HTML body** toggle button. When toggled on, a raw HTML `<textarea>` appears below the plain-text body for users who want to craft an HTML version manually (power-user feature). The plain-text body is always required; the HTML body is optional. If the HTML textarea is empty when sending, `body_html` is omitted from the request. A **Send later** toggle reveals a date/time picker for `send_at`; when set, the Send button becomes "Schedule". Auto-save to Drafts on a 30-second timer: on the first save `POST /api/v1/drafts` (or `-with-attachments`) is called and the returned `id` is stored; subsequent saves call `PUT /api/v1/drafts/{id}` (or `-with-attachments`) to update the existing draft. **Navigate-away behavior:** when the user navigates away from a compose form that has unsaved content, an immediate draft save is triggered before navigation proceeds. Drafts are always stored with `read = 1` so they never contribute to the unread badge on the Drafts folder. Scheduled messages auto-save to Drafts until explicitly scheduled. The To, Cc, and Bcc fields offer address autocomplete: as the user types, the UI queries `GET /api/v1/contacts?q=<input>` and shows a dropdown of matching name + address suggestions.
+3. **Compose / Reply / Reply All / Forward** — form with a **From** selector (dropdown of all identities, pre-selected to the default; or, when replying, to the identity whose address matches the original To/Cc), To, Cc, Bcc, Reply-To (optional, collapsed by default behind an "Add Reply-To" link), Subject, a rich-text body editor (see below), file upload for attachments. A **Send later** toggle reveals a date/time picker for `send_at`; when set, the Send button becomes "Schedule".
+
+   **Rich-text editor:** The message body is edited using [Quill](https://quilljs.com/) (vendored, no CDN dependency). Quill operates in its default `delta` mode; on send/save the UI serialises the content as both HTML (via `quill.root.innerHTML`) and plain text (via `quill.getText()`). Both `body_html` and `body_text` are always sent; if the editor is empty, both fields are sent as empty strings. The Quill toolbar exposes: Bold, Italic, Underline, Ordered list, Bullet list, Link, and Clean (remove formatting). A **Send later** toggle reveals a date/time picker for `send_at`; when set, the Send button becomes "Schedule". Auto-save to Drafts on a 30-second timer: on the first save `POST /api/v1/drafts` (or `-with-attachments`) is called and the returned `id` is stored; subsequent saves call `PUT /api/v1/drafts/{id}` (or `-with-attachments`) to update the existing draft. **Navigate-away behavior:** when the user navigates away from a compose form that has unsaved content, an immediate draft save is triggered before navigation proceeds. Drafts are always stored with `read = 1` so they never contribute to the unread badge on the Drafts folder. Scheduled messages auto-save to Drafts until explicitly scheduled. The To, Cc, and Bcc fields offer address autocomplete: as the user types, the UI queries `GET /api/v1/contacts?q=<input>` and shows a dropdown of matching name + address suggestions.
 
    **Send button behavior:** The Send button is disabled and shows a spinner while the send request is in-flight. If `POST /api/v1/messages/send` returns an error (including HTTP 500 from a `sendmail` failure), the compose form remains open with all content intact and the error is displayed inline below the Send button (not as a toast). The auto-save timer ensures a draft copy exists in the Drafts folder before the send attempt fires, so content is recoverable from Drafts even if the user closes the tab after a send failure.
 
@@ -1027,6 +1030,15 @@ When a snoozed message returns to Inbox, `read` is forcibly set to `0` regardles
 ### Filter Evaluation in LDA
 Filters are evaluated in the LDA process at delivery time, not asynchronously. This is correct because filters need to run before the message lands in the Inbox (otherwise notifications or badge counts would be wrong). The LDA holds a short write lock on the database for the duration of a single message insertion.
 
+### No Retroactive Filter Application
+Filters are applied only at LDA delivery time. Adding a new filter does not retroactively move existing messages that match the new criteria. This is a deliberate design decision consistent with the "simple client, let the MTA work" philosophy. Users who need to reorganise existing mail should do so manually using the move-to-folder UI.
+
+### Thread View N+1 Fetch Pattern
+`GET /api/v1/messages/{id}/thread` returns `MessageSummary` objects (no body). Expanding an entry in the thread view requires a separate `GET /api/v1/messages/{entryId}` fetch per entry. This is an accepted trade-off: threads are uncommon in personal email and are typically short, so the N+1 overhead is negligible in practice. A future enhancement could add a `?full=true` parameter to return full message bodies inline.
+
+### Bulk Operation Atomicity
+Bulk endpoints (`PATCH /api/v1/messages`, `DELETE /api/v1/messages`) return 404 if any supplied message ID does not exist. There is no partial-success response. In a single-user, single-active-session application stale IDs are rare, and an all-or-nothing contract is simpler to reason about. If the UI receives a 404 on a bulk operation it should refresh the folder view before retrying.
+
 ### Header-Based Spam Detection
 Rather than implementing a built-in Bayesian classifier or content scorer, mymail reads spam verdicts from headers that the MTA pipeline has already set (SpamAssassin, Rspamd, etc.). This keeps mymail simple and lets operators choose and tune their preferred spam analysis tool independently. The standard `X-Spam-Flag` / `X-Spam-Status` / `X-Spam-Score` headers are the de-facto interoperability interface for this purpose. No new Go dependency is needed — header inspection uses the already-parsed `net/mail` header map.
 
@@ -1051,6 +1063,9 @@ mymail binds plain HTTP and delegates TLS termination, rate limiting, and access
 - **Push notifications** (browser): not in scope for v1; polling the message list every 30 seconds is sufficient.
 - **Offline support / PWA**: not in scope.
 - **Large attachment threshold**: if attachments > N MB become a problem, move to disk storage. Threshold TBD.
+- **Mobile / responsive layout**: the web UI targets desktop browsers only (fixed three-pane layout). Mobile support is out of scope for the initial version. A separate responsive web app or native mobile app may be developed in a future iteration.
+- **Inline attachment preview**: only attachment download is provided. Inline preview of images, PDFs, and other file types is out of scope for v1.
+- **Cross-folder Starred view**: the `flagged` flag can be filtered per folder but there is no virtual "Starred" folder that aggregates flagged messages across all folders. This is a potential future enhancement.
 
 ---
 
