@@ -58,7 +58,11 @@ components:
           type: boolean
         send_failed:
           type: boolean
-          description: True when the message is in the Scheduled folder and has at least one failed send attempt (send_failure_count > 0). Allows the UI to show a warning badge in the message list without fetching the full detail.
+          description: |
+            True when the message has at least one send attempt failure (send_failure_count > 0).
+            The UI uses this to show a failure badge without fetching the full message detail:
+            - In the Scheduled folder: show a yellow warning badge (send is being retried).
+            - In the Drafts folder: show a red error badge (message was moved from Scheduled after exhausting all retries).
         created_at:
           type: string
           format: date-time
@@ -94,6 +98,7 @@ components:
           type: array
           items:
             type: string
+          description: Parsed References header. Empty array when the header is absent or empty.
         from_addr:
           type: string
         to_addr:
@@ -121,9 +126,11 @@ components:
           type: string
           format: date-time
           nullable: true
+          description: Non-null only for messages in the Scheduled folder. The time at which the message will be (or was scheduled to be) sent.
         send_error:
           type: string
           nullable: true
+          description: Non-null when the message has at least one failed send attempt. Contains the last sendmail stderr output (max 4 KB).
         snoozed_until:
           type: string
           format: date-time
@@ -177,6 +184,48 @@ components:
           nullable: true
           description: If present and in the future (≥1 min), schedule instead of sending immediately.
       required: [to_addr]
+
+    DraftRequest:
+      type: object
+      description: |
+        Request body for creating or replacing a draft. All fields are optional so that
+        drafts can be saved before all fields have been filled in by the user.
+      properties:
+        identity_id:
+          type: integer
+          description: If absent, the default identity is used.
+        to_addr:
+          type: string
+        cc_addr:
+          type: string
+        bcc_addr:
+          type: string
+        reply_to_addr:
+          type: string
+        subject:
+          type: string
+        body_text:
+          type: string
+        body_html:
+          type: string
+        in_reply_to:
+          type: string
+        references:
+          type: array
+          items:
+            type: string
+        send_at:
+          type: string
+          format: date-time
+          nullable: true
+          description: Stored but not acted upon until the draft is sent.
+        source_message_id:
+          type: integer
+          nullable: true
+          description: |
+            If present, attachments from this source message are copied server-side into the
+            new draft atomically. Used when forwarding a message to pre-populate the draft
+            with the original attachments. Only valid on POST (create); ignored on PUT (replace).
 
     Filter:
       type: object
@@ -492,16 +541,16 @@ paths:
             type: integer
         - name: date_from
           in: query
-          description: Inclusive lower bound (ISO 8601 date or date-time). Only messages with date >= date_from are returned.
+          description: Inclusive lower bound (ISO 8601 date). Only messages with date >= date_from are returned.
           schema:
             type: string
-            format: date-time
+            format: date
         - name: date_to
           in: query
-          description: Inclusive upper bound (ISO 8601 date or date-time). Only messages with date <= date_to are returned.
+          description: Inclusive upper bound (ISO 8601 date). Only messages with date <= date_to are returned.
           schema:
             type: string
-            format: date-time
+            format: date
         - name: limit
           in: query
           schema:
@@ -532,6 +581,7 @@ paths:
                           properties:
                             snippet:
                               type: string
+                          required: [snippet]
                 required: [total, messages]
 
   /messages/send:
@@ -728,7 +778,7 @@ paths:
       description: |
         Apply the same patch to multiple messages. Same move restrictions as single PATCH.
         Returns 404 if any of the provided IDs does not exist; no changes are made in that case.
-        Maximum 1000 IDs per request.
+        Maximum 1000 IDs per request; returns 400 if the limit is exceeded.
       requestBody:
         required: true
         content:
@@ -768,7 +818,7 @@ paths:
       description: |
         Same two-step semantics as single delete.
         Returns 404 if any of the provided IDs does not exist; no changes are made in that case.
-        Maximum 1000 IDs per request.
+        Maximum 1000 IDs per request; returns 400 if the limit is exceeded.
       requestBody:
         required: true
         content:
@@ -793,6 +843,8 @@ paths:
                   deleted:
                     type: integer
                 required: [deleted]
+        '400':
+          $ref: '#/components/responses/BadRequest'
         '404':
           $ref: '#/components/responses/NotFound'
 
@@ -833,11 +885,10 @@ paths:
            B's `Message-ID` appears in A's `In-Reply-To` or A's `References` list. Take the transitive
            closure of this graph to find all messages connected to the requested message. The requested
            message itself is always included.
-        2. **Subject-based fallback:** If a message has no `Message-ID`, `In-Reply-To`, or `References`
-           headers (or they do not connect to any other message), group by normalised subject: strip
-           leading `Re:`, `Fwd:`, `Fw:` prefixes (any combination, case-insensitive) and compare the
-           remainder case-insensitively. Subject-based grouping is only used when header-based grouping
-           yields a single message (i.e. there are no header links at all).
+        2. **Subject-based fallback:** If header-based grouping yields only the single requested message
+           (no links found to any other stored message), group by normalised subject: strip leading
+           `Re:`, `Fwd:`, `Fw:` prefixes (any combination, case-insensitive) and compare the remainder
+           case-insensitively.
 
         The endpoint includes messages from all folders (Inbox, Sent, Trash, Snoozed, etc.) so the
         full conversation is always visible.
@@ -1023,46 +1074,6 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
 
-  /messages/{id}/copy-attachments:
-    post:
-      summary: Copy attachments to a draft
-      description: |
-        Server-side copy of all attachments from the source message into a target draft.
-        Used when forwarding a message to pre-populate the draft with the original attachments
-        without requiring the client to download and re-upload each file.
-        Returns 400 if `to_draft_id` does not refer to a message in the Drafts folder.
-      parameters:
-        - name: id
-          in: path
-          required: true
-          schema:
-            type: integer
-          description: Source message ID whose attachments are copied.
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              properties:
-                to_draft_id:
-                  type: integer
-                  description: ID of the target draft message that will receive the attachment copies.
-              required: [to_draft_id]
-      responses:
-        '200':
-          description: OK. Returns the list of newly created attachment copies.
-          content:
-            application/json:
-              schema:
-                type: array
-                items:
-                  $ref: '#/components/schemas/AttachmentMeta'
-        '400':
-          $ref: '#/components/responses/BadRequest'
-        '404':
-          $ref: '#/components/responses/NotFound'
-
   # ── Scheduled ──────────────────────────────────────────────────────────────
 
   /scheduled/{id}:
@@ -1098,13 +1109,16 @@ paths:
   /drafts:
     post:
       summary: Save new draft
-      description: Save a new draft. Nothing is sent. `send_at`, if supplied, is stored but not acted upon.
+      description: |
+        Save a new draft. Nothing is sent. `send_at`, if supplied, is stored but not acted upon.
+        If `source_message_id` is supplied, all attachments from that message are copied into the
+        new draft atomically (used when forwarding a message).
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/SendRequest'
+              $ref: '#/components/schemas/DraftRequest'
       responses:
         '201':
           description: Created
@@ -1134,7 +1148,7 @@ paths:
               type: object
               properties:
                 message:
-                  $ref: '#/components/schemas/SendRequest'
+                  $ref: '#/components/schemas/DraftRequest'
                 attachments:
                   type: array
                   items:
@@ -1162,7 +1176,7 @@ paths:
       summary: Replace draft content
       description: |
         Replace an existing draft entirely. All content fields are replaced; if `send_at` is absent
-        or null, any previously stored value is cleared.
+        or null, any previously stored value is cleared. `source_message_id` is ignored on PUT.
       parameters:
         - name: id
           in: path
@@ -1174,7 +1188,7 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/SendRequest'
+              $ref: '#/components/schemas/DraftRequest'
       responses:
         '200':
           description: OK
@@ -1252,7 +1266,7 @@ paths:
               type: object
               properties:
                 message:
-                  $ref: '#/components/schemas/SendRequest'
+                  $ref: '#/components/schemas/DraftRequest'
                 attachments:
                   type: array
                   items:
@@ -1590,30 +1604,6 @@ paths:
         '409':
           $ref: '#/components/responses/Conflict'
 
-  # ── Health ─────────────────────────────────────────────────────────────────
-
-  /health:
-    get:
-      summary: Liveness check
-      description: |
-        Returns 200 when the server is ready to serve requests. Intended for reverse proxy health
-        checks and container readiness probes. Does not require authentication. Does not perform a
-        database query — it only checks that the HTTP server is running.
-      responses:
-        '200':
-          description: OK
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  status:
-                    type: string
-                    enum: [ok]
-                required: [status]
-
-  # ── Contacts ───────────────────────────────────────────────────────────────
-
   /contacts/{id}:
     put:
       summary: Replace contact
@@ -1662,3 +1652,25 @@ paths:
           description: Deleted
         '404':
           $ref: '#/components/responses/NotFound'
+
+  # ── Health ─────────────────────────────────────────────────────────────────
+
+  /health:
+    get:
+      summary: Liveness check
+      description: |
+        Returns 200 when the server is ready to serve requests. Intended for reverse proxy health
+        checks and container readiness probes. Does not require authentication. Does not perform a
+        database query — it only checks that the HTTP server is running.
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    enum: [ok]
+                required: [status]

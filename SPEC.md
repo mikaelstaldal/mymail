@@ -97,6 +97,7 @@ Behaviour:
 - A running count is printed to stdout as each folder completes: `inbox: 1042 imported, 3 skipped`.
 - On completion, a summary line is printed: `Total: 2381 imported, 17 skipped`.
 - Exit code `0` on success, `1` on any error (details logged to stderr). A single unparseable message logs a warning and continues; it does not abort the import.
+- **Concurrency:** Running `-import` concurrently with a running server against the same data directory is not supported. Stop the server before running import.
 
 ### LDA mode (`-lda`)
 
@@ -204,7 +205,7 @@ CREATE TABLE IF NOT EXISTS messages (
     snoozed_until TEXT,                    -- RFC 3339 UTC; non-NULL = snoozed, message sits in Snoozed folder
     snooze_folder INTEGER,                 -- folder_id to return to when snooze expires (usually Inbox=1)
     send_error    TEXT,                    -- last sendmail error for a scheduled message that failed to send
-    send_failure_count INTEGER NOT NULL DEFAULT 0, -- consecutive send failures; message moved to Drafts after 3
+    send_failure_count INTEGER NOT NULL DEFAULT 0, -- consecutive send failures; message moved to Drafts after 3; also non-zero for messages in Drafts that were moved there after exhausting retries
     created_at    TEXT    NOT NULL,        -- RFC 3339 UTC, time of storage
     updated_at    TEXT    NOT NULL         -- RFC 3339 UTC, time of last modification (set equal to created_at on insert)
 );
@@ -263,8 +264,9 @@ CREATE TRIGGER IF NOT EXISTS messages_fts_delete AFTER DELETE ON messages BEGIN
     VALUES ('delete', old.id, old.from_addr, old.to_addr, old.cc_addr, old.subject, old.body_text);
 END;
 
--- Note: the messages_updated_at trigger fires AFTER this trigger. FTS sync therefore uses
--- the pre-update body_text to delete and the post-update body_text to insert.
+-- Note: messages_updated_at fires BEFORE this trigger (it is defined earlier in the schema).
+-- Both triggers use the old.* and new.* pseudo-rows which reflect pre- and post-update column
+-- values regardless of trigger execution order.
 CREATE TRIGGER IF NOT EXISTS messages_fts_update AFTER UPDATE OF from_addr, to_addr, cc_addr, subject, body_text ON messages BEGIN
     INSERT INTO messages_fts(messages_fts, rowid, from_addr, to_addr, cc_addr, subject, body_text)
     VALUES ('delete', old.id, old.from_addr, old.to_addr, old.cc_addr, old.subject, old.body_text);
@@ -417,7 +419,6 @@ Use the OpenAPI specification as the source of truth and generate Go server stub
 
 #### Attachments
 - `GET /api/v1/attachments/{id}` — download attachment data
-- `POST /api/v1/messages/{id}/copy-attachments` — server-side copy of a message's attachments to a draft
 
 **Attachment download security:** The response always uses `Content-Type: application/octet-stream` regardless of the stored `content_type` value (which comes from the untrusted sender and may be attacker-controlled). The `Content-Disposition: attachment; filename="..."` header is included using the sanitized filename: any CR (`\r`), LF (`\n`), and NUL (`\0`) characters are stripped from the filename before it is placed in the header to prevent response header injection.
 
@@ -486,9 +487,9 @@ When invoked as `mymail -lda`, the program:
      - Collects remaining `attachment` parts (Content-Disposition: attachment, or non-displayable parts without a Content-ID reference) → stored in `attachments` table
    - Falls back: if no `Date` header, use current time. If no `Message-ID`, generate one.
    - Handles encoded words (RFC 2047) in headers.
-4. Duplicate detection: if a `Message-ID` is present, the INSERT uses `INSERT OR IGNORE` on the `messages` table (which has a UNIQUE constraint on `message_id`). If the row already exists, the INSERT is silently ignored and the LDA exits `0`. This is atomic and race-safe: two concurrent LDA processes cannot both insert the same `Message-ID`. Messages without a `Message-ID` are always inserted (the UNIQUE constraint ignores NULL values).
+4. Duplicate detection: if a `Message-ID` is present, query `SELECT EXISTS(SELECT 1 FROM messages WHERE message_id = ?)`. If the message already exists, log nothing and exit `0`. This early check avoids running spam detection and filters for messages that will not be stored. Messages without a `Message-ID` skip this check (they are always inserted).
 5. Applies spam detection and user-defined filters (see Filter Application).
-6. Inserts the message record and attachments in a single transaction.
+6. Inserts the message record and attachments in a single transaction using `INSERT OR IGNORE` on the `messages` table. The `UNIQUE` constraint on `message_id` acts as a race-safe guard: if two concurrent LDA processes attempt to deliver the same `Message-ID` simultaneously, only one will succeed; the other will find 0 rows inserted, log nothing, and exit `0`.
 7. Upserts the sender into the `contacts` table: lower-case the `From` address; insert if not present, otherwise update `name` only if the existing `name` is empty. Only the `From` address is upserted for incoming mail — To and Cc recipients are not auto-added (to avoid polluting contacts with mailing list addresses).
 8. Exits `0`.
 
@@ -551,7 +552,7 @@ For each result, in order:
 1. Build the RFC 5322 message from the stored fields (same logic as immediate send in Outgoing Mail).
 2. Pipe to `sendmail -t -oi`.
 3. **On success**: set `folder_id = 2` (Sent), `read = 1`, `send_at = NULL`, `send_error = NULL`, `send_failure_count = 0`.
-4. **On failure** (non-zero sendmail exit): increment `send_failure_count`, set `send_error` to captured stderr (max 4 KB). Leave the message in the Scheduled folder. The scheduler will retry on the next tick. After 3 consecutive failures (`send_failure_count >= 3`), the message is moved to Drafts (`folder_id = 3`, `read = 1`) and `send_at` is cleared, so it is no longer retried. The `send_error` text remains visible in the message detail so the user knows what happened.
+4. **On failure** (non-zero sendmail exit): increment `send_failure_count`, set `send_error` to captured stderr (max 4 KB). Leave the message in the Scheduled folder. The scheduler will retry on the next tick. The UI shows a **yellow warning badge** on messages in the Scheduled folder when `send_failure_count >= 1`. After 3 consecutive failures (`send_failure_count >= 3`), the message is moved to Drafts (`folder_id = 3`, `read = 1`) and `send_at` is cleared, so it is no longer retried. The `send_error` text remains visible in the message detail so the user knows what happened. The UI shows a **red error badge** on messages in the Drafts folder when `send_failure_count >= 3` (indicating the message was moved from Scheduled after exhausting all retries).
 
 ### Snooze Expiry
 
@@ -564,7 +565,7 @@ ORDER BY snoozed_until ASC;
 
 For each result:
 
-1. Set `folder_id = snooze_folder`, `snoozed_until = NULL`, `snooze_folder = NULL`, `read = 0`.
+1. Set `folder_id = COALESCE(snooze_folder, 1)` (falling back to Inbox if `snooze_folder` is NULL), `snoozed_until = NULL`, `snooze_folder = NULL`, `read = 0`.
 2. Mark as unread (`read = 0`) so the polling notification logic treats it as a new arrival.
 
 Setting `read = 0` means the next poll of `GET /api/v1/folders` will see an increased `unread_count` for the target folder (typically Inbox), triggering the same browser notification as a freshly delivered message (see New Message Notifications).
@@ -858,19 +859,19 @@ The Scheduled folder is shown in the sidebar so the user can review and cancel p
 
    **Rich-text editor:** The message body is edited using [Quill](https://quilljs.com/) (vendored, no CDN dependency). Quill operates in its default `delta` mode; on send/save the UI serialises the content as both HTML (via `quill.root.innerHTML`) and plain text (via `quill.getText()`). Both `body_html` and `body_text` are always sent; if the editor is empty, both fields are sent as empty strings. The Quill toolbar exposes: Bold, Italic, Underline, Ordered list, Bullet list, Link, and Clean (remove formatting). A **Send later** toggle reveals a date/time picker for `send_at`; when set, the Send button becomes "Schedule". Auto-save to Drafts on a 30-second timer: on the first save `POST /api/v1/drafts` (or `-with-attachments`) is called and the returned `id` is stored; subsequent saves call `PUT /api/v1/drafts/{id}` (or `-with-attachments`) to update the existing draft. **Navigate-away behavior:** when the user navigates away from a compose form that has unsaved content, an immediate draft save is triggered before navigation proceeds. Drafts are always stored with `read = 1` so they never contribute to the unread badge on the Drafts folder. Scheduled messages auto-save to Drafts until explicitly scheduled. The To, Cc, and Bcc fields offer address autocomplete: as the user types, the UI queries `GET /api/v1/contacts?q=<input>` and shows a dropdown of matching name + address suggestions.
 
-   **Send button behavior:** The Send button is disabled and shows a spinner while the send request is in-flight. If `POST /api/v1/messages/send` returns an error (including HTTP 500 from a `sendmail` failure), the compose form remains open with all content intact and the error is displayed inline below the Send button (not as a toast). The auto-save timer ensures a draft copy exists in the Drafts folder before the send attempt fires, so content is recoverable from Drafts even if the user closes the tab after a send failure.
+   **Send button behavior:** The Send button is disabled and shows a spinner while the send request is in-flight. Before submitting the send request, the UI performs an immediate draft save (equivalent to an auto-save tick), ensuring a draft copy exists in the Drafts folder prior to every send attempt regardless of whether the 30-second timer has previously fired. If `POST /api/v1/messages/send` returns an error (including HTTP 500 from a `sendmail` failure), the compose form remains open with all content intact and the error is displayed inline below the Send button (not as a toast). The pre-send draft save means content is always recoverable from Drafts even if the user closes the tab after a send failure.
 
    Pre-population rules per action:
 
    | Field           | Reply                                                                                   | Reply All                                                                         | Forward                                                                                                                                                 |
    |-----------------|-----------------------------------------------------------------------------------------|-----------------------------------------------------------------------------------|---------------------------------------------------------------------------------------------------------------------------------------------------------|
    | **From**        | Identity whose address appears in the original To or Cc; falls back to default identity | Same as Reply                                                                     | Default identity                                                                                                                                        |
-   | **To**          | Original `From` address                                                                 | Original `From` address                                                           | Empty                                                                                                                                                   |
+   | **To**          | Original `Reply-To` address if present; otherwise original `From` address               | Original `Reply-To` address if present; otherwise original `From` address         | Empty                                                                                                                                                   |
    | **Cc**          | Empty                                                                                   | All addresses from original To + Cc, minus the chosen From identity's own address | Empty                                                                                                                                                   |
    | **Subject**     | `Re: <original subject>` (no double `Re:`)                                              | `Re: <original subject>` (no double `Re:`)                                        | `Fwd: <original subject>`                                                                                                                               |
    | **In-Reply-To** | Original `Message-ID`                                                                   | Original `Message-ID`                                                             | Empty                                                                                                                                                   |
    | **References**  | Original references + original `Message-ID`                                             | Original references + original `Message-ID`                                       | Empty                                                                                                                                                   |
-   | **Attachments** | Empty                                                                                   | Empty                                                                             | Copies of all original attachments, populated server-side: the UI first creates the draft via `POST /api/v1/drafts`, then calls `POST /api/v1/messages/{sourceId}/copy-attachments` with `to_draft_id` set to the new draft's `id`. The server duplicates the attachment rows; the originals are not modified. |
+   | **Attachments** | Empty                                                                                   | Empty                                                                             | Copies of all original attachments, populated server-side: the UI passes `source_message_id` in the `POST /api/v1/drafts` request body. The server atomically creates the draft and duplicates the attachment rows from the source message; the originals are not modified. |
 
    "No double `Re:`": if the original subject already starts with `Re:` (case-insensitive), it is used as-is.
 
