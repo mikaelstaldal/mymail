@@ -1053,6 +1053,13 @@ If `sendmail` returns an error (e.g. MTA down), mymail returns an HTTP 500 to th
 ### Scheduling via Polling, Not a Timer Queue
 The scheduler uses a 60-second polling loop rather than a priority queue or `time.AfterFunc`. This is simpler, requires no persistent timer state across restarts, and is accurate enough for email scheduling where minute-level precision is sufficient. The partial-index on `send_at` and `snoozed_until` keeps the polling queries fast even with a large messages table.
 
+### Send Failure Exposed as Boolean Only
+`send_failure_count` is an internal counter used to enforce the 3-consecutive-failure limit. The API
+exposes only the derived boolean `send_failed` (`true` when `send_failure_count > 0`). The UI
+distinguishes the two meaningful states via `folder_id` context: `send_failed=true` in the Scheduled
+folder means "retrying" (yellow badge); `send_failed=true` in the Drafts folder means "exhausted"
+(red badge). Exposing the raw count would leak an implementation detail without adding UI value.
+
 ### Snooze Restores Unread State
 When a snoozed message returns to Inbox, `read` is forcibly set to `0` regardless of whether it was read before snoozing. This is intentional: the user asked to be reminded, so the message should behave like a new arrival (badge, document title, browser notification). If the user had read it before snoozing and does not want the notification, they can simply dismiss it.
 

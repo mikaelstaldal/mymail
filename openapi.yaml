@@ -459,6 +459,34 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
 
+  /folders/reorder:
+    patch:
+      summary: Reorder folders
+      description: Update position values for multiple folders at once. The supplied order becomes the new position sequence (0, 1, 2, …).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                ids:
+                  type: array
+                  items:
+                    type: integer
+              required: [ids]
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  updated:
+                    type: integer
+                required: [updated]
+
   /folders/{folder_id}/messages:
     get:
       summary: List messages in folder
@@ -1399,7 +1427,7 @@ paths:
           $ref: '#/components/responses/NotFound'
 
   /filters/reorder:
-    post:
+    patch:
       summary: Reorder filters
       description: Update position values for multiple filters at once. The supplied order becomes the new position sequence (0, 1, 2, …).
       requestBody:
@@ -1544,7 +1572,7 @@ paths:
           $ref: '#/components/responses/NotFound'
 
   /identities/reorder:
-    post:
+    patch:
       summary: Reorder identities
       description: Update position values for multiple identities at once. The supplied order becomes the new position sequence (0, 1, 2, …).
       requestBody:
