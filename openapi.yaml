@@ -118,6 +118,19 @@ components:
           type: string
         body_html:
           type: string
+        has_external_images:
+          type: boolean
+          description: |
+            True when the message body contains external image URLs (img src with http or https scheme).
+            The sanitiser blocks these by default; when true, the UI may offer the user a
+            "Load external images" action to re-render the body in a relaxed-CSP iframe.
+        send_failed:
+          type: boolean
+          description: |
+            True when the message has at least one send attempt failure (send_failure_count > 0).
+            The UI uses folder_id context to distinguish the two meaningful states:
+            - In the Scheduled folder: show a yellow warning badge (send is being retried).
+            - In the Drafts folder: show a red error badge (message was moved from Scheduled after exhausting all retries).
         read:
           type: boolean
         flagged:
@@ -139,7 +152,10 @@ components:
         snooze_folder_id:
           type: integer
           nullable: true
-          description: The folder the message will return to when the snooze expires. Non-null when snoozed_until is non-null.
+          description: |
+            The folder the message will return to when the snooze expires (corresponds to the
+            `snooze_folder` database column). May be null even when snoozed_until is non-null;
+            when null, the scheduler falls back to Inbox (id=1) via COALESCE.
         created_at:
           type: string
           format: date-time
@@ -150,7 +166,7 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/AttachmentMeta'
-      required: [id, folder_id, from_addr, to_addr, cc_addr, bcc_addr, reply_to_addr, subject, date, body_text, body_html, read, flagged, created_at, updated_at, attachments]
+      required: [id, folder_id, from_addr, to_addr, cc_addr, bcc_addr, reply_to_addr, subject, date, body_text, body_html, has_external_images, send_failed, read, flagged, created_at, updated_at, attachments]
 
     SendRequest:
       type: object
@@ -265,10 +281,13 @@ components:
           type: string
         match_from:
           type: string
+          maxLength: 1000
         match_to:
           type: string
+          maxLength: 1000
         match_subject:
           type: string
+          maxLength: 1000
         action:
           type: string
           enum: [move, trash, mark_read, drop]
@@ -286,6 +305,7 @@ components:
           type: boolean
         score_header:
           type: string
+          maxLength: 200
         score_threshold:
           type: number
       required: [enabled, score_header, score_threshold]
@@ -305,6 +325,8 @@ components:
           type: integer
         signature:
           type: string
+          maxLength: 51200
+          description: Plain-text signature; empty string means no signature. Maximum 50 KiB.
       required: [id, name, address, is_default, position, signature]
 
     IdentityRequest:
@@ -320,6 +342,7 @@ components:
           type: integer
         signature:
           type: string
+          maxLength: 51200
       required: [name, address]
 
     Contact:
@@ -331,6 +354,7 @@ components:
           type: string
         name:
           type: string
+          maxLength: 200
         created_at:
           type: string
           format: date-time
@@ -393,6 +417,7 @@ paths:
               properties:
                 name:
                   type: string
+                  maxLength: 200
                 position:
                   type: integer
               required: [name]
@@ -445,6 +470,14 @@ paths:
         built-in folders (ids 1–7). The Trash folder (id 4) is specifically protected because it
         is the cascade target for this operation; deleting it would leave the operation with
         nowhere to move messages.
+
+        When moving messages to Trash, the fields `snoozed_until`, `snooze_folder`, and `send_at`
+        are cleared in the same UPDATE to prevent the scheduler from attempting to process messages
+        that are now in Trash.
+
+        Messages in the Snoozed folder (id=6) that have `snooze_folder` pointing to the deleted
+        folder are not moved — they remain snoozed and will return to Inbox via the COALESCE
+        fallback when their snooze expires.
       parameters:
         - name: id
           in: path
@@ -579,6 +612,7 @@ paths:
           required: true
           schema:
             type: string
+            maxLength: 500
         - name: folder_id
           in: query
           schema:
@@ -722,6 +756,8 @@ paths:
                 required: [id, send_at]
         '400':
           $ref: '#/components/responses/BadRequest'
+        '500':
+          $ref: '#/components/responses/InternalError'
 
   /messages/import:
     post:
@@ -1610,6 +1646,7 @@ paths:
           in: query
           schema:
             type: string
+            maxLength: 500
           description: Case-insensitive substring filter on name or address.
         - name: limit
           in: query
@@ -1651,6 +1688,7 @@ paths:
                   type: string
                 name:
                   type: string
+                  maxLength: 200
               required: [address]
       responses:
         '201':
@@ -1685,6 +1723,7 @@ paths:
                   type: string
                 name:
                   type: string
+                  maxLength: 200
               required: [address]
       responses:
         '200':

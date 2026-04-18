@@ -122,7 +122,7 @@ Exit codes follow standard LDA conventions:
 
 File: `<data>/mymail.sqlite`
 
-**File permissions:** The data directory and the database file must be readable only by the user running mymail. On first run, mymail creates the data directory with mode `0700` and the database file with mode `0600`. Operators should verify these permissions if the data directory is pre-existing.
+**File permissions:** The data directory and the database file must be readable only by the user running mymail. On first run, mymail creates the data directory with mode `0700` and the database file with mode `0600`. Operators should verify these permissions if the data directory is pre-existing. The htpasswd file (if used) must also be mode `0600` — it contains bcrypt hashes that enable offline password cracking if world-readable. mymail does not create the htpasswd file; the operator must set the correct permissions when creating it with `htpasswd -Bc`.
 
 **SQLite configuration:** The server opens the database with `PRAGMA journal_mode=WAL` (Write-Ahead Logging) so that readers and writers can proceed concurrently. The LDA opens the database with a 30-second busy timeout (`PRAGMA busy_timeout=30000`) to handle contention with the HTTP server. The HTTP server uses a 5-second busy timeout.
 
@@ -203,7 +203,7 @@ CREATE TABLE IF NOT EXISTS messages (
     has_attachments INTEGER NOT NULL DEFAULT 0, -- denormalized; 1 if any rows exist in attachments for this message
     send_at       TEXT,                    -- RFC 3339 UTC; non-NULL = deferred send, message sits in Scheduled folder
     snoozed_until TEXT,                    -- RFC 3339 UTC; non-NULL = snoozed, message sits in Snoozed folder
-    snooze_folder INTEGER,                 -- folder_id to return to when snooze expires (usually Inbox=1)
+    snooze_folder INTEGER,                 -- folder_id to return to when snooze expires (usually Inbox=1); exposed as snooze_folder_id in the API
     send_error    TEXT,                    -- last sendmail error for a scheduled message that failed to send
     send_failure_count INTEGER NOT NULL DEFAULT 0, -- consecutive send failures; message moved to Drafts after 3; also non-zero for messages in Drafts that were moved there after exhausting retries
     created_at    TEXT    NOT NULL,        -- RFC 3339 UTC, time of storage
@@ -251,7 +251,7 @@ CREATE VIRTUAL TABLE IF NOT EXISTS messages_fts USING fts5(
 -- message content is searchable via body_text regardless of the original MIME structure.
 ```
 
-Maintained by triggers:
+Maintained by triggers. **Note on sanitization and searchability:** when `body_text` is derived from the sanitized `body_html` (no plain-text part present), content removed by the sanitizer (e.g. `<script>` text, `<style>` blocks) is not indexed and therefore unsearchable. This is intentional — unsanitized content should not appear in FTS results.
 
 ```sql
 CREATE TRIGGER IF NOT EXISTS messages_fts_insert AFTER INSERT ON messages BEGIN
@@ -326,7 +326,7 @@ CREATE TABLE IF NOT EXISTS contacts (
 CREATE INDEX IF NOT EXISTS idx_contacts_address ON contacts(address);
 ```
 
-Contacts are upserted automatically on message receipt (From address) and on send (To, Cc, Bcc addresses). On auto-upsert, `address` is inserted if not present; if a row already exists, `name` is updated only when the stored `name` is empty (so a manually set name is never overwritten automatically). `address` is lower-cased before storage to ensure case-insensitive deduplication.
+Contacts are upserted automatically on message receipt (From address) and on send (To, Cc, Bcc addresses). The upsert must use a single atomic `INSERT INTO contacts (...) ON CONFLICT(address) DO UPDATE SET name = excluded.name WHERE contacts.name = ''` statement to be safe under concurrent LDA processes. `address` is lower-cased before storage to ensure case-insensitive deduplication. A manually set `name` is never overwritten automatically (only updated when the stored `name` is empty).
 
 ### `filters`
 
@@ -371,7 +371,7 @@ CREATE TABLE IF NOT EXISTS spam_filter_settings (
 );
 ```
 
-A single row (enforced by `CHECK (id = 1)`). Created with defaults on first run. The `score_header` and `score_threshold` fields support deployments where the MTA uses a non-standard score header name or a different numeric scale.
+A single row (enforced by `CHECK (id = 1)`). Initialized with defaults on first run using `INSERT OR IGNORE INTO spam_filter_settings (id, enabled, score_header, score_threshold) VALUES (1, 1, 'X-Spam-Score', 5.0)` — the `OR IGNORE` makes concurrent first-run inserts race-safe. The `score_header` and `score_threshold` fields support deployments where the MTA uses a non-standard score header name or a different numeric scale.
 
 Spam detection also recognises the `X-Spam-Flag` header (value `YES`, case-insensitive) and the `X-Spam-Status` header (value starting with `Yes`, case-insensitive) regardless of the score threshold. Either a flag match or a score-threshold breach independently triggers spam routing.
 
@@ -390,13 +390,24 @@ Use the OpenAPI specification as the source of truth and generate Go server stub
 
 **List endpoint response shapes:** Paginated list endpoints (those accepting `limit`/`offset` parameters) return a wrapper object `{"total": n, "<items>": [...]}` so clients can implement pagination. Non-paginated list endpoints (filters, identities) return a bare JSON array, since all items are always returned.
 
-**Search snippet:** `GET /api/v1/messages/search` returns each result as `MessageSummary` extended with a `snippet` field — a short excerpt (up to 200 characters) of matching text from `body_text`, generated by the SQLite FTS5 `snippet()` function, with matched terms surrounded by `**` markers (e.g. `…the **keyword** in…`).
+**Search snippet:** `GET /api/v1/messages/search` returns each result as `MessageSummary` extended with a `snippet` field — a short excerpt (up to 200 characters) of matching text from `body_text`, generated by the SQLite FTS5 `snippet()` function, with matched terms surrounded by `**` markers (e.g. `…the **keyword** in…`). Before returning the snippet in the JSON response, the server must HTML-escape all characters that have special meaning in HTML (`<`, `>`, `&`, `"`) to prevent XSS if the frontend renders the snippet as HTML. The `**` bold markers are added after escaping. The frontend must treat the snippet value as plain text (or escape it again client-side) rather than injecting it as raw HTML.
 
 **Max request body:** 32 MiB (to accommodate raw message uploads; typical JSON operations limited to 1 MiB).
 
 **RFC 5322 message parsing limit:** `POST /api/v1/messages/import` accepts a raw `message/rfc822` body. In addition to the global 32 MiB body cap, the RFC 5322 parser must enforce a **10 MiB limit on the total number of bytes consumed during parsing** (header fields + body parts) before returning an error. This prevents a crafted message with deeply nested MIME structure or extremely long header lines from causing memory exhaustion during parsing even if the raw bytes fit within the body cap.
 
 **Bulk operation ID limits:** Bulk endpoints (`PATCH /api/v1/messages`, `DELETE /api/v1/messages`) accept at most 1000 message IDs per request. Requests exceeding this limit return 400.
+
+**Input length limits:** The following fields have enforced maximum lengths (requests exceeding these return 400):
+
+| Field | Context | Limit |
+|-------|---------|-------|
+| `match_from`, `match_to`, `match_subject` | Filter criteria (evaluated per LDA delivery) | 1000 characters |
+| `score_header` | Spam filter settings (scanned per incoming message) | 200 characters |
+| Contact `name`, identity `name`, folder `name` | General | 200 characters |
+| Identity `signature` | Stored and transmitted in compose form | 50 KiB (51 200 bytes) |
+| Search `q` parameter | Full-text search query | 500 characters |
+| Contact autocomplete `q` parameter | Substring filter | 500 characters |
 
 **Error responses:** `{ "error": "human-readable message" }` with status `400`, `401`, `404`, `409`, or `500`.
 
@@ -413,6 +424,7 @@ Example: input `it's a "test"` becomes `"it's a ""test"""`. The escaping must be
 - `POST /api/v1/folders` — create a user-defined folder
 - `PATCH /api/v1/folders/{id}` — update folder name and/or position
 - `DELETE /api/v1/folders/{id}` — delete a user-created folder (messages moved to Trash)
+- `PATCH /api/v1/folders/reorder` — reorder folders
 - `DELETE /api/v1/folders/{folder_id}/messages` — delete all messages in a folder
 
 #### Messages
@@ -437,8 +449,8 @@ Example: input `it's a "test"` becomes `"it's a ""test"""`. The escaping must be
 - `GET /api/v1/attachments/{id}` — download attachment data
 
 **Attachment download security:** The response always uses `Content-Type: application/octet-stream` regardless of the stored `content_type` value (which comes from the untrusted sender and may be attacker-controlled). The `Content-Disposition` header is constructed as follows:
-- Strip all CR (`\r`), LF (`\n`), NUL (`\0`), and double-quote (`"`) characters from the filename to prevent response header injection and parameter delimiter breakout.
-- If the sanitized filename contains only printable ASCII characters (U+0020–U+007E, excluding `"`, `\r`, `\n`, `\0`): emit `Content-Disposition: attachment; filename="<sanitized>"`.
+- Strip all CR (`\r`), LF (`\n`), NUL (`\0`), and double-quote (`"`) characters from the filename to prevent response header injection and parameter delimiter breakout. Quote-stripping happens first, before the ASCII/non-ASCII check.
+- After stripping, if the sanitized filename contains only printable ASCII characters (U+0020–U+007E, excluding `"`, `\r`, `\n`, `\0`): emit `Content-Disposition: attachment; filename="<sanitized>"`.
 - If the sanitized filename contains any non-ASCII characters (U+0080 and above): emit the RFC 8187 encoded form only — `Content-Disposition: attachment; filename*=UTF-8''<percent-encoded>` — where the percent-encoding follows RFC 3986 and encodes all octets outside the `attr-char` set defined in RFC 8187.
 
 #### Scheduled messages
@@ -457,7 +469,7 @@ Example: input `it's a "test"` becomes `"it's a ""test"""`. The escaping must be
 - `POST /api/v1/filters` — create a filter
 - `PUT /api/v1/filters/{id}` — replace a filter
 - `DELETE /api/v1/filters/{id}` — delete a filter
-- `POST /api/v1/filters/reorder` — reorder filters
+- `PATCH /api/v1/filters/reorder` — reorder filters
 
 #### Spam filter
 - `GET /api/v1/spam-filter` — get spam filter settings
@@ -468,7 +480,7 @@ Example: input `it's a "test"` becomes `"it's a ""test"""`. The escaping must be
 - `POST /api/v1/identities` — create an identity
 - `PUT /api/v1/identities/{id}` — replace an identity
 - `DELETE /api/v1/identities/{id}` — delete an identity
-- `POST /api/v1/identities/reorder` — reorder identities
+- `PATCH /api/v1/identities/reorder` — reorder identities
 
 #### Contacts
 - `GET /api/v1/contacts` — list contacts (supports autocomplete via `q` parameter)
@@ -505,7 +517,7 @@ When invoked as `mymail -lda`, the program:
      - Collects inline image parts (MIME parts with a `Content-ID` header referenced by `cid:` in the HTML body) and embeds them into `body_html` as `data:` URIs (see HTML Sanitization). These parts are **not** stored in the `attachments` table.
      - Collects remaining `attachment` parts (Content-Disposition: attachment, or non-displayable parts without a Content-ID reference) → stored in `attachments` table
    - Falls back: if no `Date` header, use current time. If no `Message-ID`, generate one.
-   - Handles encoded words (RFC 2047) in headers.
+   - Handles encoded words (RFC 2047) in headers and RFC 2231 encoded parameters (e.g. `filename*=UTF-8''...`) in MIME `Content-Disposition` and `Content-Type` parameter values. RFC 2047 encoded words must not be applied inside MIME parameter values; RFC 2231 is the correct encoding for non-ASCII filenames.
 4. Duplicate detection: if a `Message-ID` is present, query `SELECT EXISTS(SELECT 1 FROM messages WHERE message_id = ?)`. If the message already exists, log nothing and exit `0`. This early check avoids running spam detection and filters for messages that will not be stored. Messages without a `Message-ID` skip this check (they are always inserted).
 5. Applies spam detection and user-defined filters (see Filter Application).
 6. Inserts the message record and attachments in a single transaction using `INSERT OR IGNORE` on the `messages` table. The `UNIQUE` constraint on `message_id` acts as a race-safe guard: if two concurrent LDA processes attempt to deliver the same `Message-ID` simultaneously, only one will succeed; the other will find 0 rows inserted, log nothing, and exit `0`.
@@ -538,7 +550,7 @@ Filters are loaded from the database ordered by `position ASC`. For each filter:
    - `move` → set `folder_id` to the filter's `folder_id`
    - `trash` → set `folder_id` to Trash (id=4)
    - `mark_read` → set `read=1` (does not change `folder_id`)
-   - `drop` → exit immediately without inserting anything; return exit code `0` to the MTA (the message is silently discarded, not bounced)
+   - `drop` → exit immediately without inserting anything; return exit code `0` to the MTA (the message is silently discarded, not bounced). A `drop` action always wins, even if Phase 1 spam detection set the folder to Junk — the message is discarded entirely rather than stored in Junk.
 4. If `stop=1`, halt filter evaluation. (`drop` always implies stop — continuing after a drop is meaningless.)
 
 The final `folder_id` after both phases determines where the message is stored. This means user-defined filters can rescue a spam-tagged message from Junk (e.g. a filter matching a known-good sender with `action=move` targeting Inbox) or can send a non-spam message directly to Junk (`action=move, folder_id=7`).
@@ -592,8 +604,9 @@ Setting `read = 0` means the next poll of `GET /api/v1/folders` will see an incr
 ### Scheduler Robustness
 
 - The scheduler holds the SQLite write lock only for the duration of each individual UPDATE, not across the full tick. This keeps the database available to the HTTP server between updates.
-- **Re-entrance guard:** The scheduler uses a mutex so that if a tick takes longer than 60 seconds (e.g. `sendmail` is slow), the next tick is skipped entirely rather than running concurrently. This prevents double-sends.
-- **Conditional UPDATE:** Before sending, the scheduler UPDATE uses `WHERE send_at IS NOT NULL AND folder_id = 5` so that a message cancelled concurrently by the HTTP handler (which clears `send_at` and moves it to Drafts) is not sent.
+- **Re-entrance guard:** The scheduler uses a mutex so that if a tick takes longer than 60 seconds (e.g. `sendmail` is slow), the next tick is skipped entirely rather than running concurrently. This prevents double-sends within a single server process.
+- **Known limitation — double-send on restart:** If the server is restarted while a `sendmail` process is still running for a scheduled message, the message remains in the Scheduled folder and the new scheduler instance will retry. If the original `sendmail` also delivers successfully, the message is sent twice. The conditional UPDATE guard (`WHERE send_at IS NOT NULL AND folder_id = 5`) prevents a duplicate database record but cannot prevent a duplicate email delivery. This is an accepted trade-off of the "no send queue" design.
+- **Conditional UPDATE:** Before sending, the scheduler UPDATE uses `WHERE send_at IS NOT NULL AND folder_id = 5` so that a message cancelled concurrently by the HTTP handler is not sent. The `DELETE /api/v1/scheduled/{id}` handler **must** clear `send_at` and set `folder_id = 3` in a single `UPDATE` statement (not two separate statements), to avoid a window where the scheduler sees both conditions satisfied before the handler completes.
 - If the server is offline when a `send_at` or `snoozed_until` deadline passes, the scheduler processes the overdue items on the next startup/tick. Deferred sends may go out late; snoozed messages will reappear late. This is acceptable given the "simple, let the MTA handle reliability" design philosophy.
 - The scheduler goroutine is stopped cleanly on server shutdown via a context cancellation.
 
@@ -674,7 +687,7 @@ If auto-detection of all four variants is needed (e.g. files from SVR4-derived c
 - Each source file/directory is imported using batched transactions: commit every 500 messages. This bounds the WAL file size and prevents the write lock from being held for the full duration of large imports. If a batch fails, only that batch is rolled back; previously committed batches are retained. A warning is printed for the failed batch.
 - The full LDA parsing pipeline runs for each imported message: HTML sanitization, `cid:` inline image resolution, `body_text` derivation from `body_html` when no plain-text part exists, and attachment extraction. The only steps skipped are spam detection and user-defined filter application (messages go directly to the target folder specified in the mapping argument).
 - For Maildir, map the `S` (Seen) flag from the message filename to `read=1`.
-- The mbox `From ` separator line is **not** part of the RFC 5322 message and must be stripped before storing the `raw` BLOB.
+- The mbox `From ` separator line is **not** part of the RFC 5322 message. The timestamp on the `From ` line must be parsed and saved **before** the line is stripped (it is used as the `date` fallback when the message lacks a `Date` header). After extracting the timestamp, strip the `From ` line before storing the `raw` BLOB.
 - mbox files can be large (multi-GB). Use the streaming `NextMessage()` API; do not load the entire file into memory.
 - Preserve the original `Date` header as the message's `date` field. If absent, fall back to the mtime of the Maildir file (for Maildir) or the timestamp on the `From ` separator line (for mbox).
 
@@ -695,7 +708,7 @@ Users with MBX files or other unsupported formats can pre-convert using standard
 The send flow in the service layer:
 
 1. Construct a MIME message:
-   - `Date`: current time (RFC 5322 format)
+   - `Date`: current time at the moment of send (RFC 5322 format). For deferred messages, this is the scheduler execution time, not the compose time (`created_at`). This matches the convention used by most MUAs, which set `Date` to actual send time.
    - `Message-ID`: generate `<uuid@domain>` where `domain` is the domain part of the selected sender's `From` address (e.g. if the identity's address is `alice@example.com`, use `example.com`)
    - `MIME-Version: 1.0`
    - `Reply-To`: if `reply_to_addr` is non-empty, add a `Reply-To` header with that value; omit the header otherwise.
@@ -710,6 +723,8 @@ The send flow in the service layer:
 5. On non-zero exit: capture stderr (max 4 KB) and return it as an error. No retries — the MTA owns queueing.
 6. On success: upsert each recipient from To, Cc, and Bcc into the `contacts` table using the same rule as the LDA (lower-case address; insert if absent, update `name` only if stored `name` is empty).
 7. Store the sent message in the Sent folder with the `Bcc` header intact in the raw BLOB. The `Bcc` header is intentionally preserved: it is hidden from recipients (the MTA strips it from the outgoing copies; `sendmail -t` does not re-send to addresses already delivered), but it remains visible to anyone with access to the sending account so the sender has a complete record of who received the message.
+
+> **sendmail Bcc-stripping dependency:** mymail relies on `sendmail` (and the MTA behind it) to strip the `Bcc` header before delivering to remote recipients. Most MTA implementations (Postfix, Sendmail, Exim) strip `Bcc` by default. Deployments using atypical `sendmail` wrappers should verify this behavior. If the MTA forwards the `Bcc` header intact, Bcc recipients are exposed to To/Cc recipients.
 
 ---
 
@@ -759,6 +774,8 @@ Incoming HTML bodies and the HTML part of outgoing messages are sanitized using 
 | `height`           |                              |
 
 **Explicitly forbidden regardless of property name:** any value containing `url(`, `expression(`, `-moz-binding`, or a CSS comment (`/*`). These are stripped at the value level before the property allowlist is checked. This prevents URL-based tracking and legacy IE CSS expression attacks.
+
+**CSS property matching:** Property names in the `style` attribute must be parsed by a proper CSS parser (not by simple string splitting or prefix matching) so that properties with unexpected whitespace, comments, or encoding cannot bypass the allowlist. For example, `background` (the shorthand, forbidden) and `background-color` (allowed) must be distinguished by exact property name after parsing, not by substring matching.
 
 **Not allowed:** `background` (shorthand, could include `background-image`), `position`, `display`, `overflow`, `content`, `z-index`, `opacity`, and all vendor-prefixed properties (`-webkit-*`, `-moz-*`, etc.).
 
@@ -885,7 +902,7 @@ The Scheduled folder is shown in the sidebar so the user can review and cancel p
    **Thread display:** When the message has a non-empty `references` list or `in_reply_to`, the UI calls `GET /api/v1/messages/{id}/thread`. If the result contains more than one message, a collapsed conversation strip is shown below the current message body. Each entry shows the sender, date, and subject snippet; clicking an entry expands it inline to show the full body (fetches `GET /api/v1/messages/{entryId}` on first expand). The current message is always shown expanded. Entries are ordered oldest-first. If the thread contains only the current message, no strip is shown.
 3. **Compose / Reply / Reply All / Forward** — form with a **From** selector (dropdown of all identities, pre-selected to the default; or, when replying, to the identity whose address matches the original To/Cc), To, Cc, Bcc, Reply-To (optional, collapsed by default behind an "Add Reply-To" link), Subject, a rich-text body editor (see below), file upload for attachments. A **Send later** toggle reveals a date/time picker for `send_at`; when set, the Send button becomes "Schedule".
 
-   **Rich-text editor:** The message body is edited using [Quill](https://quilljs.com/) (vendored, no CDN dependency). Quill operates in its default `delta` mode; on send/save the UI serialises the content as both HTML (via `quill.root.innerHTML`) and plain text (via `quill.getText()`). Both `body_html` and `body_text` are always sent; if the editor is empty, both fields are sent as empty strings. The Quill toolbar exposes: Bold, Italic, Underline, Ordered list, Bullet list, Link, and Clean (remove formatting). A **Send later** toggle reveals a date/time picker for `send_at`; when set, the Send button becomes "Schedule". Auto-save to Drafts on a 30-second timer: on the first save `POST /api/v1/drafts` (or `-with-attachments`) is called and the returned `id` is stored; subsequent saves call `PUT /api/v1/drafts/{id}` (or `-with-attachments`) to update the existing draft. **Navigate-away behavior:** when the user navigates away from a compose form that has unsaved content, an immediate draft save is triggered before navigation proceeds. **Auto-save and forward attachments:** `PUT /api/v1/drafts/{id}` (the JSON endpoint) does not modify attachment rows — attachments copied from the source message during the initial `POST` persist through all subsequent auto-saves. To remove individual attachments incrementally, the UI calls `DELETE /api/v1/drafts/{id}/attachments/{attachment_id}` separately. Only `PUT /api/v1/drafts-with-attachments/{id}` replaces attachments wholesale. Drafts are always stored with `read = 1` so they never contribute to the unread badge on the Drafts folder. Scheduled messages auto-save to Drafts until explicitly scheduled. The To, Cc, and Bcc fields offer address autocomplete: as the user types, the UI queries `GET /api/v1/contacts?q=<input>` and shows a dropdown of matching name + address suggestions.
+   **Rich-text editor:** The message body is edited using [Quill](https://quilljs.com/) (vendored, no CDN dependency). Quill operates in its default `delta` mode; on send/save the UI serialises the content as both HTML (via `quill.root.innerHTML`) and plain text (via `quill.getText()`). Both `body_html` and `body_text` are always sent; if the editor is empty, both fields are sent as empty strings. The Quill toolbar exposes: Bold, Italic, Underline, Ordered list, Bullet list, Link, and Clean (remove formatting). A **Send later** toggle reveals a date/time picker for `send_at`; when set, the Send button becomes "Schedule". Auto-save to Drafts on a 30-second timer. **Exception:** when the compose form opens for a **Forward** action, `POST /api/v1/drafts` is called immediately at form-open time (before the first 30-second tick) because `source_message_id` — needed to copy attachments from the source message — is only valid on the initial `POST`. For Reply, Reply-All, and new compose (no `source_message_id`), the first `POST` is deferred until the first 30-second tick fires. The returned draft `id` is stored; subsequent saves call `PUT /api/v1/drafts/{id}` (or `-with-attachments`) to update the existing draft. **Navigate-away behavior:** when the user navigates away from a compose form that has unsaved content, an immediate draft save is triggered before navigation proceeds. **Auto-save and forward attachments:** `PUT /api/v1/drafts/{id}` (the JSON endpoint) does not modify attachment rows — attachments copied from the source message during the initial `POST` persist through all subsequent auto-saves. To remove individual attachments incrementally, the UI calls `DELETE /api/v1/drafts/{id}/attachments/{attachment_id}` separately. Only `PUT /api/v1/drafts-with-attachments/{id}` replaces attachments wholesale. Drafts are always stored with `read = 1` so they never contribute to the unread badge on the Drafts folder. Scheduled messages auto-save to Drafts until explicitly scheduled. The To, Cc, and Bcc fields offer address autocomplete: as the user types, the UI queries `GET /api/v1/contacts?q=<input>` and shows a dropdown of matching name + address suggestions.
 
    **Send button behavior:** The Send button is disabled and shows a spinner while the send request is in-flight. Before submitting the send request, the UI performs an immediate draft save (equivalent to an auto-save tick), ensuring a draft copy exists in the Drafts folder prior to every send attempt regardless of whether the 30-second timer has previously fired. If `POST /api/v1/messages/send` returns an error (including HTTP 500 from a `sendmail` failure), the compose form remains open with all content intact and the error is displayed inline below the Send button (not as a toast). The pre-send draft save means content is always recoverable from Drafts even if the user closes the tab after a send failure.
 
@@ -894,8 +911,8 @@ The Scheduled folder is shown in the sidebar so the user can review and cancel p
    | Field           | Reply                                                                                   | Reply All                                                                         | Forward                                                                                                                                                 |
    |-----------------|-----------------------------------------------------------------------------------------|-----------------------------------------------------------------------------------|---------------------------------------------------------------------------------------------------------------------------------------------------------|
    | **From**        | Identity whose address appears in the original To or Cc; falls back to default identity | Same as Reply                                                                     | Default identity                                                                                                                                        |
-   | **To**          | Original `Reply-To` address if present; otherwise original `From` address               | Original `Reply-To` address if present; otherwise original `From` address. If the resulting address matches the chosen From identity's own address, it is removed (prevents replying to yourself). | Empty                                                                                                                                                   |
-   | **Cc**          | Empty                                                                                   | All addresses from original To + Cc, minus the chosen From identity's own address | Empty                                                                                                                                                   |
+   | **To**          | Original `Reply-To` address if present; otherwise original `From` address               | Original `Reply-To` address if present; otherwise original `From` address. If this address matches the chosen From identity's own address, it is removed (prevents replying to yourself). Additionally, any occurrence of the chosen From identity's address in the original To field is removed before adding those addresses to Cc. | Empty                                                                                                                                                   |
+   | **Cc**          | Empty                                                                                   | All addresses from original To + Cc, minus the chosen From identity's own address. The chosen From identity's address is removed from both To and Cc when building reply-all. | Empty                                                                                                                                                   |
    | **Subject**     | `Re: <original subject>` (no double `Re:`)                                              | `Re: <original subject>` (no double `Re:`)                                        | `Fwd: <original subject>`                                                                                                                               |
    | **In-Reply-To** | Original `Message-ID`                                                                   | Original `Message-ID`                                                             | Empty                                                                                                                                                   |
    | **References**  | Original references + original `Message-ID`                                             | Original references + original `Message-ID`                                       | Empty                                                                                                                                                   |
