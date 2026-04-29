@@ -69,6 +69,8 @@ The full REST API contract is in `openapi.yaml`. Use ogen to generate Go server 
 
 **Search snippet:** Search results include a `snippet` field — a short excerpt (up to 200 characters) of matching text, with matched terms surrounded by `**` markers. The snippet is HTML-escaped to prevent XSS.
 
+**Contact autocomplete:** When `GET /api/v1/contacts` is used for address-field autocomplete dropdowns, the Web UI sends `limit=10`. If `total > 10`, the dropdown shows a "type more to narrow" hint rather than paginating.
+
 ### Endpoint Summary
 
 #### Folders
@@ -78,6 +80,7 @@ The full REST API contract is in `openapi.yaml`. Use ogen to generate Go server 
 - `DELETE /api/v1/folders/{id}` — delete a user-created folder (messages moved to Trash)
 - `PATCH /api/v1/folders/reorder` — reorder folders
 - `DELETE /api/v1/folders/{folder_id}/messages` — delete all messages in a folder
+- `POST /api/v1/folders/{folder_id}/mark-all-read` — mark all messages in a folder as read (atomic)
 
 #### Messages
 - `GET /api/v1/folders/{folder_id}/messages` — list messages in a folder
@@ -143,7 +146,7 @@ The full REST API contract is in `openapi.yaml`. Use ogen to generate Go server 
 `GET /api/v1/messages/{id}/thread` determines membership using (in order):
 
 1. **Header-based (primary):** Build a directed graph where message A links to message B if B's `Message-ID` appears in A's `In-Reply-To` or `References` header. Take the transitive closure to find all messages in the same connected component.
-2. **Subject-based fallback:** If header-based grouping yields only the single requested message, group by normalized subject: strip leading `Re:`, `Fwd:`, `Fw:` prefixes (any combination, case-insensitive, repeatedly) and compare case-insensitively.
+2. **Subject-based fallback:** If header-based grouping yields only the single requested message, group by normalized subject: strip leading reply/forward prefixes (any combination, case-insensitive, repeatedly) and compare case-insensitively. Strip: `Re:`, `Fwd:`, `Fw:`, `AW:`, `WG:`, `RES:`, `ENC:`, `VS:`, `SV:`.
 
 Thread results include messages from all folders, ordered by `date ASC`.
 
@@ -172,7 +175,7 @@ All timestamps stored as UTC RFC 3339 strings.
 
 ### Schema Migrations
 
-Versioned using `PRAGMA user_version`. On every startup the server reads the current version and applies any missing migrations in order, each in a transaction. `PRAGMA user_version` is set inside the same transaction as the DDL, so a crash mid-migration leaves the version unchanged and is retried on next startup.
+Versioned using `PRAGMA user_version`. On every startup the server reads the current version and applies any missing migrations in order, each in a transaction. `PRAGMA user_version` is set inside the same transaction as the DDL, so a crash mid-migration leaves the version unchanged and is retried on next startup. **Note:** SQLite's handling of `PRAGMA user_version` inside a transaction may vary by version; treat the atomicity guarantee as best-effort.
 
 Each `if v < N` block is checked independently (not `else if`), so a single startup can apply multiple sequential migrations.
 
@@ -196,6 +199,12 @@ CREATE TABLE IF NOT EXISTS folders (
 
 Built-in folders seeded on first run (id=1..7); user-created folders have `id >= 100`.
 
+The `unread_count` field in the `Folder` API response is computed on-the-fly:
+```sql
+SELECT COUNT(*) FROM messages WHERE folder_id = ? AND read = 0
+```
+No denormalized counter is maintained.
+
 | id | name      | slug      | position |
 |----|-----------|-----------|----------|
 | 1  | Inbox     | inbox     | 0        |
@@ -214,7 +223,7 @@ CREATE TABLE IF NOT EXISTS messages (
     folder_id     INTEGER NOT NULL REFERENCES folders(id),
     message_id    TEXT UNIQUE,
     in_reply_to   TEXT,
-    references    TEXT,                    -- space-separated; serialized as JSON array by the API
+    references    TEXT,                    -- newline-separated (\n); serialized as JSON array by the API
     from_addr     TEXT    NOT NULL,
     to_addr       TEXT    NOT NULL,
     cc_addr       TEXT    NOT NULL DEFAULT '',
@@ -230,7 +239,7 @@ CREATE TABLE IF NOT EXISTS messages (
     has_attachments INTEGER NOT NULL DEFAULT 0,
     send_at       TEXT,                    -- RFC 3339 UTC; non-NULL = deferred send
     snoozed_until TEXT,                    -- RFC 3339 UTC; non-NULL = snoozed
-    snooze_folder INTEGER,                 -- folder_id to return to on snooze expiry; exposed as snooze_folder_id in API
+    snooze_folder INTEGER REFERENCES folders(id) ON DELETE SET NULL, -- folder_id to return to on snooze expiry; exposed as snooze_folder_id in API
     send_error    TEXT,                    -- last sendmail error (max 4 KB stored)
     send_failure_count INTEGER NOT NULL DEFAULT 0,
     created_at    TEXT    NOT NULL,
@@ -393,6 +402,8 @@ Use Go standard library (`net/mail`, `mime`, `mime/multipart`, `mime/quotedprint
 - Decode RFC 2231 encoded parameters (e.g. `filename*=UTF-8''...`) in `Content-Disposition` and `Content-Type` parameter values.
 - RFC 2047 must not be applied inside MIME parameter values.
 
+**MIME body part search strategy:** Use depth-first search of the primary body tree to locate `text/plain` and `text/html` parts. Skip `message/rfc822` sub-parts entirely (treat them as opaque attachments, not as a source of body text). Within a `multipart/alternative`, prefer `text/html` over `text/plain` when both are present (as they are siblings at the same level, not nested).
+
 ### Duplicate Detection
 
 ```sql
@@ -401,15 +412,21 @@ SELECT EXISTS(SELECT 1 FROM messages WHERE message_id = ?)
 
 Run before spam detection and filter evaluation. Use `INSERT OR IGNORE` on the `messages` table as a race-safe guard for concurrent LDA processes.
 
+### Message-ID Generation in LDA Mode
+
+When an incoming message lacks a `Message-ID` header, generate one as `<uuid@domain>` where `domain` is extracted from the first address in the `To` header. If the `To` header is absent or unparseable, fall back to `localhost`.
+
 ### Database Insertion
 
 Insert message record and attachments in a single transaction.
 
 ### Contacts Upsert
 
-Only the `From` address is upserted for incoming mail (To/Cc not auto-added). Lower-case the address before storage.
+Only the `From` address is upserted for incoming mail (To/Cc not auto-added). Lower-case the address before storage using Unicode simple casefolding (`golang.org/x/text/cases` with `language.Und` and `cases.Fold()`).
 
 ### Error Handling
+
+**Definition of parse failure:** any error returned by `net/mail.ReadMessage()` (missing or malformed headers) is a hard parse failure. Missing optional fields (e.g. absent `Date`, absent `Message-ID`, empty `Subject`) are treated as warnings and handled gracefully, not as failures.
 
 - `SQLITE_BUSY`: retry with exponential backoff for up to 30 seconds, then exit `75`.
 - Parse failure: log to stderr, exit `1`.
@@ -461,9 +478,9 @@ The scheduler holds the SQLite write lock only for the duration of each individu
 ### Implementation Notes
 
 - Open database and run migrations before importing.
-- Use batched transactions: commit every 500 messages to bound WAL file size. If a batch fails, only that batch is rolled back; previously committed batches are retained.
+- Use batched transactions: commit every 500 messages to bound WAL file size. If a batch fails, only that batch is rolled back; previously committed batches are retained. There is no way to identify which individual messages were committed after a partial failure — re-run the full import after fixing the source data (duplicate detection will skip already-imported messages).
 - Run the full LDA parsing pipeline (HTML sanitization, `cid:` resolution, `body_text` derivation, attachment extraction) for each message. Skip only spam detection and filter application.
-- For Maildir, map the `S` (Seen) flag to `read=1`.
+- For Maildir, map the `S` (Seen) flag to `read=1` and the `F` (Flagged) flag to `flagged=1`.
 - For mbox: parse and save the `From ` separator line timestamp **before** stripping it (used as `date` fallback). Strip the `From ` line before storing the `raw` BLOB. Use streaming `NextMessage()` API — do not load the entire file into memory.
 - `date` field: use the original `Date` header. Fallback: mtime of the Maildir file (Maildir) or `From ` separator timestamp (mbox). Never use current time as fallback during import.
 
@@ -478,7 +495,8 @@ The scheduler holds the SQLite write lock only for the duration of each individu
 4. Encode non-ASCII header values as RFC 2047 encoded words.
 5. Encode attachment data as base64.
 6. Body structure:
-   - `multipart/alternative` for text + HTML parts.
+   - If only one body part is provided: single `text/plain` or `text/html` part directly.
+   - If both text and HTML are provided: `multipart/alternative` with both parts.
    - Wrap in `multipart/mixed` if attachments are present.
 7. Add `Reply-To` header only if `reply_to_addr` is non-empty.
 
@@ -561,7 +579,7 @@ Use [Quill](https://quilljs.com/) (vendored). On send/save, serialize as both HT
 
 ### Mark All As Read
 
-Fetch message IDs in batches of 200 using `GET /api/v1/folders/{id}/messages?limit=200&unread=true&offset=0` until all unread IDs are collected, then send `PATCH /api/v1/messages` requests with up to 200 IDs each.
+Call `POST /api/v1/folders/{id}/mark-all-read`. This single atomic request replaces the previous client-side batching approach.
 
 ### HTML Body Display
 

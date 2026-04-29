@@ -573,7 +573,7 @@ paths:
       summary: Delete all messages in folder
       description: |
         Delete all messages in a folder using two-step semantics: messages not in Trash are moved
-        to Trash; messages already in Trash are permanently deleted. Returns 400 for Scheduled and Snoozed folders.
+        to Trash; messages already in Trash are permanently deleted. Returns 400 for Scheduled (id=5), Snoozed (id=6), and Drafts (id=3) folders.
       parameters:
         - name: folder_id
           in: path
@@ -600,6 +600,31 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
 
+  /folders/{folder_id}/mark-all-read:
+    post:
+      summary: Mark all messages in folder as read
+      description: Atomically marks every message in the folder as read. Returns the count of messages updated.
+      parameters:
+        - name: folder_id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  updated:
+                    type: integer
+                    description: Number of messages marked as read.
+                required: [updated]
+        '404':
+          $ref: '#/components/responses/NotFound'
+
   # ── Messages ───────────────────────────────────────────────────────────────
 
   /messages/search:
@@ -620,19 +645,21 @@ paths:
         - name: date_from
           in: query
           description: |
-            Inclusive lower bound (ISO 8601 date, e.g. `2025-01-15`). Only messages with
-            `date >= <date_from>T00:00:00Z` are returned (start of that day in UTC).
+            Inclusive lower bound (RFC 3339 timestamp, e.g. `2025-01-15T00:00:00Z`). Only messages
+            with `date >= date_from` are returned. Clients should set this to the start of the desired
+            day in their local timezone (e.g. `2025-01-15T00:00:00+02:00`).
           schema:
             type: string
-            format: date
+            format: date-time
         - name: date_to
           in: query
           description: |
-            Inclusive upper bound (ISO 8601 date, e.g. `2025-01-15`). Only messages with
-            `date < <date_to+1day>T00:00:00Z` are returned (i.e. through the end of that day in UTC).
+            Exclusive upper bound (RFC 3339 timestamp, e.g. `2025-01-16T00:00:00Z`). Only messages
+            with `date < date_to` are returned. Clients should set this to the start of the day
+            after the desired end day in their local timezone (e.g. `2025-01-16T00:00:00+02:00`).
           schema:
             type: string
-            format: date
+            format: date-time
         - name: limit
           in: query
           schema:
@@ -977,8 +1004,8 @@ paths:
            message itself is always included.
         2. **Subject-based fallback:** If header-based grouping yields only the single requested message
            (no links found to any other stored message), group by normalised subject: strip leading
-           `Re:`, `Fwd:`, `Fw:` prefixes (any combination, case-insensitive) and compare the remainder
-           case-insensitively.
+           reply/forward prefixes (any combination, case-insensitive) — `Re:`, `Fwd:`, `Fw:`, `AW:`,
+           `WG:`, `RES:`, `ENC:`, `VS:`, `SV:` — and compare the remainder case-insensitively.
 
         The endpoint includes messages from all folders (Inbox, Sent, Trash, Snoozed, etc.) so the
         full conversation is always visible.
@@ -1640,7 +1667,10 @@ paths:
   /contacts:
     get:
       summary: List contacts
-      description: List contacts ordered by name (empty names last), then address. Supports autocomplete filtering.
+      description: |
+        List contacts ordered by name (empty names last), then address. Supports autocomplete filtering.
+        When used for address-field autocomplete dropdowns, clients should send `limit=10`. If `total`
+        exceeds the requested limit, the UI should show a "type more to narrow" hint rather than paginating.
       parameters:
         - name: q
           in: query

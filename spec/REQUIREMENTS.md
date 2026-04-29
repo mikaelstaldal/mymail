@@ -79,7 +79,7 @@ Behaviour:
 - Filters are **not** applied during import — messages go directly to the specified target folder.
 - A running count is printed to stdout as each folder completes: `inbox: 1042 imported, 3 skipped`.
 - On completion, a summary line is printed: `Total: 2381 imported, 17 skipped`.
-- Exit code `0` on success, `1` on any error. A single unparseable message logs a warning and continues.
+- Exit code `0` on success, `1` on any error. A single unparseable message logs a warning and continues. A message is considered unparseable when `net/mail.ReadMessage()` returns an error (missing or malformed headers); missing optional fields (e.g. absent `Date`) are warnings, not failures.
 - **Concurrency:** Running import concurrently with a running server against the same data directory is not supported.
 
 
@@ -142,7 +142,7 @@ Each identity has:
 ### Contacts
 
 Each contact has:
-- Email address (lower-cased, unique)
+- Email address (lower-cased using Unicode simple casefolding, unique)
 - Display name (may be empty)
 - Created and updated timestamps
 
@@ -225,7 +225,7 @@ The send flow:
 1. Constructs a MIME message from the provided fields (subject, to, cc, bcc, reply-to, body, attachments).
    - `Date` is set to the current time at send (not compose time).
    - `Message-ID` is generated as `<uuid@domain>` using the sender's address domain.
-   - Body is `multipart/alternative` with plain-text and/or HTML parts; wrapped in `multipart/mixed` if attachments are present.
+   - Body is a single `text/plain` or `text/html` part when only one body type is provided; `multipart/alternative` when both are provided; wrapped in `multipart/mixed` if attachments are present.
    - User-supplied header values are sanitized to strip control characters.
 2. Pipes the message to `sendmail -t -oi` with a 30-second timeout.
 3. On failure: returns the sendmail stderr as an error. No retries.
@@ -260,7 +260,7 @@ A single file containing multiple RFC 5322 messages. Each message begins with a 
 
 #### Maildir
 
-Each message stored as a separate file. A Maildir root contains `new/`, `cur/`, and `tmp/` subdirectories. The `S` (Seen) flag in the filename maps to `read=1`.
+Each message stored as a separate file. A Maildir root contains `new/`, `cur/`, and `tmp/` subdirectories. The `S` (Seen) flag in the filename maps to `read=1`. The `F` (Flagged) flag maps to `flagged=1`.
 
 #### MBX (not supported)
 
@@ -360,7 +360,7 @@ On first load the UI reads `localStorage` for the last selected folder and navig
 ```
 +-------------------+-----------------------------------+
 |  Folder list      |  Message list (subject, from,    |
-|  (sidebar)        |  date, snippet)                  |
+|  (sidebar)        |  date)                           |
 |                   +-----------------------------------+
 |  - Inbox (3)      |  Message detail / compose pane   |
 |  - Sent           |  (full headers, body, attachments)|
@@ -451,7 +451,7 @@ Message detail always shows the full "Apr 3, 14:32 CEST" form with timezone abbr
 - **404 on navigation:** shows inline "Not found" in the detail pane.
 - **Auth failure (401):** redirects to the browser's built-in Basic Auth dialog.
 
-**Junk folder:** Message detail shows a **Not junk** button. All other views show a **Mark as junk** button.
+**Junk folder:** Message detail shows a **Not junk** button (moves to Inbox) and standard Move controls (allows moving to any folder directly). All other views show a **Mark as junk** button.
 
 **Empty folder button:** Trash and Junk views show an **Empty** button (with confirmation prompt).
 
