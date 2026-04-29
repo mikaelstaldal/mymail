@@ -1,7 +1,16 @@
 openapi: 3.0.3
 info:
   title: mymail API
-  description: REST API for mymail — a self-hosted personal email client.
+  description: |
+    REST API for mymail — a self-hosted personal email client.
+
+    **Authentication:** When `-basic-auth-file` is configured, all endpoints except `GET /health`
+    require HTTP Basic Auth. Missing or invalid credentials return `401 Unauthorized` with
+    `WWW-Authenticate: Basic realm="<realm>"`. The `401` response is not individually listed on
+    each endpoint but applies globally to all authenticated endpoints.
+
+    **Error responses** use the schema `{"error": "human-readable message"}` with status
+    `400`, `401`, `404`, `409`, or `500`.
   version: 1.0.0
 
 servers:
@@ -29,7 +38,10 @@ components:
           type: integer
         unread_count:
           type: integer
-      required: [id, name, slug, position, unread_count]
+        created_at:
+          type: string
+          format: date-time
+      required: [id, name, slug, position, unread_count, created_at]
 
     MessageSummary:
       type: object
@@ -98,7 +110,10 @@ components:
           type: array
           items:
             type: string
-          description: Parsed References header. Empty array when the header is absent or empty.
+          description: |
+            Parsed References header. Empty array when the header is absent or empty. Each element
+            is a raw Message-ID string as it appears in the header, including angle brackets
+            (e.g. `<id@domain>`).
         from_addr:
           type: string
         to_addr:
@@ -166,22 +181,29 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/AttachmentMeta'
-      required: [id, folder_id, from_addr, to_addr, cc_addr, bcc_addr, reply_to_addr, subject, date, body_text, body_html, has_external_images, send_failed, read, flagged, created_at, updated_at, attachments]
+      required: [id, folder_id, message_id, in_reply_to, references, from_addr, to_addr, cc_addr, bcc_addr, reply_to_addr, subject, date, body_text, body_html, has_external_images, send_failed, read, flagged, send_at, send_error, snoozed_until, snooze_folder_id, created_at, updated_at, attachments]
 
     SendRequest:
       type: object
+      description: |
+        At least one of `to_addr`, `cc_addr`, or `bcc_addr` must be non-empty. An empty `to_addr`
+        is permitted when `cc_addr` or `bcc_addr` is non-empty.
       properties:
         identity_id:
           type: integer
           description: If absent, the default identity is used.
         to_addr:
           type: string
+          maxLength: 8192
         cc_addr:
           type: string
+          maxLength: 8192
         bcc_addr:
           type: string
+          maxLength: 8192
         reply_to_addr:
           type: string
+          maxLength: 8192
         subject:
           type: string
         body_text:
@@ -199,7 +221,6 @@ components:
           format: date-time
           nullable: true
           description: If present and in the future (≥1 min), schedule instead of sending immediately.
-      required: [to_addr]
 
     DraftRequest:
       type: object
@@ -212,12 +233,16 @@ components:
           description: If absent, the default identity is used.
         to_addr:
           type: string
+          maxLength: 8192
         cc_addr:
           type: string
+          maxLength: 8192
         bcc_addr:
           type: string
+          maxLength: 8192
         reply_to_addr:
           type: string
+          maxLength: 8192
         subject:
           type: string
         body_text:
@@ -239,9 +264,10 @@ components:
           type: integer
           nullable: true
           description: |
-            If present, attachments from this source message are copied server-side into the
+            If present on POST, attachments from this source message are copied server-side into the
             new draft atomically. Used when forwarding a message to pre-populate the draft
-            with the original attachments. Only valid on POST (create); ignored on PUT (replace).
+            with the original attachments. On PUT (replace), this field is silently ignored —
+            no attachments are copied and no error is returned.
 
     Filter:
       type: object
@@ -268,8 +294,9 @@ components:
         stop:
           type: boolean
           description: |
-            When true, stop evaluating subsequent filters after this one matches. Stored as
-            INTEGER (0/1) in the database; exposed as boolean in the API (true = stop, false = continue).
+            When true, evaluation halts after this filter matches and no further filters are
+            evaluated for that message, regardless of whether earlier matching filters had
+            `stop=false`. Stored as INTEGER (0/1) in the database; exposed as boolean in the API.
       required: [id, position, name, match_from, match_to, match_subject, action, stop]
 
     FilterRequest:
@@ -294,6 +321,10 @@ components:
         folder_id:
           type: integer
           nullable: true
+          description: |
+            Required when `action` is `move`. Must reference an existing folder. The Snoozed
+            (id=6) and Scheduled (id=5) folders are not valid targets; a 400 is returned if
+            either is specified.
         stop:
           type: boolean
       required: [action]
@@ -395,19 +426,30 @@ paths:
   /folders:
     get:
       summary: List folders
-      description: Returns all non-hidden folders ordered by position.
+      description: Returns all folders ordered by position.
       responses:
         '200':
           description: OK
           content:
             application/json:
               schema:
-                type: array
-                items:
-                  $ref: '#/components/schemas/Folder'
+                type: object
+                properties:
+                  total:
+                    type: integer
+                  items:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Folder'
+                required: [total, items]
     post:
       summary: Create folder
-      description: Create a user-defined folder. The slug is derived from the name.
+      description: |
+        Create a user-defined folder. The slug is derived from the name by Unicode NFKD
+        normalization, lowercasing, replacing non-alphanumeric runs with hyphens, and trimming
+        leading/trailing hyphens. If the slug collides with an existing one, a numeric suffix
+        (`-2`, `-3`, …) is appended. Leading/trailing whitespace is trimmed from the name before
+        processing.
       requestBody:
         required: true
         content:
@@ -476,8 +518,9 @@ paths:
         that are now in Trash.
 
         Messages in the Snoozed folder (id=6) that have `snooze_folder` pointing to the deleted
-        folder are not moved — they remain snoozed and will return to Inbox via the COALESCE
-        fallback when their snooze expires.
+        folder are not moved — they remain snoozed. The `snooze_folder` column is set to NULL
+        via the `ON DELETE SET NULL` foreign key constraint at deletion time. When snooze expires,
+        the scheduler uses `COALESCE(snooze_folder, 1)` so the message returns to Inbox.
       parameters:
         - name: id
           in: path
@@ -527,6 +570,9 @@ paths:
         List messages in a folder, ordered by date descending. When both `unread` and `flagged`
         query parameters are provided, they are combined with AND semantics (only messages that
         are both unread AND flagged are returned).
+
+        **Accessing drafts:** there is no separate `/drafts` list endpoint. Use
+        `GET /folders/3/messages` (folder_id=3 is the Drafts built-in folder) to list drafts.
       parameters:
         - name: folder_id
           in: path
@@ -562,11 +608,11 @@ paths:
                 properties:
                   total:
                     type: integer
-                  messages:
+                  items:
                     type: array
                     items:
                       $ref: '#/components/schemas/MessageSummary'
-                required: [total, messages]
+                required: [total, items]
         '404':
           $ref: '#/components/responses/NotFound'
     delete:
@@ -630,7 +676,11 @@ paths:
   /messages/search:
     get:
       summary: Search messages
-      description: Full-text search across all folders using FTS5 syntax. Results ordered by relevance. Optionally filtered by date range.
+      description: |
+        Full-text search across all folders using FTS5 phrase-match. Results ordered by relevance.
+        Optionally filtered by date range. The FTS5 `unicode61` tokenizer is used, so searches
+        are case-insensitive. Search results include a `snippet` field (present only in search
+        results, not in `GET /messages/{id}`).
       parameters:
         - name: q
           in: query
@@ -681,7 +731,7 @@ paths:
                 properties:
                   total:
                     type: integer
-                  messages:
+                  items:
                     type: array
                     items:
                       allOf:
@@ -695,7 +745,7 @@ paths:
                                 `body_text`, generated by the SQLite FTS5 `snippet()` function.
                                 Matched terms are surrounded by `**` markers (e.g. `…the **keyword** in…`).
                           required: [snippet]
-                required: [total, messages]
+                required: [total, items]
 
   /messages/send:
     post:
@@ -895,6 +945,8 @@ paths:
         Returns 404 if any of the provided IDs does not exist; no changes are made in that case.
         Returns 400 if more than 1000 IDs are supplied (the `maxItems: 1000` constraint on the `ids`
         array is the enforced limit); no changes are made in that case.
+        The `updated` count equals the number of rows actually modified (no-op updates where the
+        new value equals the existing value are not counted).
       requestBody:
         required: true
         content:
@@ -1023,11 +1075,13 @@ paths:
               schema:
                 type: object
                 properties:
-                  messages:
+                  total:
+                    type: integer
+                  items:
                     type: array
                     items:
                       $ref: '#/components/schemas/MessageSummary'
-                required: [messages]
+                required: [total, items]
         '404':
           $ref: '#/components/responses/NotFound'
 
@@ -1038,7 +1092,10 @@ paths:
         Temporarily hide a message until a future time. The message must be in Inbox or a user
         folder. System folders (Sent, Trash, Junk, Scheduled, Snoozed) are not allowed because
         each has its own specific semantics that would conflict with snooze behaviour.
-        `until` must be a future timestamp at least 1 minute ahead.
+        `until` must be a future timestamp at least 1 minute ahead of the current server time.
+        On expiry, the message is returned to its original folder (the folder it was in at the
+        time this endpoint was called); if that folder has since been deleted, Inbox is used.
+        Concurrent snooze requests on the same message are permitted; the last request wins.
       parameters:
         - name: id
           in: path
@@ -1068,10 +1125,14 @@ paths:
                     type: integer
                   folder_id:
                     type: integer
+                    description: The folder the message was moved to (id=6, Snoozed).
                   snoozed_until:
                     type: string
                     format: date-time
-                required: [id, folder_id, snoozed_until]
+                  snooze_folder_id:
+                    type: integer
+                    description: The folder the message will return to on expiry (the folder it was in before snoozeing).
+                required: [id, folder_id, snoozed_until, snooze_folder_id]
         '400':
           $ref: '#/components/responses/BadRequest'
         '404':
@@ -1106,7 +1167,10 @@ paths:
   /messages/{id}/mark-junk:
     post:
       summary: Mark message as junk
-      description: Moves the message to the Junk folder and marks it as read. Returns 400 if already in Junk.
+      description: |
+        Moves the message to the Junk folder (id=7) and marks it as read. Returns 400 if the
+        message is currently in the Junk folder. This check is based on the current folder_id,
+        not historical state.
       parameters:
         - name: id
           in: path
@@ -1342,6 +1406,60 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
 
+  /drafts/{id}/send:
+    post:
+      summary: Send or schedule a draft
+      description: |
+        Send or schedule the draft identified by `{id}`. The server reads all draft fields and
+        attachments from the database — no request body is needed and no re-upload is required.
+
+        - If `send_at` is null or in the past, the draft is sent immediately: the MIME message is
+          constructed (including all stored attachments), piped to `sendmail`, and on success the
+          draft is deleted and the sent message is stored in the Sent folder (201).
+        - If `send_at` is a future timestamp (≥1 min), the draft is moved to the Scheduled folder
+          without calling sendmail (202). The scheduler will send it at the specified time.
+
+        On sendmail failure the draft is preserved unchanged and 500 is returned. Returns 400 if
+        none of `to_addr`, `cc_addr`, `bcc_addr` is non-empty.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '201':
+          description: Sent immediately
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id:
+                    type: integer
+                    description: ID of the newly created message in the Sent folder.
+                required: [id]
+        '202':
+          description: Scheduled for future delivery
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id:
+                    type: integer
+                    description: ID of the newly created message in the Scheduled folder.
+                  send_at:
+                    type: string
+                    format: date-time
+                required: [id, send_at]
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
   /drafts/{id}/attachments/{attachment_id}:
     delete:
       summary: Remove a single attachment from a draft
@@ -1423,15 +1541,23 @@ paths:
           content:
             application/json:
               schema:
-                type: array
-                items:
-                  $ref: '#/components/schemas/Filter'
+                type: object
+                properties:
+                  total:
+                    type: integer
+                  items:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Filter'
+                required: [total, items]
     post:
       summary: Create filter
       description: |
         Create a filter. At least one of `match_from`, `match_to`, `match_subject` must be
         non-empty. A field is considered non-empty if it is not `null`, not `""`, and not a
-        whitespace-only string.
+        whitespace-only string. When this condition is not met, returns 400 with
+        `{"error": "at least one of match_from, match_to, match_subject must be non-empty"}`.
+        When `action` is `move`, `folder_id` is required; omitting it returns 400.
       requestBody:
         required: true
         content:
@@ -1451,7 +1577,9 @@ paths:
   /filters/{id}:
     put:
       summary: Replace filter
-      description: Replace a filter entirely.
+      description: |
+        Replace a filter entirely. Validation is identical to POST: at least one match field must
+        be non-empty, and `folder_id` is required when `action` is `move`.
       parameters:
         - name: id
           in: path
@@ -1562,9 +1690,15 @@ paths:
           content:
             application/json:
               schema:
-                type: array
-                items:
-                  $ref: '#/components/schemas/Identity'
+                type: object
+                properties:
+                  total:
+                    type: integer
+                  items:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Identity'
+                required: [total, items]
     post:
       summary: Create identity
       description: |
@@ -1671,6 +1805,8 @@ paths:
         List contacts ordered by name (empty names last), then address. Supports autocomplete filtering.
         When used for address-field autocomplete dropdowns, clients should send `limit=10`. If `total`
         exceeds the requested limit, the UI should show a "type more to narrow" hint rather than paginating.
+        The Contact schema has no flag distinguishing manually set names from auto-populated ones;
+        this distinction is enforced server-side and not observable via the API.
       parameters:
         - name: q
           in: query
@@ -1699,11 +1835,11 @@ paths:
                 properties:
                   total:
                     type: integer
-                  contacts:
+                  items:
                     type: array
                     items:
                       $ref: '#/components/schemas/Contact'
-                required: [total, contacts]
+                required: [total, items]
     post:
       summary: Create contact
       description: Create a contact. `address` must be a valid RFC 5322 addr-spec.

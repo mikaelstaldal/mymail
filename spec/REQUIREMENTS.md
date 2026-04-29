@@ -75,12 +75,12 @@ mymail -import -data /var/lib/mymail \
 
 Behaviour:
 - Messages are imported in source order (oldest first within each file/directory).
-- Duplicate detection: if a message with the same `Message-ID` already exists anywhere in the database, it is skipped. Messages without a `Message-ID` are always imported.
+- Duplicate detection: if a message with the same `Message-ID` already exists anywhere in the database, it is skipped. Matching is a case-sensitive byte comparison of the full Message-ID string. Messages without a `Message-ID` are always imported (null Message-IDs are never treated as duplicates of each other). Skipped duplicates are included in the per-folder count as `skipped`.
 - Filters are **not** applied during import — messages go directly to the specified target folder.
 - A running count is printed to stdout as each folder completes: `inbox: 1042 imported, 3 skipped`.
 - On completion, a summary line is printed: `Total: 2381 imported, 17 skipped`.
 - Exit code `0` on success, `1` on any error. A single unparseable message logs a warning and continues. A message is considered unparseable when `net/mail.ReadMessage()` returns an error (missing or malformed headers); missing optional fields (e.g. absent `Date`) are warnings, not failures.
-- **Concurrency:** Running import concurrently with a running server against the same data directory is not supported.
+- **Concurrency:** Running import (`-import`) concurrently with a running server against the same data directory is not supported. Concurrent LDA (`-lda`) processes alongside a running server are safe — SQLite WAL mode and the LDA's busy timeout serialize access, and `INSERT OR IGNORE` guards against duplicate inserts from concurrent LDA processes.
 
 
 ## Data Model
@@ -88,6 +88,8 @@ Behaviour:
 ### Folders
 
 Each folder has a name, a URL-safe slug, and a display order position.
+
+**Slug generation:** when a user-created folder is added, the slug is derived from the name by: (1) applying Unicode NFKD normalization, (2) lowercasing, (3) replacing any run of non-alphanumeric ASCII characters with a single hyphen, (4) trimming leading and trailing hyphens. If the resulting slug collides with an existing slug, a numeric suffix is appended (`-2`, `-3`, etc.). Built-in folder slugs are fixed and immutable.
 
 **Built-in folders** (protected from deletion):
 
@@ -148,7 +150,9 @@ Each contact has:
 
 Contacts are upserted automatically:
 - On message receipt: the `From` address is upserted. A manually set name is never overwritten automatically (only updated when the stored name is empty).
-- On send: `To`, `Cc`, and `Bcc` addresses are upserted.
+- On send: `To`, `Cc`, and `Bcc` addresses are upserted using the same Unicode simple casefolding normalization as incoming contacts.
+
+The distinction between manually set and automatically populated names is enforced server-side. Clients cannot observe or control this distinction via the API.
 
 ### Filters
 
@@ -159,13 +163,13 @@ Each filter has:
   - `match_to` matches against both the `To` and `Cc` headers
   - Matching is case-insensitive substring search
 - Action: `move` (to a specific folder), `trash`, `mark_read`, or `drop`
-- Stop flag: whether to halt evaluation after this filter matches
+- Stop flag: when true, evaluation halts after this filter matches; no further filters are evaluated for that message, regardless of whether prior matching filters had `stop=false`
 
 **Actions:**
-- `move` — deliver to the specified folder. If the target folder was deleted, the filter is skipped and delivery continues to Inbox.
+- `move` — deliver to the specified folder. Filters may not target the Snoozed (id=6) or Scheduled (id=5) folders; the API rejects such configurations with 400. If the target folder was deleted, the filter is skipped and delivery continues to Inbox. The filter remains visible in the filter list with a warning indicator and can be edited to assign a new folder or deleted.
 - `trash` — deliver directly to Trash.
 - `mark_read` — deliver to the folder chosen by spam detection, but mark as read.
-- `drop` — discard the message entirely; nothing is stored.
+- `drop` — discard the message entirely; nothing is stored. Dropped messages are logged at INFO level (envelope From and Message-ID) but are otherwise unrecoverable.
 
 ### Spam Filter Settings
 
@@ -178,6 +182,8 @@ Spam detection triggers on any of:
 - `X-Spam-Flag` header equals `YES` (case-insensitive)
 - `X-Spam-Status` header starts with `Yes` (case-insensitive)
 - The configured score header is present and its numeric value is ≥ the threshold
+
+If the score header is present but its value cannot be parsed as a floating-point number, it is treated as absent (the score trigger does not fire for that message).
 
 
 ## Incoming Mail (LDA)
@@ -193,7 +199,7 @@ When invoked as `mymail -lda`:
    - Resolves `cid:` inline image references to `data:` URIs before sanitizing.
    - Sanitizes the HTML body.
    - Collects attachments.
-   - Falls back to current time if no `Date` header; generates a `Message-ID` if absent.
+   - Falls back to current time if no `Date` header (import mode uses format-specific metadata instead; see Batch Import); generates a `Message-ID` if absent.
 4. Skips duplicate messages (same `Message-ID` already in database).
 5. Applies spam detection and user-defined filters to determine the destination folder and read state.
 6. Stores the message and attachments.
@@ -219,6 +225,10 @@ When invoked as `mymail -lda`:
 
 
 ## Outgoing Mail
+
+At least one of `to_addr`, `cc_addr`, or `bcc_addr` must be non-empty; an empty `to_addr` is permitted when `cc_addr` or `bcc_addr` is non-empty.
+
+If `body_html` contains `data:` URIs for embedded images (e.g. from images pasted into the rich-text editor), they are preserved as-is in the outgoing HTML MIME part; no conversion to CID attachments is performed.
 
 The send flow:
 
@@ -321,6 +331,8 @@ External images in email bodies are blocked by the CSP (no `https:` in `img-src`
 
 Optional HTTP Basic Auth over all endpoints (API + static UI). Passwords stored as bcrypt hashes in an htpasswd file. If not configured, all requests are accepted without authentication (loopback-only deployments).
 
+When authentication is required and credentials are missing or invalid, all endpoints (except `GET /api/v1/health`) respond with `401 Unauthorized` and `WWW-Authenticate: Basic realm="<realm>"` where `<realm>` is the `-basic-auth-realm` flag value.
+
 ### CSRF Protection
 
 All state-changing HTTP methods (POST, PUT, PATCH, DELETE) are protected via Origin/Referer validation:
@@ -383,6 +395,8 @@ On first load the UI reads `localStorage` for the last selected folder and navig
 
 3. **Compose / Reply / Reply All / Forward** — Form with From selector, To/Cc/Bcc/Reply-To fields (To/Cc/Bcc offer address autocomplete), Subject, rich-text body editor (Quill), file upload for attachments. A **Send later** toggle reveals a date/time picker. Auto-saves to Drafts every 30 seconds. Navigate-away triggers an immediate draft save.
 
+   **Sending a draft:** the **Send** button calls `POST /drafts/{id}/send`, which reads all draft fields and attachments from the server, validates, sends or schedules, then deletes the draft. Attachments are never re-uploaded by the client at send time.
+
    Pre-population rules:
 
    | Field           | Reply                                                        | Reply All                                                          | Forward                                         |
@@ -395,9 +409,13 @@ On first load the UI reads `localStorage` for the last selected folder and navig
    | **References**  | Original references + original `Message-ID`                  | Original references + original `Message-ID`                        | Empty                                           |
    | **Attachments** | Empty                                                        | Empty                                                              | Copies of all original attachments (server-side) |
 
+   The **Reply-To** compose field is not pre-populated for Reply, Reply-All, or Forward; it starts empty and is editable by the user.
+
    Signatures are pre-populated from the selected identity, with `\n-- \n` delimiter. Changing the From identity swaps the signature block.
 
    **Send button behavior:** Disabled while in-flight. Performs an immediate draft save before sending. On send failure, keeps the compose form open and shows the error inline.
+
+   **Auto-save failure:** If an auto-save request fails, a transient error toast is shown. The save is retried on the next 30-second tick. If the navigate-away save fails, a brief warning is shown but navigation is not blocked.
 
 4. **Scheduled folder message detail** — Shows scheduled send time; **Cancel schedule** button moves message to Drafts.
 
@@ -464,7 +482,7 @@ The UI polls the REST API every 30 seconds. When the Inbox `unread_count` increa
 
 Polling is suspended while the browser tab is hidden.
 
-Permission is requested only when the user explicitly enables browser notifications in Preferences.
+Permission is requested only when the user explicitly enables browser notifications in Preferences. If the browser denies permission, or if permission is later revoked, the notifications preference toggle is automatically switched off and the feature degrades silently (polling continues; no browser notifications are shown).
 
 ### Client-Side Storage (`localStorage`)
 
@@ -475,7 +493,7 @@ Permission is requested only when the user explicitly enables browser notificati
 - Notification permission state (cached)
 - Preferred body view (`"html"` or `"text"`)
 
-**Draft recovery on page reload:** compares `savedAt` in localStorage against the server draft's `updated_at`; whichever is newer is loaded. If the server returns 404, the localStorage state is used and the stale id is cleared.
+**Draft recovery on page reload:** compares `savedAt` in localStorage against the server draft's `updated_at`; whichever is newer is loaded. If the timestamps are identical, the server version is loaded. If the server returns 404, the localStorage state is used and the stale id is cleared.
 
 
 ## Production Deployment

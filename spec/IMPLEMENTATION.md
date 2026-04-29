@@ -52,6 +52,8 @@ The full REST API contract is in `openapi.yaml`. Use ogen to generate Go server 
 
 **Max request body:** 32 MiB.
 
+**Entity counts:** The number of user-defined folders, filters, identities, and contacts is unbounded at the API level. No 400 is returned for exceeding any count; growth is bounded only by SQLite file size and available disk space.
+
 **Bulk operation ID limits:** Bulk endpoints accept at most 1000 message IDs per request; exceeding this returns 400.
 
 **Input length limits:**
@@ -61,13 +63,16 @@ The full REST API contract is in `openapi.yaml`. Use ogen to generate Go server 
 | `match_from`, `match_to`, `match_subject` | Filter criteria | 1000 characters |
 | `score_header` | Spam filter settings | 200 characters |
 | Contact `name`, identity `name`, folder `name` | General | 200 characters |
+| `to_addr`, `cc_addr`, `bcc_addr`, `reply_to_addr` | SendRequest, DraftRequest | 8192 characters each |
 | Identity `signature` | Stored and transmitted | 50 KiB |
 | Search `q` parameter | Full-text search | 500 characters |
 | Contact autocomplete `q` parameter | Substring filter | 500 characters |
 
-**List endpoints:** Paginated list endpoints return `{"total": n, "<items>": [...]}`. Non-paginated list endpoints (filters, identities) return a bare JSON array.
+**Whitespace trimming:** Leading and trailing whitespace is trimmed from folder names, filter names, contact names, and identity names before validation and storage.
 
-**Search snippet:** Search results include a `snippet` field — a short excerpt (up to 200 characters) of matching text, with matched terms surrounded by `**` markers. The snippet is HTML-escaped to prevent XSS.
+**List endpoints:** All list endpoints return `{"total": n, "items": [...]}`, whether paginated or not. The `total` field is the total number of matching records (before pagination). Non-paginated endpoints (folders, filters, identities) return all records in `items` and set `total` to the same count. The `updated` count in bulk PATCH responses equals the number of rows actually modified by the SQL UPDATE (SQLite's `changes()` function); no-op updates where the new value equals the existing value are not counted.
+
+**Search snippet:** Search results include a `snippet` field generated with `snippet(messages_fts, 4, '**', '**', '…', 15)`, where `4` is the zero-based index of the `body_text` column and `15` is the token context window. The snippet is HTML-escaped before being returned in the API response to prevent XSS. The `snippet` field appears only in search results, not in `GET /messages/{id}` responses.
 
 **Contact autocomplete:** When `GET /api/v1/contacts` is used for address-field autocomplete dropdowns, the Web UI sends `limit=10`. If `total > 10`, the dropdown shows a "type more to narrow" hint rather than paginating.
 
@@ -113,6 +118,7 @@ The full REST API contract is in `openapi.yaml`. Use ogen to generate Go server 
 - `PUT /api/v1/drafts-with-attachments/{id}` — replace draft content and attachments
 - `DELETE /api/v1/drafts/{id}` — permanently delete a draft
 - `DELETE /api/v1/drafts/{id}/attachments/{attachment_id}` — remove a single attachment from a draft
+- `POST /api/v1/drafts/{id}/send` — send or schedule the draft (reads draft fields and attachments from DB; deletes draft on success)
 
 #### Filters
 - `GET /api/v1/filters` — list all filters
@@ -150,6 +156,8 @@ The full REST API contract is in `openapi.yaml`. Use ogen to generate Go server 
 
 Thread results include messages from all folders, ordered by `date ASC`.
 
+Messages that initially lacked a `Message-ID` header are assigned a generated ID at storage time. Since external mailers may not reference this generated ID in their `In-Reply-To`/`References` headers, subject-based threading serves as the natural fallback for such messages.
+
 ### FTS Search Input Sanitization
 
 The `q` parameter on `GET /api/v1/messages/search` is passed to SQLite FTS5 as a literal phrase match. Transform:
@@ -159,6 +167,8 @@ The `q` parameter on `GET /api/v1/messages/search` is passed to SQLite FTS5 as a
 Example: `it's a "test"` → `"it's a ""test"""`. Apply byte-by-byte (no locale-specific interpretation). A unit test must verify that inputs containing `"`, non-ASCII characters, and FTS5 operator keywords (`AND`, `OR`, `NOT`, `NEAR`) are treated as literals.
 
 **RFC 5322 message parsing limit:** `POST /api/v1/messages/import` enforces a 10 MiB limit on the total bytes consumed during parsing (in addition to the global 32 MiB body cap) to prevent memory exhaustion from deeply nested MIME structures.
+
+**FTS5 tokenizer:** FTS5 uses the built-in `unicode61` tokenizer (the default), which performs Unicode-aware case folding. All FTS searches are effectively case-insensitive.
 
 
 ## Database
@@ -193,7 +203,8 @@ CREATE TABLE IF NOT EXISTS folders (
     id         INTEGER PRIMARY KEY AUTOINCREMENT,
     name       TEXT    NOT NULL UNIQUE,
     slug       TEXT    NOT NULL UNIQUE,
-    position   INTEGER NOT NULL DEFAULT 0
+    position   INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
 );
 ```
 
@@ -334,7 +345,7 @@ CREATE TABLE IF NOT EXISTS identities (
 );
 ```
 
-The "exactly one default" invariant and address validation are enforced in the service layer (not as SQL constraints) for human-readable error messages.
+The "exactly one default" invariant and address validation are enforced in the service layer (not as SQL constraints) for human-readable error messages. Because SQLite serializes all write operations, concurrent identity deletions are naturally serialized: if two DELETE requests arrive concurrently, only one finds the count > 1; the other returns 400. Position values need not be contiguous; gaps are allowed. The server sorts by `position ASC, id ASC`. The reorder endpoint assigns contiguous 0-based positions for convenience, but direct position assignment via POST/PUT may use arbitrary non-negative integers.
 
 ### `contacts`
 
@@ -410,7 +421,7 @@ Use Go standard library (`net/mail`, `mime`, `mime/multipart`, `mime/quotedprint
 SELECT EXISTS(SELECT 1 FROM messages WHERE message_id = ?)
 ```
 
-Run before spam detection and filter evaluation. Use `INSERT OR IGNORE` on the `messages` table as a race-safe guard for concurrent LDA processes.
+Run before spam detection and filter evaluation. Use `INSERT OR IGNORE` on the `messages` table as a race-safe guard for concurrent LDA processes. Matching is a case-sensitive byte comparison (`=` operator). Messages without a `Message-ID` header have `NULL` stored; since `NULL = NULL` is false in SQL, messages without a Message-ID are never considered duplicates of each other and are always stored.
 
 ### Message-ID Generation in LDA Mode
 
@@ -422,7 +433,7 @@ Insert message record and attachments in a single transaction.
 
 ### Contacts Upsert
 
-Only the `From` address is upserted for incoming mail (To/Cc not auto-added). Lower-case the address before storage using Unicode simple casefolding (`golang.org/x/text/cases` with `language.Und` and `cases.Fold()`).
+Only the `From` address is upserted for incoming mail (To/Cc not auto-added). Lower-case the address before storage using Unicode simple casefolding (`golang.org/x/text/cases` with `language.Und` and `cases.Fold()`). The same normalization applies to outgoing contacts (To/Cc/Bcc addresses upserted on send).
 
 ### Error Handling
 
@@ -464,7 +475,7 @@ ORDER BY snoozed_until ASC;
 
 The scheduler holds the SQLite write lock only for the duration of each individual UPDATE, not across the full tick.
 
-**Known limitation — double-send on restart:** If the server restarts while a `sendmail` process is running, the new scheduler retries and may send twice. The conditional UPDATE prevents duplicate database records but not duplicate email delivery. Accepted trade-off.
+**Known limitation — double-send on restart:** If the server restarts while a `sendmail` process is running, the new scheduler retries and may send twice. The conditional UPDATE prevents duplicate database records but not duplicate email delivery. Deduplication of duplicate deliveries is outside mymail's scope; operators may configure MTA-level deduplication if needed.
 
 
 ## Batch Import Implementation
@@ -504,7 +515,12 @@ The scheduler holds the SQLite write lock only for the duration of each individu
 
 - Pipe to `sendmail -t -oi`.
 - Maximum 30-second timeout; treat timeout as a failure.
-- Capture stderr (max 4 KB) on non-zero exit.
+- Capture stderr on non-zero exit or timeout: retain the **last** 4 KB (oldest output is discarded when stderr exceeds 4 KB).
+- **HTTP status mapping:** any non-zero exit code or timeout → `500 Internal Server Error`. The sendmail stderr output is included in the `{"error": "..."}` response body.
+
+### Outgoing HTML Sanitization
+
+Sanitize `body_html` using the standard email HTML sanitization policy before constructing the MIME message and before storing the message in the Sent folder. This applies to all outgoing HTML content regardless of source (composed, quoted, or forwarded). Client-side sanitization by the rich-text editor is defence in depth only; server-side sanitization is authoritative.
 
 ### Bcc Handling
 
@@ -542,6 +558,8 @@ Use `github.com/mikaelstaldal/go-server-common` for:
 - htpasswd file reading (bcrypt verification)
 - CSRF Origin/Referer validation middleware
 
+When a request lacks valid credentials, respond with `401 Unauthorized` and `WWW-Authenticate: Basic realm="<realm>"` (where `<realm>` is the `-basic-auth-realm` flag value). The `GET /api/v1/health` endpoint is exempt from authentication.
+
 CSRF middleware logic:
 - Extract the origin from the `Origin` header; if absent, derive from the `Referer` header.
 - Reject `Origin: null`.
@@ -554,10 +572,10 @@ Create htpasswd files with: `htpasswd -Bc htpasswd myuser`
 
 ## Attachment Download Response
 
-Always respond with `Content-Type: application/octet-stream`.
+Always respond with `Content-Type: application/octet-stream`. This sanitization applies to the single-attachment download endpoint (`GET /attachments/{id}`) only; there are no multipart attachment download endpoints.
 
 `Content-Disposition` construction:
-1. Strip CR (`\r`), LF (`\n`), NUL (`\0`), and `"` from the filename.
+1. Strip CR (`\r`), LF (`\n`), NUL (`\0`), and `"` from the filename. If the filename is empty after stripping, use `attachment` as the filename.
 2. After stripping, if the filename contains only printable ASCII (U+0020–U+007E, excluding stripped chars): emit `Content-Disposition: attachment; filename="<sanitized>"`.
 3. If it contains any non-ASCII characters (U+0080+): emit `Content-Disposition: attachment; filename*=UTF-8''<RFC-8187-percent-encoded>` (encode all octets outside the `attr-char` set from RFC 8187).
 
@@ -576,6 +594,17 @@ Use [Quill](https://quilljs.com/) (vendored). On send/save, serialize as both HT
 - `PUT /api/v1/drafts/{id}` (JSON endpoint) does not modify attachment rows.
 - `PUT /api/v1/drafts-with-attachments/{id}` replaces attachments wholesale.
 - To remove individual attachments, call `DELETE /api/v1/drafts/{id}/attachments/{attachment_id}`.
+
+### Send Draft Logic (`POST /api/v1/drafts/{id}/send`)
+
+1. Read the draft from the DB. Return 404 if not found or if `folder_id != 3` (not in Drafts).
+2. Validate: at least one of `to_addr`, `cc_addr`, `bcc_addr` must be non-empty. Return 400 otherwise.
+3. Resolve the identity: use `identity_id` from the draft if set, otherwise the default identity.
+4. Look up all attachment rows for the draft.
+5. Determine mode from `send_at`:
+   - **Immediate send** (`send_at` is null or ≤ now): run the standard outgoing mail pipeline (sanitize body_html, construct MIME message with all attachments, pipe to sendmail). On sendmail failure: return 500 with the error; draft is preserved unchanged. On success: insert the sent message and its attachments into the Sent folder, then delete the draft row (attachments cascade-delete).
+   - **Scheduled** (`send_at` > now + 1 min): insert the message and attachments into the Scheduled folder (do not call sendmail), then delete the draft. Return 202.
+6. Upsert recipients (To/Cc/Bcc) into the contacts table on immediate send only (same as the regular send flow). For scheduled sends, upsert happens when the scheduler actually sends the message.
 
 ### Mark All As Read
 
