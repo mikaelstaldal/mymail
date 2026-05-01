@@ -114,7 +114,6 @@ The full REST API contract is in `openapi.yaml`. Use ogen to generate Go server 
 - `DELETE /api/v1/messages` — bulk delete messages
 - `POST /api/v1/messages/send` — send or schedule a message
 - `POST /api/v1/messages/send-with-attachments` — send/schedule with `multipart/form-data`
-- `POST /api/v1/messages/import` — import a raw RFC 5322 message into a folder
 - `POST /api/v1/messages/{id}/snooze` — snooze a message until a future time
 - `DELETE /api/v1/messages/{id}/snooze` — cancel a snooze early
 - `POST /api/v1/messages/{id}/mark-junk` — move to Junk and mark as read
@@ -180,8 +179,6 @@ The `q` parameter on `GET /api/v1/messages/search` is passed to SQLite FTS5 as a
 2. Wrap the result in a single pair of outer double quotes.
 
 Example: `it's a "test"` → `"it's a ""test"""`. Apply byte-by-byte (no locale-specific interpretation). A unit test must verify that inputs containing `"`, non-ASCII characters, and FTS5 operator keywords (`AND`, `OR`, `NOT`, `NEAR`) are treated as literals.
-
-**RFC 5322 message parsing limit:** `POST /api/v1/messages/import` enforces a 10 MiB limit on the total bytes consumed during parsing (in addition to the global 32 MiB body cap) to prevent memory exhaustion from deeply nested MIME structures.
 
 **FTS5 tokenizer:** FTS5 uses the built-in `unicode61` tokenizer (the default), which performs Unicode-aware case folding. All FTS searches are effectively case-insensitive.
 

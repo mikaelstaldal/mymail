@@ -302,16 +302,6 @@ Each message stored as a separate file. A Maildir root contains `new/`, `cur/`, 
 
 Users with MBX files should pre-convert them using `mb2md` or a similar tool.
 
-### Single-Message Import (REST API)
-
-In addition to the `-import` CLI mode, mymail exposes `POST /api/v1/messages/import` for storing a single raw RFC 5322 message into a folder. The request body is a `message/rfc822` blob; the optional `folder_id` query parameter selects the target folder (default Inbox).
-
-- Filters and spam detection are **not** applied (same as `-import`).
-- Duplicate detection by `Message-ID` applies; an existing `Message-ID` returns 200 with the existing message id rather than re-importing.
-- Valid `folder_id` targets are Inbox (1), Sent (2), Trash (4), Junk (7), and any user folder (≥100). Drafts (3), Scheduled (5), and Snoozed (6) are rejected with 400 because their state is managed by the draft / scheduler / snooze flows rather than imported as inert messages. A non-existent `folder_id` returns 404.
-- The full LDA parsing pipeline runs (HTML sanitization, `cid:` resolution, charset decoding, `body_text` derivation, attachment extraction). Parse failure returns 400.
-
-
 ## HTML Sanitization
 
 Incoming HTML bodies and the HTML part of outgoing messages are sanitized with a strict email-appropriate policy.

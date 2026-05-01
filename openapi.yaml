@@ -875,64 +875,6 @@ paths:
         '500':
           $ref: '#/components/responses/InternalError'
 
-  /messages/import:
-    post:
-      summary: Import a raw message
-      description: |
-        Store a raw RFC 5322 message directly into a folder. Filters and spam detection are
-        not applied. The full LDA parsing pipeline (HTML sanitization, `cid:` resolution,
-        charset decoding, `body_text` derivation, attachment extraction) runs.
-
-        **Duplicate detection:** if the message's `Message-ID` already exists in the database,
-        no new row is created; the response is 200 with the existing message id.
-
-        **Folder validation:** valid `folder_id` targets are Inbox (1), Sent (2), Trash (4),
-        Junk (7), and any user folder (id ≥ 100). Drafts (3), Scheduled (5), and Snoozed (6)
-        are rejected with 400 — Drafts is created via `/drafts` only, and Scheduled/Snoozed
-        require scheduler-managed timestamps that import cannot supply. A `folder_id` that
-        does not refer to an existing folder returns 404.
-
-        **Parse failure** (any error from `net/mail.ReadMessage()`) returns 400.
-      parameters:
-        - name: folder_id
-          in: query
-          schema:
-            type: integer
-            default: 1
-            description: Target folder (default Inbox).
-      requestBody:
-        required: true
-        content:
-          message/rfc822:
-            schema:
-              type: string
-              format: binary
-      responses:
-        '200':
-          description: Already imported (duplicate Message-ID)
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  id:
-                    type: integer
-                required: [id]
-        '201':
-          description: Imported
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  id:
-                    type: integer
-                required: [id]
-        '400':
-          $ref: '#/components/responses/BadRequest'
-        '404':
-          $ref: '#/components/responses/NotFound'
-
   /messages/{id}:
     get:
       summary: Get message details
