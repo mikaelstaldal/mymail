@@ -220,13 +220,25 @@ components:
           type: string
           format: date-time
           nullable: true
-          description: If present and in the future (≥1 min), schedule instead of sending immediately.
+          description: |
+            Scheduling threshold (applies identically to `/messages/send`,
+            `/messages/send-with-attachments`, and `/drafts/{id}/send`):
+
+            - **Scheduled** when `send_at` is non-null AND `send_at > now + 60 seconds`. Response 202.
+            - **Immediate** in every other case: null, in the past, equal to now, or within the next
+              60 seconds. Response 201.
 
     DraftRequest:
       type: object
       description: |
         Request body for creating or replacing a draft. All fields are optional so that
         drafts can be saved before all fields have been filled in by the user.
+
+        **PUT replacement semantics:** PUT replaces the draft entirely. Any field omitted from
+        the request body is cleared (treated as the empty string for text fields, `null` for
+        `identity_id` and `send_at`, and the empty list for `references`). To preserve a value
+        across PUT, the client must include it explicitly in every PUT body. POST follows the
+        same model — omitted fields default to their empty/zero value.
       properties:
         identity_id:
           type: integer
@@ -322,9 +334,12 @@ components:
           type: integer
           nullable: true
           description: |
-            Required when `action` is `move`. Must reference an existing folder. The Snoozed
-            (id=6) and Scheduled (id=5) folders are not valid targets; a 400 is returned if
-            either is specified.
+            Required when `action` is `move`. Must reference an existing folder. Valid targets
+            are Inbox (1), Trash (4), Junk (7), and any user folder (id ≥ 100). Sent (2),
+            Drafts (3), Scheduled (5), and Snoozed (6) are rejected with 400 — routing inbound
+            mail to those folders conflicts with their dedicated semantics (Drafts is created
+            via `/drafts` only; Scheduled/Snoozed are managed by the scheduler; nothing should
+            be auto-dropped into Sent).
         stop:
           type: boolean
       required: [action]
@@ -336,9 +351,16 @@ components:
           type: boolean
         score_header:
           type: string
+          minLength: 1
           maxLength: 200
         score_threshold:
           type: number
+          minimum: 0
+          description: |
+            Score threshold (inclusive: messages with score `>= threshold` are spam). Must be
+            zero or positive. There is no upper bound. A threshold of `0` is permitted and
+            means "match every message whose score header parses as a number" — useful when
+            the operator wants to defer to the upstream filter's flag/status entirely.
       required: [enabled, score_header, score_threshold]
 
     Identity:
@@ -476,7 +498,15 @@ paths:
   /folders/{id}:
     patch:
       summary: Update folder
-      description: Update folder name and/or position. Built-in folders (ids 1–7) may only have their position updated.
+      description: |
+        Update folder name and/or position. Built-in folders (ids 1–7) may only have their
+        position updated.
+
+        **Slug stability:** the `slug` field is immutable for both built-in and user folders.
+        Renaming a user folder via this endpoint changes only the display `name`; the slug is
+        preserved so bookmarked URLs and stored filter references continue to work.
+
+        **Conflicts:** if the new `name` collides with an existing folder's name, returns 409.
       parameters:
         - name: id
           in: path
@@ -505,6 +535,8 @@ paths:
           $ref: '#/components/responses/BadRequest'
         '404':
           $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
     delete:
       summary: Delete folder
       description: |
@@ -681,12 +713,17 @@ paths:
         Optionally filtered by date range. The FTS5 `unicode61` tokenizer is used, so searches
         are case-insensitive. Search results include a `snippet` field (present only in search
         results, not in `GET /messages/{id}`).
+
+        Returns 400 with `{"error": "q must contain at least one non-whitespace character"}` when
+        `q` is empty (`q=`) or contains only ASCII whitespace after trimming. Match-all is not
+        supported via this endpoint — list a folder via `GET /folders/{folder_id}/messages` instead.
       parameters:
         - name: q
           in: query
           required: true
           schema:
             type: string
+            minLength: 1
             maxLength: 500
         - name: folder_id
           in: query
@@ -746,14 +783,16 @@ paths:
                                 Matched terms are surrounded by `**` markers (e.g. `…the **keyword** in…`).
                           required: [snippet]
                 required: [total, items]
+        '400':
+          $ref: '#/components/responses/BadRequest'
 
   /messages/send:
     post:
       summary: Send or schedule a message
       description: |
-        Compose and send a new message, or schedule it for future delivery.
-        If `send_at` is absent or null, the message is sent immediately (response 201).
-        If `send_at` is a future timestamp (≥1 min), the message is scheduled (response 202).
+        Compose and send a new message, or schedule it for future delivery. See
+        `SendRequest.send_at` for the immediate-vs-scheduled threshold (`send_at > now + 60s`
+        schedules; otherwise immediate).
       requestBody:
         required: true
         content:
@@ -839,7 +878,21 @@ paths:
   /messages/import:
     post:
       summary: Import a raw message
-      description: Store a raw RFC 5322 message directly into a folder. Filters are not applied.
+      description: |
+        Store a raw RFC 5322 message directly into a folder. Filters and spam detection are
+        not applied. The full LDA parsing pipeline (HTML sanitization, `cid:` resolution,
+        charset decoding, `body_text` derivation, attachment extraction) runs.
+
+        **Duplicate detection:** if the message's `Message-ID` already exists in the database,
+        no new row is created; the response is 200 with the existing message id.
+
+        **Folder validation:** valid `folder_id` targets are Inbox (1), Sent (2), Trash (4),
+        Junk (7), and any user folder (id ≥ 100). Drafts (3), Scheduled (5), and Snoozed (6)
+        are rejected with 400 — Drafts is created via `/drafts` only, and Scheduled/Snoozed
+        require scheduler-managed timestamps that import cannot supply. A `folder_id` that
+        does not refer to an existing folder returns 404.
+
+        **Parse failure** (any error from `net/mail.ReadMessage()`) returns 400.
       parameters:
         - name: folder_id
           in: query
@@ -855,6 +908,16 @@ paths:
               type: string
               format: binary
       responses:
+        '200':
+          description: Already imported (duplicate Message-ID)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id:
+                    type: integer
+                required: [id]
         '201':
           description: Imported
           content:
@@ -867,6 +930,8 @@ paths:
                 required: [id]
         '400':
           $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
 
   /messages/{id}:
     get:
@@ -941,10 +1006,14 @@ paths:
     patch:
       summary: Bulk update messages
       description: |
-        Apply the same patch to multiple messages. Same move restrictions as single PATCH.
+        Apply the same patch to multiple messages. The same target restrictions as the single
+        PATCH apply to `folder_id`: Scheduled (5), Snoozed (6), and Drafts (3) are rejected with
+        400 (Drafts is forbidden because drafts are created only via the `/drafts` endpoints).
         Returns 404 if any of the provided IDs does not exist; no changes are made in that case.
         Returns 400 if more than 1000 IDs are supplied (the `maxItems: 1000` constraint on the `ids`
         array is the enforced limit); no changes are made in that case.
+        Returns 400 if `ids` is an empty array (`{"error": "ids must contain at least one id"}`);
+        no SQL is issued.
         The `updated` count equals the number of rows actually modified (no-op updates where the
         new value equals the existing value are not counted).
       requestBody:
@@ -958,6 +1027,7 @@ paths:
                   type: array
                   items:
                     type: integer
+                  minItems: 1
                   maxItems: 1000
                 folder_id:
                   type: integer
@@ -988,6 +1058,8 @@ paths:
         Returns 404 if any of the provided IDs does not exist; no changes are made in that case.
         Returns 400 if more than 1000 IDs are supplied (the `maxItems: 1000` constraint on the `ids`
         array is the enforced limit); no changes are made in that case.
+        Returns 400 if `ids` is an empty array (`{"error": "ids must contain at least one id"}`);
+        no SQL is issued.
       requestBody:
         required: true
         content:
@@ -999,6 +1071,7 @@ paths:
                   type: array
                   items:
                     type: integer
+                  minItems: 1
                   maxItems: 1000
               required: [ids]
       responses:
@@ -1020,7 +1093,10 @@ paths:
   /messages/{id}/raw:
     get:
       summary: Download raw message
-      description: Download the original RFC 5322 message file.
+      description: |
+        Download the original RFC 5322 message file. The filename is `<id>.eml` (numeric, always
+        ASCII-safe) so the response never needs RFC 8187 encoding and there is no header-injection
+        vector via subject-derived filenames.
       parameters:
         - name: id
           in: path
@@ -1034,7 +1110,7 @@ paths:
             Content-Disposition:
               schema:
                 type: string
-                example: 'attachment; filename="message.eml"'
+                example: 'attachment; filename="42.eml"'
           content:
             message/rfc822:
               schema:
@@ -1056,8 +1132,10 @@ paths:
            message itself is always included.
         2. **Subject-based fallback:** If header-based grouping yields only the single requested message
            (no links found to any other stored message), group by normalised subject: strip leading
-           reply/forward prefixes (any combination, case-insensitive) — `Re:`, `Fwd:`, `Fw:`, `AW:`,
-           `WG:`, `RES:`, `ENC:`, `VS:`, `SV:` — and compare the remainder case-insensitively.
+           reply/forward prefixes (any combination, case-insensitive, applied **repeatedly** until no
+           further match) — `Re:`, `Fwd:`, `Fw:`, `AW:`, `WG:`, `RES:`, `ENC:`, `VS:`, `SV:` — and
+           compare the remainder case-insensitively. The full regex is defined in REQUIREMENTS.md
+           → Compose → Subject prefix stripping.
 
         The endpoint includes messages from all folders (Inbox, Sent, Trash, Snoozed, etc.) so the
         full conversation is always visible.
@@ -1089,13 +1167,18 @@ paths:
     post:
       summary: Snooze a message
       description: |
-        Temporarily hide a message until a future time. The message must be in Inbox or a user
-        folder. System folders (Sent, Trash, Junk, Scheduled, Snoozed) are not allowed because
-        each has its own specific semantics that would conflict with snooze behaviour.
-        `until` must be a future timestamp at least 1 minute ahead of the current server time.
-        On expiry, the message is returned to its original folder (the folder it was in at the
-        time this endpoint was called); if that folder has since been deleted, Inbox is used.
-        Concurrent snooze requests on the same message are permitted; the last request wins.
+        Temporarily hide a message until a future time. The message must be in Inbox, a user
+        folder, **or already in Snoozed**. System folders (Sent, Trash, Junk, Scheduled) are
+        not allowed because each has its own specific semantics that would conflict with snooze
+        behaviour. `until` must be a future timestamp at least 1 minute ahead of the current
+        server time. On expiry, the message is returned to the folder it was in at the time of
+        the **first** snooze (recorded in `snooze_folder`); if that folder has since been
+        deleted, Inbox is used.
+
+        **Re-snoozing:** if the message is already in Snoozed, the request updates `snoozed_until`
+        and returns 200 with `folder_id=6`; `snooze_folder` is not changed (so the original return
+        folder is preserved across reschedules). Concurrent snooze requests on the same message
+        are permitted — whichever update commits last wins for `snoozed_until`.
       parameters:
         - name: id
           in: path
@@ -1139,7 +1222,10 @@ paths:
           $ref: '#/components/responses/NotFound'
     delete:
       summary: Cancel snooze
-      description: Cancel a snooze early, returning the message to its original folder immediately.
+      description: |
+        Cancel a snooze early, returning the message to its original folder immediately.
+        Returns 400 when the message is not currently in the Snoozed folder (id=6); the check
+        is based on the current `folder_id`, not on the stored `snoozed_until` timestamp.
       parameters:
         - name: id
           in: path
@@ -1260,7 +1346,17 @@ paths:
   /scheduled/{id}:
     delete:
       summary: Cancel scheduled message
-      description: Cancel a scheduled message and move it to Drafts. Returns 400 if already sent.
+      description: |
+        Cancel a scheduled message and move it to Drafts. Implemented as a single conditional
+        UPDATE that requires `folder_id = 5` (Scheduled) AND `send_at IS NOT NULL`.
+
+        - 200 when the cancellation moved the message back to Drafts.
+        - **404** when no such row exists, including the race where the scheduler has already
+          moved the message out of Scheduled (sent → Sent, or exhausted retries → Drafts) before
+          this request committed. The 404 indicates "no longer cancellable" rather than
+          "never existed".
+        - **400** is reserved for input-validation failures (e.g. non-integer `id` rejected by
+          the path parameter type); it does not indicate a race.
       parameters:
         - name: id
           in: path
@@ -1413,11 +1509,12 @@ paths:
         Send or schedule the draft identified by `{id}`. The server reads all draft fields and
         attachments from the database — no request body is needed and no re-upload is required.
 
-        - If `send_at` is null or in the past, the draft is sent immediately: the MIME message is
-          constructed (including all stored attachments), piped to `sendmail`, and on success the
-          draft is deleted and the sent message is stored in the Sent folder (201).
-        - If `send_at` is a future timestamp (≥1 min), the draft is moved to the Scheduled folder
-          without calling sendmail (202). The scheduler will send it at the specified time.
+        - If `send_at` is null, in the past, equal to now, or within the next 60 seconds, the draft
+          is sent immediately: the MIME message is constructed (including all stored attachments),
+          piped to `sendmail`, and on success the draft is deleted and the sent message is stored
+          in the Sent folder (201).
+        - If `send_at > now + 60 seconds`, the draft is moved to the Scheduled folder without
+          calling sendmail (202). The scheduler will send it at the specified time.
 
         On sendmail failure the draft is preserved unchanged and 500 is returned. Returns 400 if
         none of `to_addr`, `cc_addr`, `bcc_addr` is non-empty.
@@ -1660,8 +1757,9 @@ paths:
     put:
       summary: Replace spam filter settings
       description: |
-        Replace spam filter settings entirely. `score_threshold` must be positive;
-        `score_header` must be non-empty.
+        Replace spam filter settings entirely. `score_threshold` must be ≥ 0 (no upper bound);
+        a threshold of `0` is allowed and is treated as "match any message with a parseable
+        score". `score_header` must be non-empty after trimming.
       requestBody:
         required: true
         content:

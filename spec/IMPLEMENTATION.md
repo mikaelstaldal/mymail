@@ -8,12 +8,15 @@ This document covers the technical implementation details for mymail. For what t
 ```
 modernc.org/sqlite                         # Pure-Go SQLite (no CGO)
 github.com/microcosm-cc/bluemonday         # HTML sanitization
+github.com/jaytaylor/html2text             # HTML → plain text derivation when message has no text/plain part
 github.com/mikaelstaldal/go-server-common  # htpasswd parsing, CSRF protection
 github.com/emersion/go-mbox                # mbox file reading (batch import)
 github.com/emersion/go-maildir             # Maildir reading (batch import)
 github.com/ogen-go/ogen                    # Generate server stubs from OpenAPI specification
 github.com/go-faster/errors                # Needed by ogen
 github.com/go-faster/jx                    # Needed by ogen
+golang.org/x/net/html/charset              # Charset decoding (ISO-8859-x, Windows-125x, GB2312, etc.)
+golang.org/x/text/cases                    # Unicode simple casefolding (contacts, identities)
 ```
 
 Parsing individual RFC 5322 messages: Go standard library (`net/mail`, `mime`, `mime/multipart`, `mime/quotedprintable`) — no third-party MIME library needed.
@@ -32,9 +35,12 @@ require (
     github.com/go-faster/jx v1.2.0
     github.com/emersion/go-maildir v0.6.0
     github.com/emersion/go-mbox v1.0.4
+    github.com/jaytaylor/html2text v0.0.0-20230321000545-74c2419ad056
     github.com/microcosm-cc/bluemonday v1.0.27
     github.com/mikaelstaldal/go-server-common v1.0.0
     github.com/ogen-go/ogen v1.20.2
+    golang.org/x/net v0.43.0
+    golang.org/x/text v0.30.0
     modernc.org/sqlite v1.48.1
 )
 ```
@@ -69,6 +75,15 @@ The full REST API contract is in `openapi.yaml`. Use ogen to generate Go server 
 | Contact autocomplete `q` parameter | Substring filter | 500 characters |
 
 **Whitespace trimming:** Leading and trailing whitespace is trimmed from folder names, filter names, contact names, and identity names before validation and storage.
+
+**Reorder endpoint semantics:** `PATCH /folders/reorder`, `PATCH /filters/reorder`, and `PATCH /identities/reorder` all share the same validation rules:
+
+- The submitted `ids` array must contain **every** existing entity of that type exactly once. Partial reorders are not supported (the endpoint rewrites all positions in a single transaction).
+- Duplicate IDs in the array → `400 {"error": "duplicate id"}`.
+- IDs that do not refer to an existing entity → `400 {"error": "unknown id"}`.
+- Missing IDs (any existing entity not present in the array) → `400 {"error": "incomplete reorder; all ids must be supplied"}`.
+- An empty `ids` array is rejected with the same "incomplete reorder" 400 (unless no entities exist at all, in which case the call is a no-op returning `updated: 0`).
+- On success the array index becomes the new `position` value (0, 1, 2, …) for each id, applied in a single SQLite transaction so the new ordering is atomic.
 
 **List endpoints:** All list endpoints return `{"total": n, "items": [...]}`, whether paginated or not. The `total` field is the total number of matching records (before pagination). Non-paginated endpoints (folders, filters, identities) return all records in `items` and set `total` to the same count. The `updated` count in bulk PATCH responses equals the number of rows actually modified by the SQL UPDATE (SQLite's `changes()` function); no-op updates where the new value equals the existing value are not counted.
 
@@ -152,7 +167,7 @@ The full REST API contract is in `openapi.yaml`. Use ogen to generate Go server 
 `GET /api/v1/messages/{id}/thread` determines membership using (in order):
 
 1. **Header-based (primary):** Build a directed graph where message A links to message B if B's `Message-ID` appears in A's `In-Reply-To` or `References` header. Take the transitive closure to find all messages in the same connected component.
-2. **Subject-based fallback:** If header-based grouping yields only the single requested message, group by normalized subject: strip leading reply/forward prefixes (any combination, case-insensitive, repeatedly) and compare case-insensitively. Strip: `Re:`, `Fwd:`, `Fw:`, `AW:`, `WG:`, `RES:`, `ENC:`, `VS:`, `SV:`.
+2. **Subject-based fallback:** If header-based grouping yields only the single requested message, group by normalized subject and compare case-insensitively. Normalisation strips leading reply/forward prefixes using the regex defined in REQUIREMENTS.md → Compose → Subject prefix stripping (`^[ \t]*(?i:re|fwd|fw|aw|wg|res|enc|vs|sv):[ \t]+`), applied repeatedly to the start of the subject until no further match is found, then trims surrounding whitespace.
 
 Thread results include messages from all folders, ordered by `date ASC`.
 
@@ -185,9 +200,17 @@ All timestamps stored as UTC RFC 3339 strings.
 
 ### Schema Migrations
 
-Versioned using `PRAGMA user_version`. On every startup the server reads the current version and applies any missing migrations in order, each in a transaction. `PRAGMA user_version` is set inside the same transaction as the DDL, so a crash mid-migration leaves the version unchanged and is retried on next startup. **Note:** SQLite's handling of `PRAGMA user_version` inside a transaction may vary by version; treat the atomicity guarantee as best-effort.
+Versioned using `PRAGMA user_version`. On every startup the server reads the current version and applies any missing migrations in order, each in a transaction. `PRAGMA user_version` is set inside the same transaction as the DDL, so a crash mid-migration leaves the version unchanged and is retried on next startup. **Note:** SQLite's handling of `PRAGMA user_version` inside a transaction may vary by version; treat the atomicity guarantee as best-effort. In particular, `CREATE VIRTUAL TABLE` for FTS5 may auto-commit on some SQLite versions. Every `CREATE TABLE`, `CREATE INDEX`, `CREATE TRIGGER`, and `CREATE VIRTUAL TABLE` statement therefore uses `IF NOT EXISTS` so the v0→v1 migration is safe to re-run after a partial-commit interruption.
 
 Each `if v < N` block is checked independently (not `else if`), so a single startup can apply multiple sequential migrations.
+
+### SQL Identifier Quoting
+
+`messages.references` collides with the SQL reserved word `REFERENCES`. SQLite (and modernc.org/sqlite) accept the bare identifier in most contexts because the parser is lenient, but every read or write of the column must quote it as `"references"` (or `[references]`) to remain portable and to avoid surprising behaviour from future parser tightening. Code review and any future migration touching this column must enforce the quoting convention.
+
+### Single-Writer Lock (`-import` vs server)
+
+`-import` and the server cannot safely share a data directory because import bypasses the LDA serialization model and may hold long write transactions. Enforcement: on startup the server creates a shared advisory lock file `<data>/mymail.lock` (containing the server PID) and acquires an exclusive `flock(2)` on it. `-import` acquires the same lock at startup; if it is already held, the import exits with status 1 and a message naming the holding PID. The server releases the lock on shutdown; `flock` releases automatically on process exit so a crashed server does not leave the lock orphaned. The LDA mode does not take this lock — concurrent LDA + server is supported via SQLite WAL and the LDA's busy timeout, as documented in REQUIREMENTS.md.
 
 ```
 user_version 0  →  fresh database: run all CREATE TABLE / CREATE INDEX / CREATE TRIGGER statements
@@ -248,6 +271,7 @@ CREATE TABLE IF NOT EXISTS messages (
     read          INTEGER NOT NULL DEFAULT 0,
     flagged       INTEGER NOT NULL DEFAULT 0,
     has_attachments INTEGER NOT NULL DEFAULT 0,
+    has_external_images INTEGER NOT NULL DEFAULT 0,
     send_at       TEXT,                    -- RFC 3339 UTC; non-NULL = deferred send
     snoozed_until TEXT,                    -- RFC 3339 UTC; non-NULL = snoozed
     snooze_folder INTEGER REFERENCES folders(id) ON DELETE SET NULL, -- folder_id to return to on snooze expiry; exposed as snooze_folder_id in API
@@ -415,6 +439,10 @@ Use Go standard library (`net/mail`, `mime`, `mime/multipart`, `mime/quotedprint
 
 **MIME body part search strategy:** Use depth-first search of the primary body tree to locate `text/plain` and `text/html` parts. Skip `message/rfc822` sub-parts entirely (treat them as opaque attachments, not as a source of body text). Within a `multipart/alternative`, prefer `text/html` over `text/plain` when both are present (as they are siblings at the same level, not nested).
 
+**Charset decoding:** Each text body part is decoded to UTF-8 before storage. Use `golang.org/x/net/html/charset` (`charset.NewReader`) to wrap the per-part body reader: it inspects the `Content-Type` charset parameter and, when known, returns a UTF-8 reader; when the declared charset is unrecognised the reader passes bytes through, which combined with `utf8.ToValidUTF8(b, "�")` (or the equivalent rune-by-rune copy with `utf8.RuneError` replacement) yields the U+FFFD-replacement behaviour required by REQUIREMENTS. Add `golang.org/x/net` to `go.mod` for this; no other transitive C dependencies are pulled in.
+
+**Plain-text derivation from HTML:** when the message has an HTML part but no `text/plain` part, run the **sanitized** `body_html` through `html2text.FromString(html, html2text.Options{PrettyTables: false, OmitLinks: false})`. The library is invoked after sanitization (not on the raw HTML) so any markup the sanitizer stripped is also absent from `body_text` — keeping the FTS index aligned with what the user actually sees. Treat the html2text version as part of the schema: bumping it requires a backfill pass that re-derives `body_text` for every affected row and rebuilds the FTS5 entries.
+
 ### Duplicate Detection
 
 ```sql
@@ -493,7 +521,8 @@ The scheduler holds the SQLite write lock only for the duration of each individu
 - Run the full LDA parsing pipeline (HTML sanitization, `cid:` resolution, `body_text` derivation, attachment extraction) for each message. Skip only spam detection and filter application.
 - For Maildir, map the `S` (Seen) flag to `read=1` and the `F` (Flagged) flag to `flagged=1`.
 - For mbox: parse and save the `From ` separator line timestamp **before** stripping it (used as `date` fallback). Strip the `From ` line before storing the `raw` BLOB. Use streaming `NextMessage()` API — do not load the entire file into memory.
-- `date` field: use the original `Date` header. Fallback: mtime of the Maildir file (Maildir) or `From ` separator timestamp (mbox). Never use current time as fallback during import.
+- mbox `From ` timestamp parsing: the canonical format (per the historical spec used by `From ` lines) is `Mon Jan _2 15:04:05 2006` (Go layout — note the `_2` to handle single-digit days). Parse with `time.Parse("Mon Jan _2 15:04:05 2006", ts)` after splitting off the address prefix on the first ASCII space. If parsing fails, fall back to the file's mtime; if the file mtime cannot be obtained either, log a warning and skip the message rather than substituting the current time.
+- `date` field: use the original `Date` header. Fallback: mtime of the Maildir file (Maildir) or `From ` separator timestamp (mbox). If the fallback is also unavailable, log a warning and skip the message. Never use current time as fallback during import.
 
 
 ## Outgoing Mail Implementation
@@ -502,7 +531,7 @@ The scheduler holds the SQLite write lock only for the duration of each individu
 
 1. Set `Date` to current time at send (RFC 5322 format).
 2. Generate `Message-ID` as `<uuid@domain>` where `domain` is extracted from the sender address.
-3. Strip CR (`\r`), LF (`\n`), and NUL (`\0`) from all user-supplied header values before encoding.
+3. Strip CR (`\r`), LF (`\n`), and NUL (`\0`) from all user-supplied header values before encoding (`to_addr`, `cc_addr`, `bcc_addr`, `reply_to_addr`, `subject`, `in_reply_to`, every element of `references`, and the identity display name).
 4. Encode non-ASCII header values as RFC 2047 encoded words.
 5. Encode attachment data as base64.
 6. Body structure:
@@ -510,6 +539,21 @@ The scheduler holds the SQLite write lock only for the duration of each individu
    - If both text and HTML are provided: `multipart/alternative` with both parts.
    - Wrap in `multipart/mixed` if attachments are present.
 7. Add `Reply-To` header only if `reply_to_addr` is non-empty.
+8. Add `In-Reply-To` header only if `in_reply_to` is non-empty. Each value is wrapped in angle brackets at emission time (the storage format strips them — see "Threading-header storage format" below).
+9. Add `References` header only if `references` is a non-empty list. Wrap each value in angle brackets and join the resulting tokens with single spaces. Both `In-Reply-To` and `References` are required for replies sent through mymail to thread on the recipient side.
+
+### Threading-header storage format
+
+`messages.message_id`, `messages.in_reply_to`, and the entries of `messages.references` are all stored **without** angle brackets (the brackets are syntactic delimiters from RFC 5322, not part of the identifier value). On read:
+
+- `MessageDetail.message_id` is serialized without brackets.
+- `MessageDetail.in_reply_to` is serialized without brackets.
+- `MessageDetail.references` re-adds angle brackets to each element on serialization (matching the openapi description "as it appears in the header, including angle brackets").
+- The header-based thread query joins on the bracket-stripped form on both sides, so threading works irrespective of bracket policy in the stored raw bytes.
+
+`messages.in_reply_to` is a single TEXT column. RFC 5322 syntactically permits multiple Message-IDs in `In-Reply-To`; if the parsed header contains more than one, only the **first** ID is stored. The discarded IDs remain visible in `references` (most mail clients populate both headers consistently).
+
+`messages.references` is stored as the parsed Message-IDs joined by `\n`. **Maximum stored length: 16 KiB.** When the joined value exceeds 16 KiB, the **oldest** IDs are dropped from the front and the most recent IDs are retained until the value fits. The first/last semantics (oldest-first ordering of `References`) is preserved among the retained IDs.
 
 ### Sendmail Integration
 
@@ -531,7 +575,9 @@ The `Bcc` header is preserved in the raw BLOB stored in Sent. Relies on the MTA 
 
 Use `github.com/microcosm-cc/bluemonday` with a custom email-appropriate policy.
 
-**CSS property matching:** Use a proper CSS parser (not string splitting or prefix matching) to distinguish properties with unexpected whitespace, comments, or encoding. For example, `background` (forbidden shorthand) and `background-color` (allowed) must be distinguished by exact name after parsing.
+**Per-element attribute configuration:** bluemonday's `AllowAttrs(...).OnElements(...)` form is used to scope attributes to the elements where they are valid. The policy mirrors the per-element matrix in REQUIREMENTS.md → HTML Sanitization (e.g. `colspan`/`rowspan` only on `td`/`th`, `align` only on table-related elements plus headings, paragraphs, and `div`). A unit test verifies that disallowed combinations (e.g. `<p colspan="2">`) are stripped.
+
+**CSS property matching:** bluemonday's CSS handling is regex-based. After parsing the `style` attribute into declarations, each declaration's property name is checked for **exact** match against the allowlist (so `background` does not match `background-color`). The forbidden value patterns below are checked against the raw declaration value before the property allowlist. The residual risk is that a sufficiently obscure CSS comment or encoding trick could slip past the regex; the consequence is at most an unexpected style being applied inside the sandboxed iframe (no script execution, no network access). Mitigations beyond regex matching are not added because no maintained Go CSS parser library matches the dependency profile (CGO-free, single binary). This decision is documented here so it is auditable.
 
 **Forbidden value patterns** (checked before the property allowlist):
 - `url(`
@@ -570,6 +616,10 @@ CSRF middleware logic:
 Create htpasswd files with: `htpasswd -Bc htpasswd myuser`
 
 
+## Raw Message Download (`GET /messages/{id}/raw`)
+
+The response sets `Content-Type: message/rfc822` and `Content-Disposition: attachment; filename=...` where the filename is built as `<id>.eml` (numeric, always ASCII-safe; no header injection vector). The numeric id avoids leaking subject content into URL bars and download history while still being unique. RFC 8187 percent-encoding therefore never has to be applied to this endpoint.
+
 ## Attachment Download Response
 
 Always respond with `Content-Type: application/octet-stream`. This sanitization applies to the single-attachment download endpoint (`GET /attachments/{id}`) only; there are no multipart attachment download endpoints.
@@ -601,9 +651,9 @@ Use [Quill](https://quilljs.com/) (vendored). On send/save, serialize as both HT
 2. Validate: at least one of `to_addr`, `cc_addr`, `bcc_addr` must be non-empty. Return 400 otherwise.
 3. Resolve the identity: use `identity_id` from the draft if set, otherwise the default identity.
 4. Look up all attachment rows for the draft.
-5. Determine mode from `send_at`:
-   - **Immediate send** (`send_at` is null or ≤ now): run the standard outgoing mail pipeline (sanitize body_html, construct MIME message with all attachments, pipe to sendmail). On sendmail failure: return 500 with the error; draft is preserved unchanged. On success: insert the sent message and its attachments into the Sent folder, then delete the draft row (attachments cascade-delete).
-   - **Scheduled** (`send_at` > now + 1 min): insert the message and attachments into the Scheduled folder (do not call sendmail), then delete the draft. Return 202.
+5. Determine mode from `send_at` using a single threshold (the same rule applies to `POST /messages/send`, `POST /messages/send-with-attachments`, and `POST /drafts/{id}/send`):
+   - **Scheduled** when `send_at` is non-null AND `send_at > now + 60 seconds`. Insert the message and attachments into the Scheduled folder (do not call sendmail), then delete the draft. Return 202.
+   - **Immediate** in every other case (`send_at` is null, in the past, equal to now, or within the next 60 seconds). Run the standard outgoing mail pipeline (sanitize body_html, construct MIME message with all attachments, pipe to sendmail). On sendmail failure: return 500 with the error; draft is preserved unchanged. On success: insert the sent message and its attachments into the Sent folder, then delete the draft row (attachments cascade-delete).
 6. Upsert recipients (To/Cc/Bcc) into the contacts table on immediate send only (same as the regular send flow). For scheduled sends, upsert happens when the scheduler actually sends the message.
 
 ### Mark All As Read
@@ -612,7 +662,17 @@ Call `POST /api/v1/folders/{id}/mark-all-read`. This single atomic request repla
 
 ### HTML Body Display
 
-Render in `<iframe srcdoc="...">` with `sandbox` attribute and no additional tokens (maximum restriction). Per-message opt-in for external images: rerender in an isolated iframe with a relaxed CSP (`img-src https:`) for that frame only.
+Render in `<iframe srcdoc="...">` with `sandbox` attribute and no additional tokens (maximum restriction). Per-message opt-in for external images: rerender by re-injecting `body_html` wrapped in a tiny HTML document whose `<head>` contains `<meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src https:; style-src 'unsafe-inline'">`. Because the parent CSP does not flow into a sandboxed `srcdoc` document and the iframe has no `allow-same-origin` token, the per-document `<meta>` CSP is the only policy in effect for that frame, so it can permit `https:` images without weakening the parent page's restrictions. The frame is freshly constructed each time the user toggles "Load external images" so the previous restricted document is discarded.
+
+### `has_external_images` Computation
+
+Computed at storage time and persisted as a column on `messages` (`has_external_images INTEGER NOT NULL DEFAULT 0`) so that the message list and detail responses do not have to re-scan the HTML on every request:
+
+1. After sanitization, scan the resulting `body_html` with a simple HTML token walker (`golang.org/x/net/html`).
+2. Set the flag to `1` if any `<img>` element has a `src` attribute beginning with `http://` or `https://` (case-insensitive). `data:` URIs do not count.
+3. The flag is recomputed only when `body_html` is (re)written; it is not maintained otherwise.
+
+Add the column to the v1 schema (initial schema, not a migration) and to the trigger surface that mirrors `messages` into `messages_fts` if needed (it is not indexed in FTS, so no trigger change is required).
 
 ### Notifications Polling
 

@@ -26,7 +26,9 @@ Starts an HTTP server that serves the REST API and the embedded web UI.
 | `-data`             | `data/`             | Data directory (stores the database)                   |
 | `-basic-auth-file`  | ``                  | Path to htpasswd file; if set, enables HTTP Basic Auth |
 | `-basic-auth-realm` | `mymail`            | Auth realm shown to clients                            |
-| `-sendmail`         | `sendmail`          | Path to the sendmail binary                            |
+| `-sendmail`         | `sendmail`          | Path to the sendmail binary (resolved via `PATH` if not absolute) |
+
+At startup the server resolves the configured sendmail binary (using `PATH` lookup when the value is not absolute) and verifies that it exists and is executable. If the lookup fails the server logs a fatal error and exits with a non-zero exit code; it does not start serving HTTP. This makes the misconfiguration visible at boot rather than deferring it to the first send (which would otherwise return 500 to the user).
 
 > **Security note:** If `-basic-auth-file` is not set, all requests are accepted without authentication. This mode is only safe when `-addr` is bound to a loopback address (`127.0.0.1` or `::1`), which is the default.
 >
@@ -89,7 +91,7 @@ Behaviour:
 
 Each folder has a name, a URL-safe slug, and a display order position.
 
-**Slug generation:** when a user-created folder is added, the slug is derived from the name by: (1) applying Unicode NFKD normalization, (2) lowercasing, (3) replacing any run of non-alphanumeric ASCII characters with a single hyphen, (4) trimming leading and trailing hyphens. If the resulting slug collides with an existing slug, a numeric suffix is appended (`-2`, `-3`, etc.). Built-in folder slugs are fixed and immutable.
+**Slug generation:** when a user-created folder is added, the slug is derived from the name by: (1) applying Unicode NFKD normalization, (2) lowercasing, (3) replacing any run of non-alphanumeric ASCII characters with a single hyphen, (4) trimming leading and trailing hyphens. If the resulting slug collides with an existing slug, a numeric suffix is appended (`-2`, `-3`, etc.). Slugs (built-in and user-created) are immutable: renaming a user folder via `PATCH /folders/{id}` changes the display name only — the slug is preserved so that bookmarked URLs and stored filter references keep working. Renaming to a name already in use by another folder is rejected with 409.
 
 **Built-in folders** (protected from deletion):
 
@@ -132,7 +134,7 @@ Inline image parts referenced by `cid:` URLs in the HTML body are **not** stored
 
 Each identity has:
 - Display name
-- Email address (unique, must be a valid RFC 5322 addr-spec)
+- Email address (unique, must be a valid RFC 5322 addr-spec). Stored in Unicode-simple-casefolded form (the same normalization as contacts) so that `User@x.com` and `user@x.com` cannot coexist as separate identities and so that identity matching during compose is deterministic regardless of header case.
 - Default flag (exactly one identity is default at all times)
 - Display order position
 - Plain-text signature
@@ -140,6 +142,13 @@ Each identity has:
 **Constraints:**
 - At least one identity must exist at all times.
 - Exactly one identity has the default flag. When a new default is set, all others are cleared. When the default is deleted, the identity with the lowest position (then lowest id) becomes the new default.
+
+**Identity matching for Reply / Reply All:**
+The compose pre-population logic (see Web UI → Compose) selects the From identity by:
+1. Building the candidate set: every addr-spec that appears in the original message's `To` and `Cc` headers (parsed with `net/mail` — group syntax flattened, comments stripped, addr-spec only). Casefold each candidate using Unicode simple casefolding.
+2. Iterating identities in `position ASC, id ASC` order. The first identity whose casefolded address matches any candidate is selected.
+3. If no identity matches, the default identity is used.
+4. If no identities exist, the compose form is unavailable (see Web UI → First-Run Behaviour).
 
 ### Contacts
 
@@ -166,7 +175,7 @@ Each filter has:
 - Stop flag: when true, evaluation halts after this filter matches; no further filters are evaluated for that message, regardless of whether prior matching filters had `stop=false`
 
 **Actions:**
-- `move` — deliver to the specified folder. Filters may not target the Snoozed (id=6) or Scheduled (id=5) folders; the API rejects such configurations with 400. If the target folder was deleted, the filter is skipped and delivery continues to Inbox. The filter remains visible in the filter list with a warning indicator and can be edited to assign a new folder or deleted.
+- `move` — deliver to the specified folder. Valid targets are Inbox (id=1), Trash (id=4), Junk (id=7), and any user-created folder (id ≥ 100). Sent (id=2), Drafts (id=3), Scheduled (id=5), and Snoozed (id=6) are rejected with 400 because routing inbound mail there would conflict with the dedicated semantics of those folders (e.g. Drafts is created via `/drafts` only, Scheduled/Snoozed are managed by the scheduler). If the target folder was deleted, the filter is skipped and delivery continues to Inbox. The filter remains visible in the filter list with a warning indicator and can be edited to assign a new folder or deleted.
 - `trash` — deliver directly to Trash.
 - `mark_read` — deliver to the folder chosen by spam detection, but mark as read.
 - `drop` — discard the message entirely; nothing is stored. Dropped messages are logged at INFO level (envelope From and Message-ID) but are otherwise unrecoverable.
@@ -179,11 +188,11 @@ A single global configuration:
 - Score threshold (default: 5.0)
 
 Spam detection triggers on any of:
-- `X-Spam-Flag` header equals `YES` (case-insensitive)
-- `X-Spam-Status` header starts with `Yes` (case-insensitive)
-- The configured score header is present and its numeric value is ≥ the threshold
+- `X-Spam-Flag` header equals `YES` after trimming surrounding ASCII whitespace (case-insensitive). When multiple `X-Spam-Flag` headers are present, the **first** instance is evaluated.
+- `X-Spam-Status` header value, after trimming leading ASCII whitespace, starts with `Yes` (case-insensitive) **and** the next character (if any) is not an ASCII letter (so `Yes,score=…` and `Yes ` match, but a value beginning with `Yesterday…` does not). When multiple `X-Spam-Status` headers are present, the **first** instance is evaluated.
+- The configured score header is present and its numeric value is ≥ the threshold. When the score header appears more than once, the **first** instance is evaluated; the others are ignored.
 
-If the score header is present but its value cannot be parsed as a floating-point number, it is treated as absent (the score trigger does not fire for that message).
+If the configured score header is present but its value cannot be parsed as a floating-point number, it is treated as absent (the score trigger does not fire for that message).
 
 
 ## Incoming Mail (LDA)
@@ -194,12 +203,13 @@ When invoked as `mymail -lda`:
 2. Reads the raw message from stdin.
 3. Parses the RFC 5322 message:
    - Extracts all standard headers.
+   - Decodes any non-UTF-8 charset declared in `Content-Type` to UTF-8 before storing `body_text`/`body_html` (see HTML Sanitization → Charset Handling).
    - Extracts plain-text and HTML body parts.
-   - If no plain-text part exists but an HTML part is present, derives plain text by stripping HTML tags.
+   - If no plain-text part exists but an HTML part is present, derives plain text by passing the sanitized HTML through `github.com/jaytaylor/html2text` (whitespace handling — `<br>` to newlines, block elements to paragraph breaks, list flattening — follows the library's defaults). The pinned version is recorded in `go.mod`; if the library is upgraded, all messages whose `body_text` was derived (i.e. messages without a native plain-text part) should be re-derived and the FTS5 index rebuilt to keep search results consistent.
    - Resolves `cid:` inline image references to `data:` URIs before sanitizing.
    - Sanitizes the HTML body.
    - Collects attachments.
-   - Falls back to current time if no `Date` header (import mode uses format-specific metadata instead; see Batch Import); generates a `Message-ID` if absent.
+   - Falls back to current time if no `Date` header (import mode uses format-specific metadata instead; see Batch Import); generates a `Message-ID` if absent (LDA mode generates `<uuid@domain>` where `domain` is taken from the first address in the `To` header, falling back to `localhost` if absent or unparseable).
 4. Skips duplicate messages (same `Message-ID` already in database).
 5. Applies spam detection and user-defined filters to determine the destination folder and read state.
 6. Stores the message and attachments.
@@ -217,6 +227,19 @@ When invoked as `mymail -lda`:
 - A `mark_read` action sets the read flag without changing the folder.
 - If `stop=1`, evaluation halts after the first match.
 
+**Worked example — `move` to Junk vs `mark_read` interactions:**
+
+Suppose spam detection has chosen Junk for the message, and the user has two non-stopping filters in this order:
+
+| # | Match           | Action      | Folder | stop |
+|---|-----------------|-------------|--------|------|
+| 1 | from: newsletter@example.com | `mark_read` | —    | 0    |
+| 2 | from: newsletter@example.com | `move`      | News   | 0    |
+
+Phase 1 picks Junk. Phase 2 applies filter 1: read flag is set. Filter 2 then applies: folder becomes News (overriding Junk). Final result: read=1, folder=News. If the order were reversed, the outcome would be identical because actions are accumulated, not chained: `mark_read` only updates the read flag, and the latest non-`mark_read` action (move/trash) wins for the folder.
+
+If filter 2 instead targeted Junk via `move`, the result would still be Junk + read=1 — equivalent to spam detection alone plus `mark_read`.
+
 ### LDA Error Handling
 
 - Database locked: retry up to 30 seconds, then exit `75`.
@@ -232,14 +255,17 @@ If `body_html` contains `data:` URIs for embedded images (e.g. from images paste
 
 The send flow:
 
-1. Constructs a MIME message from the provided fields (subject, to, cc, bcc, reply-to, body, attachments).
+1. Constructs a MIME message from the provided fields (subject, to, cc, bcc, reply-to, in-reply-to, references, body, attachments).
    - `Date` is set to the current time at send (not compose time).
-   - `Message-ID` is generated as `<uuid@domain>` using the sender's address domain.
+   - `Message-ID` is generated as `<uuid@domain>` using the sender's (`From`) address domain.
+   - When `in_reply_to` is non-empty it is emitted as the `In-Reply-To` header. When `references` is a non-empty list its values are joined with single spaces and emitted as the `References` header. Both are required for replies sent through mymail to thread on the recipient side.
    - Body is a single `text/plain` or `text/html` part when only one body type is provided; `multipart/alternative` when both are provided; wrapped in `multipart/mixed` if attachments are present.
-   - User-supplied header values are sanitized to strip control characters.
+   - User-supplied header values (`to_addr`, `cc_addr`, `bcc_addr`, `reply_to_addr`, `subject`, `in_reply_to`, every element of `references`, and the identity display name) are sanitized to strip CR, LF, and NUL control characters before encoding.
 2. Pipes the message to `sendmail -t -oi` with a 30-second timeout.
 3. On failure: returns the sendmail stderr as an error. No retries.
 4. On success: upserts recipients into the contacts table, stores the sent message in the Sent folder with `Bcc` header preserved in the raw blob.
+
+> **Bcc on outgoing copies:** mymail relies on the MTA (`sendmail -t`, as implemented by Postfix and Sendmail) to strip the `Bcc` header from envelopes generated for delivery before relaying. Some MTAs may not do this; operators using a non-standard MTA must verify this behaviour. The header is intentionally retained in the raw blob stored under Sent so the user can see who they bcc'ed.
 
 
 ## Background Scheduler
@@ -270,11 +296,20 @@ A single file containing multiple RFC 5322 messages. Each message begins with a 
 
 #### Maildir
 
-Each message stored as a separate file. A Maildir root contains `new/`, `cur/`, and `tmp/` subdirectories. The `S` (Seen) flag in the filename maps to `read=1`. The `F` (Flagged) flag maps to `flagged=1`.
+Each message stored as a separate file. A Maildir root contains `new/`, `cur/`, and `tmp/` subdirectories. Files in `new/` have no flag suffix (Maildir convention: they are unread/unflagged); they are imported with `read=0` and `flagged=0`. Files in `cur/` carry an info section after the `:2,` separator: the `S` (Seen) flag maps to `read=1`, the `F` (Flagged) flag maps to `flagged=1`, and absence of either flag means `0`. Files in `tmp/` are skipped (transient delivery state).
 
 #### MBX (not supported)
 
 Users with MBX files should pre-convert them using `mb2md` or a similar tool.
+
+### Single-Message Import (REST API)
+
+In addition to the `-import` CLI mode, mymail exposes `POST /api/v1/messages/import` for storing a single raw RFC 5322 message into a folder. The request body is a `message/rfc822` blob; the optional `folder_id` query parameter selects the target folder (default Inbox).
+
+- Filters and spam detection are **not** applied (same as `-import`).
+- Duplicate detection by `Message-ID` applies; an existing `Message-ID` returns 200 with the existing message id rather than re-importing.
+- Valid `folder_id` targets are Inbox (1), Sent (2), Trash (4), Junk (7), and any user folder (≥100). Drafts (3), Scheduled (5), and Snoozed (6) are rejected with 400 because their state is managed by the draft / scheduler / snooze flows rather than imported as inert messages. A non-existent `folder_id` returns 404.
+- The full LDA parsing pipeline runs (HTML sanitization, `cid:` resolution, charset decoding, `body_text` derivation, attachment extraction). Parse failure returns 400.
 
 
 ## HTML Sanitization
@@ -283,11 +318,19 @@ Incoming HTML bodies and the HTML part of outgoing messages are sanitized with a
 
 **Allowed elements:** `a`, `b`, `blockquote`, `br`, `code`, `del`, `em`, `h1`–`h6`, `hr`, `i`, `img`, `li`, `ol`, `p`, `pre`, `s`, `strong`, `table`, `tbody`, `td`, `tfoot`, `th`, `thead`, `tr`, `ul`
 
-**Allowed attributes:**
-- `href` on `a` (must be `http://`, `https://`, or `mailto:`)
-- `src` on `img` (must be `http://`, `https://`, or `data:image/…;base64,…`)
-- `alt` on `img`
-- `align`, `colspan`, `rowspan`, `style` (restricted CSS properties only)
+**Allowed attributes** (per element):
+
+| Attribute | Allowed on elements                                                            | Notes                                                          |
+|-----------|--------------------------------------------------------------------------------|----------------------------------------------------------------|
+| `href`    | `a`                                                                            | Must be `http://`, `https://`, or `mailto:`                    |
+| `src`     | `img`                                                                          | Must be `http://`, `https://`, or `data:image/…;base64,…`      |
+| `alt`     | `img`                                                                          |                                                                |
+| `colspan` | `td`, `th`                                                                     | Numeric value                                                  |
+| `rowspan` | `td`, `th`                                                                     | Numeric value                                                  |
+| `align`   | `table`, `tbody`, `td`, `tfoot`, `th`, `thead`, `tr`, `p`, `h1`–`h6`, `div`    | One of `left`, `right`, `center`, `justify`                    |
+| `style`   | All allowed elements                                                           | Restricted CSS properties only (see below)                     |
+
+Any attribute not listed above is stripped. Any value not matching the listed rule (including unknown URL schemes for `href`/`src`) causes the attribute to be stripped.
 
 **Stripped always:** `script`, `style` (standalone), `iframe`, `object`, `embed`, `form`, `input`
 
@@ -300,6 +343,10 @@ Incoming HTML bodies and the HTML part of outgoing messages are sanitized with a
 **Not allowed:** `background` (shorthand), `position`, `display`, `overflow`, `content`, `z-index`, `opacity`, and all vendor-prefixed properties.
 
 Links inside email bodies have `target="_blank"` and `rel="noopener noreferrer"` added by the sanitizer.
+
+### Charset Handling
+
+Body parts can declare any charset in `Content-Type` (`charset=ISO-8859-1`, `windows-1252`, `gb2312`, …). Each body part is decoded to UTF-8 using the charset declared in its `Content-Type` header before being stored in `body_text` or `body_html`. If the declared charset is unknown to the decoder, or the part contains bytes that cannot be decoded under the declared charset, the part is decoded as UTF-8 with invalid byte sequences replaced by the Unicode replacement character (U+FFFD). The original encoded bytes remain accessible via the raw RFC 5322 blob.
 
 ### `cid:` Inline Image Resolution
 
@@ -404,12 +451,41 @@ On first load the UI reads `localStorage` for the last selected folder and navig
    | **From**        | Identity matching original To/Cc; falls back to default      | Same as Reply                                                      | Default identity                                |
    | **To**          | Original `Reply-To` if present; otherwise original `From`    | Same as Reply, minus own address                                   | Empty                                           |
    | **Cc**          | Empty                                                        | Original To + Cc minus own address                                 | Empty                                           |
-   | **Subject**     | `Re: <original>` (no double Re:)                             | `Re: <original>` (no double Re:)                                   | `Fwd: <original>`                               |
+   | **Subject**     | `Re: <original>` (no double Re:)                             | `Re: <original>` (no double Re:)                                   | `Fwd: <original>` (no double Fwd:)              |
    | **In-Reply-To** | Original `Message-ID`                                        | Original `Message-ID`                                              | Empty                                           |
    | **References**  | Original references + original `Message-ID`                  | Original references + original `Message-ID`                        | Empty                                           |
    | **Attachments** | Empty                                                        | Empty                                                              | Copies of all original attachments (server-side) |
 
    The **Reply-To** compose field is not pre-populated for Reply, Reply-All, or Forward; it starts empty and is editable by the user.
+
+   **Subject prefix stripping** (used both for "no double Re:" / "no double Fwd:" in compose and for subject-based thread fallback):
+
+   The recognised prefixes are `Re`, `Fwd`, `Fw`, `AW`, `WG`, `RES`, `ENC`, `VS`, and `SV`. A prefix is matched by the regular expression `^[ \t]*(?i:re|fwd|fw|aw|wg|res|enc|vs|sv):[ \t]+` — case-insensitive, optional leading horizontal whitespace, mandatory ASCII colon (no space allowed between the keyword and the colon), and at least one trailing space or tab character. Stripping is applied **repeatedly** to the start of the subject until no further prefix matches. After stripping, the appropriate single prefix (`Re: ` for reply, `Fwd: ` for forward) is prepended. Subjects beginning with non-matching variants such as `RE ` (no colon), `Re :` (space before colon), or `re-:` are not treated as prefixes and are left untouched, except that the new prefix is still added.
+
+   **Body quoting** (Reply / Reply All / Forward):
+
+   The original message body is quoted into the new compose buffer below the cursor position. The exact format is fixed (English-only; localization is out of scope for v1):
+
+   - **Attribution line:** the new body opens with the user's blank composition area (with the identity signature, see below), then a single empty line, then the attribution line:
+
+     `On <RFC 1123 date in the recipient's locale-independent UTC representation>, <From display name if non-empty, otherwise the addr-spec> wrote:`
+
+     The date is formatted using the RFC 1123 layout (`Mon, 02 Jan 2006 15:04:05 MST`) using the original message's `Date` header value. If `Date` is absent, the stored `date` field (which is set from the LDA fallback) is used.
+   - **Plain-text quote:** every line of the original `body_text` is prefixed with `> ` (greater-than followed by a single space). Lines that already begin with `>` get an additional `>` (standard convention — quote depth grows with each forward/reply).
+   - **HTML quote:** the original `body_html` is wrapped in `<blockquote style="margin:0 0 0 0.8ex; border-left:1px solid #ccc; padding-left:1ex;">…</blockquote>`. The inline `style` is chosen because the values use only properties on the CSS allowlist, so the sanitiser preserves them on subsequent renders. The blockquote nests naturally on subsequent reply rounds.
+   - **Signature placement (Reply / Reply-All):** the identity signature (with the standard `\n-- \n` delimiter) is placed at the **top** of the new body, above the attribution line and quoted material — i.e. top-posting. This matches the dominant convention in modern web and desktop mail clients and is what users typing into the compose area expect.
+   - **Signature placement (Forward):** the signature appears once at the top in the same position; the forwarded content follows the attribution line.
+   - **Forward wrapper:** the forward attribution line is replaced by a four-line block:
+
+     ```
+     ---------- Forwarded message ----------
+     From: <original From>
+     Date: <RFC 1123 date as above>
+     Subject: <original Subject>
+     To: <original To>
+     ```
+
+     followed by a blank line, then the original body (no `> ` prefix and no `<blockquote>` for forwards — the forwarded content is presented as the new message body, with the wrapper acting as the boundary).
 
    Signatures are pre-populated from the selected identity, with `\n-- \n` delimiter. Changing the From identity swaps the signature block.
 
@@ -432,6 +508,17 @@ On first load the UI reads `localStorage` for the last selected folder and navig
 10. **Contact management** — Paginated list with add/edit/delete.
 
 11. **Preferences** — Client-side display preferences: dark mode toggle, message list density (Compact/Normal/Relaxed), default body view (HTML/Plain text), browser notifications toggle.
+
+### First-Run Behaviour
+
+A fresh install has no identities. The constraint "at least one identity must exist at all times" is enforced once the first identity is created; until then the UI and API behave as follows:
+
+- On any UI navigation (any hash route), if `GET /api/v1/identities` returns `total: 0` the UI immediately replaces the current route with `/#/settings/identities` and shows an inline banner explaining that an identity must be created before mail can be composed or sent. The banner remains until at least one identity exists. Other settings tabs and read-only views (folder lists, message detail, search) remain navigable but the **Compose** button in the sidebar is disabled and shows a tooltip referring the user to the identities tab.
+- The **Reply / Reply All / Forward** buttons in message detail are likewise disabled while no identity exists.
+- `POST /api/v1/messages/send`, `POST /api/v1/messages/send-with-attachments`, and `POST /api/v1/drafts/{id}/send` return `400` with `{"error": "no identity configured; create one in Settings → Identities first"}` when called with no identities present and no `identity_id` supplied (or with an `identity_id` that does not resolve).
+- `POST /api/v1/drafts` and `POST /api/v1/drafts-with-attachments` are permitted with no identities so that a partially composed message is not lost when the user navigates away — but the draft cannot be sent until an identity exists.
+
+The first identity created is automatically marked as default; the "exactly one default" invariant takes effect from that point on.
 
 ### Settings Navigation
 
