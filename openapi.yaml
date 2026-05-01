@@ -342,6 +342,10 @@ components:
             be auto-dropped into Sent).
         stop:
           type: boolean
+          default: true
+          description: |
+            When true, evaluation halts after this filter matches. Defaults to `true` when omitted,
+            matching the database default (`stop INTEGER NOT NULL DEFAULT 1`).
       required: [action]
 
     SpamFilterSettings:
@@ -714,7 +718,9 @@ paths:
     get:
       summary: Search messages
       description: |
-        Full-text search across all folders using FTS5 phrase-match. Results ordered by relevance.
+        Full-text search across all folders using FTS5 phrase-match. Results are ordered by
+        relevance using `ORDER BY rank` (SQLite FTS5 BM25 score — lower/more-negative rank means
+        higher relevance). No custom column weighting is applied.
         Optionally filtered by date range. The FTS5 `unicode61` tokenizer is used, so searches
         are case-insensitive. Search results include a `snippet` field (present only in search
         results, not in `GET /messages/{id}`).
@@ -938,7 +944,10 @@ paths:
           $ref: '#/components/responses/NotFound'
     delete:
       summary: Delete message
-      description: If not in Trash, moves to Trash. If already in Trash, permanently deletes.
+      description: |
+        If not in Trash, moves to Trash. If already in Trash, permanently deletes.
+        When moving to Trash, `snoozed_until`, `snooze_folder`, and `send_at` are cleared in the
+        same UPDATE to prevent the background scheduler from acting on a message that is now in Trash.
       parameters:
         - name: id
           in: path
@@ -1006,6 +1015,8 @@ paths:
         Same two-step semantics as single delete: messages not in Trash are moved to Trash; messages
         already in Trash are permanently deleted. Returns `moved_to_trash` and `permanently_deleted`
         counts consistent with `DELETE /folders/{folder_id}/messages`.
+        When moving messages to Trash, `snoozed_until`, `snooze_folder`, and `send_at` are cleared
+        in the same UPDATE to prevent the background scheduler from acting on messages now in Trash.
         Returns 404 if any of the provided IDs does not exist; no changes are made in that case.
         Returns 400 if more than 1000 IDs are supplied (the `maxItems: 1000` constraint on the `ids`
         array is the enforced limit); no changes are made in that case.
@@ -1194,6 +1205,8 @@ paths:
         Cancel a snooze early, returning the message to its original folder immediately.
         Returns 400 when the message is not currently in the Snoozed folder (id=6); the check
         is based on the current `folder_id`, not on the stored `snoozed_until` timestamp.
+        On success, `snoozed_until` and `snooze_folder` are cleared in the database, matching
+        the clearing behaviour of folder deletion and snooze-expiry processing by the scheduler.
       parameters:
         - name: id
           in: path
@@ -1774,6 +1787,10 @@ paths:
       description: |
         Create an identity. `address` must be a valid RFC 5322 addr-spec.
         If `is_default` is true, all other identities are set to is_default=false.
+        When `is_default` is absent or false and at least one identity already exists, the new
+        identity is created as non-default and the existing default identity is unchanged.
+        The first identity created (when no identities exist) is automatically marked as default
+        regardless of the `is_default` field value.
       requestBody:
         required: true
         content:

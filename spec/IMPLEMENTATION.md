@@ -182,6 +182,22 @@ Example: `it's a "test"` → `"it's a ""test"""`. Apply byte-by-byte (no locale-
 
 **FTS5 tokenizer:** FTS5 uses the built-in `unicode61` tokenizer (the default), which performs Unicode-aware case folding. All FTS searches are effectively case-insensitive.
 
+**Search SQL pattern:**
+
+```sql
+SELECT m.*, snippet(messages_fts, 4, '**', '**', '…', 15) AS snippet
+FROM messages_fts
+JOIN messages m ON messages_fts.rowid = m.id
+WHERE messages_fts MATCH ?
+  -- AND m.folder_id = ?       (when folder_id parameter is supplied)
+  -- AND m.date >= ?           (when date_from parameter is supplied)
+  -- AND m.date < ?            (when date_to parameter is supplied)
+ORDER BY rank
+LIMIT ? OFFSET ?;
+```
+
+Date filtering uses lexicographic string comparison on the stored `date` column (UTC RFC 3339 strings). This is correct because all dates are normalised to UTC before storage, so lexicographic order matches chronological order. The `date_from` bound is inclusive (`>=`) and `date_to` is exclusive (`<`). Omitted date parameters are simply excluded from the WHERE clause — no coalescing to a sentinel value. The `ORDER BY rank` sorts by SQLite FTS5 BM25 score; lower (more negative) values are more relevant, so this produces highest-relevance first. No custom column weighting is applied.
+
 
 ## Database
 

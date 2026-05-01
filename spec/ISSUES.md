@@ -1,174 +1,96 @@
 # Open Issues
 
-Issues are grouped by severity. Each issue cites the conflicting or incomplete locations.
+Issues requiring explicit decisions before implementation can proceed. All other issues from
+the previous review have been resolved by updating REQUIREMENTS.md, IMPLEMENTATION.md, and
+openapi.yaml.
 
 ---
 
 ## Critical — Would cause implementation bugs or contradictions
 
-### 1. LDA "creating if necessary" contradicts database-must-exist requirement
-
-**REQUIREMENTS.md §LDA mode, step 1:** "Opens the database (creating it if necessary)."  
-**REQUIREMENTS.md §Init mode (end of section):** "The server, LDA, and import modes require the database to already exist (created by `mymail -init`). They exit with a fatal error if the database file is absent."
-
-These are contradictory. Decide: does LDA create the database if absent, or does it exit fatally? The rest of the spec (init mode, deployment model) implies the latter. Step 1 should read "Opens the database (exits with a fatal error if absent)."
-
----
-
-### 2. `align` attribute allowed on `div`, but `div` is not an allowed element
+### 1. `align` attribute allowed on `div`, but `div` is not an allowed element
 
 **REQUIREMENTS.md §HTML Sanitization, Allowed attributes table:** `align` is listed as allowed on `"table, tbody, td, tfoot, th, thead, tr, p, h1–h6, div"`.  
 **REQUIREMENTS.md §HTML Sanitization, Allowed elements list:** `div` does not appear.
 
-If `div` is stripped by the sanitizer, there is no element to carry the `align` attribute. Either add `div` to the allowed elements list, or remove `div` from the `align` row in the attribute table.
+**Decision required:** Choose one:
+- **Option A — Remove `div` from the `align` row.** Keeps the sanitizer strict; `div` is silently stripped along with any `align` on it. Simpler and safer for a strict email policy.
+- **Option B — Add `div` to the allowed elements list** (and keep it in the `align` attribute row). `div` is widely used in HTML emails for layout; allowing it is more permissive but more compatible.
 
 ---
 
-### 3. `identity_id` for drafts is not stored in the database schema
+### 2. `identity_id` for drafts is not stored in the database schema
 
 **openapi.yaml `DraftRequest`:** includes optional `identity_id: integer`.  
 **IMPLEMENTATION.md §Send Draft Logic, step 3:** "Resolve the identity: use `identity_id` from the draft if set, otherwise the default identity."  
 **IMPLEMENTATION.md §messages schema:** the `messages` table has no `identity_id` column — only `from_addr TEXT`.
 
-The send-draft logic references a stored `identity_id` that does not exist. Either:
+The current design resolves `identity_id` on each PUT and writes the resulting address to `from_addr`, then discards `identity_id`. Step 3 of Send Draft Logic therefore cannot read back a stored `identity_id`; it can only match `from_addr` against identities.
 
-- Add `identity_id INTEGER REFERENCES identities(id) ON DELETE SET NULL` to the `messages` table, and update the schema version / migration notes accordingly; or
-- Clarify that "use `identity_id` from the draft" means "find the identity whose casefolded address matches `from_addr`", and remove the phrase "if set."
-
-The first option is safer (handles identity renames; preserves the user's explicit choice).
+**Decision required:** Choose one:
+- **Option A — Add `identity_id INTEGER REFERENCES identities(id) ON DELETE SET NULL` to the `messages` table.** Preserves the user's explicit identity choice across renames. Requires a schema version bump and migration notes update.
+- **Option B — Clarify step 3 to read "find the identity whose casefolded address matches `from_addr`; if no match, use the default identity."** No schema change needed; the stored `from_addr` acts as the identity reference. Breaks silently if the user renames the identity address after drafting.
 
 ---
 
 ## Missing details — Required to write correct implementation code
 
-### 4. Single-message and bulk DELETE do not specify clearing scheduler/snooze fields
+### 3. `source_message_id` error behaviour unspecified
 
-**openapi.yaml `DELETE /folders/{folder_id}` description:** explicitly states that `snoozed_until`, `snooze_folder`, and `send_at` are cleared when messages are moved to Trash.  
-**openapi.yaml `DELETE /messages/{id}` and `DELETE /messages`:** silent on this side effect.
+**openapi.yaml `DraftRequest`:** "If present on POST, attachments from this source message are copied server-side into the new draft atomically. Used when forwarding a message."
 
-Without clearing these fields, a deleted (Trashed) message could still be acted on by the background scheduler (attempted send or snooze expiry restore). Both single and bulk delete endpoints should specify the same clearing behaviour as folder deletion.
+No response code is specified when `source_message_id` references a non-existent message.
 
----
-
-### 5. `GET /messages/search` date filtering not described in IMPLEMENTATION.md
-
-**openapi.yaml `GET /messages/search`:** documents `date_from` and `date_to` query parameters (inclusive/exclusive RFC 3339 bounds).  
-**IMPLEMENTATION.md §REST API / Endpoint Summary and §FTS Search Input Sanitization:** describes the FTS5 phrase-match transformation but says nothing about how to combine FTS5 results with a date filter.
-
-The implementation needs a concrete SQL pattern, e.g., joining `messages_fts` with `messages` and adding `AND m.date >= ?` / `AND m.date < ?` clauses. This should be specified, including whether the date comparison uses the stored RFC 3339 string lexicographic ordering (which works for UTC-normalised values).
+**Decision required:** Choose one:
+- **404** — communicates clearly that the referenced message is gone.
+- **400** — treats a bad ID as a client input error.
+- **Silently ignore** — create the draft with no attachments and return 201.
 
 ---
 
-### 6. `stop` field default in `FilterRequest` not documented in openapi.yaml
+### 4. Position default when `position` is omitted on entity creation
 
-**IMPLEMENTATION.md §filters schema:** `stop INTEGER NOT NULL DEFAULT 1` — so the database default is `true` (stop after first match).  
-**openapi.yaml `FilterRequest`:** `stop` is listed but not in `required`, and no default value is stated.
+**IMPLEMENTATION.md / openapi.yaml:** `position` is optional in `POST /folders`, `POST /filters`, and `POST /identities`. The database schemas default to `0`, which places every newly created entity at position 0 (ties broken by `id` in list ordering, but the intent is unclear).
 
-The API contract should state explicitly what value is assumed when `stop` is omitted from a POST or PUT body.
-
----
-
-### 7. `source_message_id` error behaviour unspecified
-
-**openapi.yaml `DraftRequest`:** "If present on POST, attachments from this source message are copied server-side into the new draft atomically."
-
-No error response is specified when `source_message_id` references a non-existent message. Should the endpoint return `404`, silently create the draft with no attachments, or return `400`? This must be defined before implementation.
+**Decision required:** Choose one:
+- **Append semantics** — when `position` is omitted, the server sets `position = MAX(existing positions) + 1`, placing the new entity at the end of the ordered list. This is the expected UX behaviour.
+- **Explicit required** — callers must always supply `position`; the field should be added to `required`. The database default of `0` is only a schema safety net.
 
 ---
 
-### 8. Position default when `position` is omitted on entity creation
-
-**IMPLEMENTATION.md / openapi.yaml:** `position` is optional in `POST /folders`, `POST /filters`, and `POST /identities`. The database schemas default to `0`, which would place every newly created entity at the same position.
-
-The spec should state the intended behaviour: either the entity is appended to the end of the list (position = max existing position + 1), or the caller is required to supply a position for correct ordering.
-
----
-
-### 9. `is_default` default for subsequent identity creation not specified
-
-**REQUIREMENTS.md §Identities:** "The first identity created is automatically marked as default."  
-**openapi.yaml `POST /identities`:** "If `is_default` is true, all other identities are set to is_default=false." — no statement about what happens when `is_default` is omitted on a non-first identity.
-
-Clarify: when `is_default` is absent or `false` on a POST and at least one identity already exists, the new identity is created as non-default (existing default is unchanged).
-
----
-
-### 10. FTS snippet is sourced only from `body_text`; matches in other columns produce no snippet
+### 5. FTS snippet is sourced only from `body_text`; matches in other columns produce no snippet
 
 **IMPLEMENTATION.md §Search snippet:** `snippet(messages_fts, 4, '**', '**', '…', 15)` — column index 4 is `body_text`.
 
-If the search term matches only in `from_addr`, `to_addr`, `cc_addr`, or `subject` (columns 0–3), the `snippet()` call will return an empty or unrelated excerpt from `body_text`. This is a known SQLite FTS5 limitation (snippet only covers one column). The spec should acknowledge this and either accept it or specify fallback behaviour (e.g., try each column in order until a non-empty snippet is found).
+If the search term matches only in `from_addr`, `to_addr`, `cc_addr`, or `subject` (columns 0–3), the `snippet()` call returns an empty or irrelevant excerpt from `body_text`. This is a known SQLite FTS5 limitation.
 
----
-
-## Inconsistencies between documents
-
-### 11. `mark-not-junk` marks message as unread — not stated in REQUIREMENTS.md
-
-**openapi.yaml `POST /messages/{id}/mark-not-junk`:** "Moves the message from Junk to Inbox and marks it as unread."  
-**REQUIREMENTS.md §Web UI, Junk folder:** "Message detail shows a **Not junk** button (moves to Inbox)" — no mention of marking as unread.
-
-Update REQUIREMENTS.md to match the API spec behaviour (marking as unread is intentional: mirrors the snooze-expiry behaviour and ensures the message appears as new on return to Inbox).
-
----
-
-### 12. Snooze source-folder restrictions only in openapi.yaml
-
-**openapi.yaml `POST /messages/{id}/snooze`:** "The message must be in Inbox, a user folder, or already in Snoozed. System folders (Drafts, Sent, Trash, Junk, Scheduled) are not allowed."  
-**REQUIREMENTS.md:** no such restriction stated.
-
-The restriction and its rationale should be added to REQUIREMENTS.md.
-
----
-
-### 13. `DELETE /folders/{folder_id}/messages` folder restrictions only in openapi.yaml
-
-**openapi.yaml:** returns `400` for Scheduled (id=5), Snoozed (id=6), and Drafts (id=3).  
-**REQUIREMENTS.md §Web UI, Empty folder button:** only mentions Trash and Junk having the Empty button; no mention of protected folders.
-
-Add the restriction and its rationale (these folders have dedicated lifecycle management) to REQUIREMENTS.md.
-
----
-
-### 14. 60-second scheduling threshold not stated in REQUIREMENTS.md
-
-**openapi.yaml `SendRequest.send_at`:** "Scheduled when `send_at > now + 60 seconds`; immediate otherwise."  
-**IMPLEMENTATION.md §Send Draft Logic:** same threshold.  
-**REQUIREMENTS.md:** describes deferred send and the Scheduled folder but never mentions the 60-second window.
-
-Add the threshold and its rationale (prevents race between immediate path and scheduler) to REQUIREMENTS.md.
+**Decision required:** Choose one:
+- **Accept the limitation** — document in IMPLEMENTATION.md that snippet may be empty for header-only matches; the UI shows an empty snippet in that case.
+- **Try each column in order** — attempt `snippet(messages_fts, 0, …)` through `snippet(messages_fts, 4, …)` and return the first non-empty result. More expensive but more accurate.
 
 ---
 
 ## Design gaps — Potential behavioural ambiguities
 
-### 15. `mark-junk` does not prevent marking Scheduled or Snoozed messages as junk
+### 6. `mark-junk` does not prevent marking Scheduled or Snoozed messages as junk
 
 **openapi.yaml `POST /messages/{id}/mark-junk`:** only returns `400` "if the message is currently in the Junk folder."
 
-A message in the Scheduled folder can be moved to Junk by this endpoint, stranding a `send_at` value in the database (the scheduler checks `folder_id = 5` so it won't resend, but the field remains set). Similarly a Snoozed message would have a dangling `snoozed_until`. Specify whether Scheduled and Snoozed are also rejected with 400, and whether the relevant fields are cleared if the move is allowed.
+A Scheduled message moved to Junk would have a dangling `send_at` (the scheduler checks `folder_id = 5`, so it won't resend, but the field remains set). A Snoozed message would have a dangling `snoozed_until`.
+
+**Decision required:** Choose one:
+- **Reject Scheduled and Snoozed with 400** — add them to the existing Junk check. Clean semantics; forces the user to cancel the schedule/snooze first.
+- **Allow the move, clear the dangling fields** — add `send_at = NULL` / `snoozed_until = NULL` / `snooze_folder = NULL` to the UPDATE for `mark-junk`. Matches the behaviour already specified for folder deletion and single/bulk DELETE.
+- **Allow the move, leave fields set** — acceptable because the scheduler already gates on `folder_id`; the dangling values are harmless. Document as a known minor inconsistency.
 
 ---
 
-### 16. Cancel-snooze response does not document field clearing
-
-**openapi.yaml `DELETE /messages/{id}/snooze`:** response body is `{id, folder_id}`.
-
-The endpoint description says the message is "returned to its original folder immediately" but does not explicitly state that `snoozed_until` and `snooze_folder` are cleared in the database. Add this to the description, matching the folder-deletion and scheduler-expiry behaviour.
-
----
-
-### 17. Thread algorithm has no stated complexity bound or limit
+### 7. Thread algorithm has no stated complexity bound or limit
 
 **IMPLEMENTATION.md §Thread Algorithm:** describes a transitive-closure graph traversal across all stored messages.
 
-For a very large mailbox with a long reply chain (thousands of messages in one thread), this traversal could require loading all `message_id`, `in_reply_to`, and `references` rows into memory in Go. The spec should acknowledge this and state an upper bound (e.g., cap at N messages) or confirm unbounded traversal is acceptable for the single-user personal-mail use case.
+For a large mailbox with a very long reply chain, this traversal could require loading many rows into memory in Go. The spec is silent on whether this is acceptable or whether a limit should be imposed.
 
----
-
-### 18. FTS search relevance ordering delegates entirely to FTS5 defaults without documentation
-
-**openapi.yaml `GET /messages/search`:** "Results ordered by relevance."  
-**IMPLEMENTATION.md:** silent on ranking.
-
-SQLite FTS5 returns rows in an unspecified order unless `ORDER BY rank` is used. The spec should state explicitly that results are ordered by `rank` (BM25 default) and that no custom weighting is applied, so the implementation and future maintainers have a clear contract.
+**Decision required:** Choose one:
+- **Unbounded** — confirm that unbounded traversal is acceptable for a single-user personal-mail use case (typical threads are short; pathological cases are the user's problem).
+- **Capped at N** — specify an upper bound (e.g. 500 messages per thread result). Truncated threads would show a "thread too long" indicator in the UI.

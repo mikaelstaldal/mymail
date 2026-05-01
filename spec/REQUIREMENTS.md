@@ -218,7 +218,7 @@ If the configured score header is present but its value cannot be parsed as a fl
 
 When invoked as `mymail -lda`:
 
-1. Opens the database (creating it if necessary).
+1. Opens the database (exits with a fatal error if absent; the database must first be created with `mymail -init`).
 2. Reads the raw message from stdin.
 3. Parses the RFC 5322 message:
    - Extracts all standard headers.
@@ -271,6 +271,8 @@ If filter 2 instead targeted Junk via `move`, the result would still be Junk + r
 At least one of `to_addr`, `cc_addr`, or `bcc_addr` must be non-empty; an empty `to_addr` is permitted when `cc_addr` or `bcc_addr` is non-empty.
 
 If `body_html` contains `data:` URIs for embedded images (e.g. from images pasted into the rich-text editor), they are preserved as-is in the outgoing HTML MIME part; no conversion to CID attachments is performed.
+
+**Immediate vs. scheduled:** A message with a `send_at` value more than 60 seconds in the future is placed in the Scheduled folder for deferred delivery by the background scheduler; in every other case (`send_at` is null, in the past, equal to now, or within 60 seconds) the message is sent immediately. The 60-second buffer prevents a race condition between the immediate send path and the scheduler's first tick.
 
 The send flow:
 
@@ -449,7 +451,7 @@ On first load the UI reads `localStorage` for the last selected folder and navig
 
 1. **Folder view** — Paginated message list. Unread messages shown in bold. **Mark all as read** button marks all messages in the folder as read.
 
-2. **Message detail** — Full headers, sanitized HTML body in a sandboxed iframe (or plain-text fallback), attachment download links. Reply/Reply All/Forward/Move/Delete/Snooze/Mark as junk buttons. Opening an unread message causes the UI to issue an explicit `PATCH /messages/{id}` request (with `{"read": true}`) after a successful GET to mark it as read; `GET /messages/{id}` itself does not alter read state. When the message has both body types, a toggle switches between HTML and plain text; the preference is stored. Thread display: if the message is part of a thread, a collapsed conversation strip is shown below the body; clicking an entry expands it.
+2. **Message detail** — Full headers, sanitized HTML body in a sandboxed iframe (or plain-text fallback), attachment download links. Reply/Reply All/Forward/Move/Delete/Snooze/Mark as junk buttons. The Snooze button is available only when the message is in Inbox, Snoozed, or a user-created folder. It is not available for messages in Drafts, Sent, Trash, Junk, or Scheduled — each of those folders has its own dedicated lifecycle management that would conflict with snooze behaviour. Opening an unread message causes the UI to issue an explicit `PATCH /messages/{id}` request (with `{"read": true}`) after a successful GET to mark it as read; `GET /messages/{id}` itself does not alter read state. When the message has both body types, a toggle switches between HTML and plain text; the preference is stored. Thread display: if the message is part of a thread, a collapsed conversation strip is shown below the body; clicking an entry expands it.
 
 3. **Compose / Reply / Reply All / Forward** — Form with From selector, To/Cc/Bcc/Reply-To fields (To/Cc/Bcc offer address autocomplete), Subject, rich-text body editor (Quill), file upload for attachments. A **Send later** toggle reveals a date/time picker. Auto-saves to Drafts every 30 seconds. Navigate-away triggers an immediate draft save.
 
@@ -569,9 +571,9 @@ Message detail always shows the full "Apr 3, 14:32 CEST" form with timezone abbr
 - **404 on navigation:** shows inline "Not found" in the detail pane.
 - **Auth failure (401):** redirects to the browser's built-in Basic Auth dialog.
 
-**Junk folder:** Message detail shows a **Not junk** button (moves to Inbox) and standard Move controls (allows moving to any folder directly). All other views show a **Mark as junk** button.
+**Junk folder:** Message detail shows a **Not junk** button (moves to Inbox and marks as unread — mirroring snooze-expiry behaviour so the message appears as new on return to Inbox) and standard Move controls (allows moving to any folder directly). All other views show a **Mark as junk** button.
 
-**Empty folder button:** Trash and Junk views show an **Empty** button (with confirmation prompt). For Trash: messages already in Trash are permanently deleted (standard two-step semantics). For Junk: all messages are permanently deleted immediately, regardless of whether they have been in Trash previously — moving spam to Trash is not useful.
+**Empty folder button:** Trash and Junk views show an **Empty** button (with confirmation prompt). For Trash: messages already in Trash are permanently deleted (standard two-step semantics). For Junk: all messages are permanently deleted immediately, regardless of whether they have been in Trash previously — moving spam to Trash is not useful. Drafts, Scheduled, and Snoozed do not show the Empty button; those folders have dedicated lifecycle management (draft deletion, schedule cancellation, and snooze cancellation respectively) and bulk-emptying them would bypass that logic.
 
 ### New Message Notifications
 
