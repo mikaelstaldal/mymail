@@ -327,7 +327,7 @@ Users with MBX files should pre-convert them using `mb2md` or a similar tool.
 
 Incoming HTML bodies and the HTML part of outgoing messages are sanitized with a strict email-appropriate policy.
 
-**Allowed elements:** `a`, `b`, `blockquote`, `br`, `code`, `del`, `em`, `h1`–`h6`, `hr`, `i`, `img`, `li`, `ol`, `p`, `pre`, `s`, `strong`, `table`, `tbody`, `td`, `tfoot`, `th`, `thead`, `tr`, `ul`
+**Allowed elements:** `a`, `b`, `blockquote`, `br`, `code`, `del`, `div`, `em`, `h1`–`h6`, `hr`, `i`, `img`, `li`, `ol`, `p`, `pre`, `s`, `span`, `strong`, `table`, `tbody`, `td`, `tfoot`, `th`, `thead`, `tr`, `ul`
 
 **Allowed attributes** (per element):
 
@@ -451,7 +451,7 @@ On first load the UI reads `localStorage` for the last selected folder and navig
 
 1. **Folder view** — Paginated message list. Unread messages shown in bold. **Mark all as read** button marks all messages in the folder as read.
 
-2. **Message detail** — Full headers, sanitized HTML body in a sandboxed iframe (or plain-text fallback), attachment download links. Reply/Reply All/Forward/Move/Delete/Snooze/Mark as junk buttons. The Snooze button is available only when the message is in Inbox, Snoozed, or a user-created folder. It is not available for messages in Drafts, Sent, Trash, Junk, or Scheduled — each of those folders has its own dedicated lifecycle management that would conflict with snooze behaviour. Opening an unread message causes the UI to issue an explicit `PATCH /messages/{id}` request (with `{"read": true}`) after a successful GET to mark it as read; `GET /messages/{id}` itself does not alter read state. When the message has both body types, a toggle switches between HTML and plain text; the preference is stored. Thread display: if the message is part of a thread, a collapsed conversation strip is shown below the body; clicking an entry expands it.
+2. **Message detail** — Full headers, sanitized HTML body in a sandboxed iframe (or plain-text fallback), attachment download links. Reply/Reply All/Forward/Move/Delete/Snooze/Mark as junk buttons. The Snooze button is available only when the message is in Inbox, Snoozed, or a user-created folder. It is not available for messages in Drafts, Sent, Trash, Junk, or Scheduled — each of those folders has its own dedicated lifecycle management that would conflict with snooze behaviour. Opening an unread message causes the UI to issue an explicit `PATCH /messages/{id}` request (with `{"read": true}`) after a successful GET to mark it as read; `GET /messages/{id}` itself does not alter read state. When the message has both body types, a toggle switches between HTML and plain text; the preference is stored. Thread display: if the message is part of a thread, a collapsed conversation strip is shown below the body; clicking an entry expands it. When the thread is truncated at the 1000-message cap (`truncated: true` in the API response), a "thread too long" indicator is shown in place of the missing entries.
 
 3. **Compose / Reply / Reply All / Forward** — Form with From selector, To/Cc/Bcc/Reply-To fields (To/Cc/Bcc offer address autocomplete), Subject, rich-text body editor (Quill), file upload for attachments. A **Send later** toggle reveals a date/time picker. Auto-saves to Drafts every 30 seconds. Navigate-away triggers an immediate draft save.
 

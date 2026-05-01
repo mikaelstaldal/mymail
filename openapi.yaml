@@ -279,7 +279,8 @@ components:
             If present on POST, attachments from this source message are copied server-side into the
             new draft atomically. Used when forwarding a message to pre-populate the draft
             with the original attachments. On PUT (replace), this field is silently ignored —
-            no attachments are copied and no error is returned.
+            no attachments are copied and no error is returned. Returns 400 if the referenced
+            message does not exist.
 
     Filter:
       type: object
@@ -316,6 +317,7 @@ components:
       properties:
         position:
           type: integer
+          description: Display order position. When omitted on POST, appended after the last existing filter.
         name:
           type: string
         match_from:
@@ -397,6 +399,7 @@ components:
           type: boolean
         position:
           type: integer
+          description: Display order position. When omitted on POST, appended after the last existing identity.
         signature:
           type: string
           maxLength: 51200
@@ -475,7 +478,8 @@ paths:
         normalization, lowercasing, replacing non-alphanumeric runs with hyphens, and trimming
         leading/trailing hyphens. If the slug collides with an existing one, a numeric suffix
         (`-2`, `-3`, …) is appended. Leading/trailing whitespace is trimmed from the name before
-        processing.
+        processing. When `position` is omitted, the server sets it to `MAX(existing positions) + 1`,
+        placing the new folder at the end of the ordered list.
       requestBody:
         required: true
         content:
@@ -488,6 +492,7 @@ paths:
                   maxLength: 200
                 position:
                   type: integer
+                  description: Display order position. When omitted, appended after the last existing folder.
               required: [name]
       responses:
         '201':
@@ -1114,6 +1119,10 @@ paths:
 
         The endpoint includes messages from all folders (Inbox, Sent, Trash, Snoozed, etc.) so the
         full conversation is always visible.
+
+        **Cap:** At most 1000 messages are returned. If the thread exceeds this limit, the 1000
+        messages with the earliest `date` are returned and `truncated` is set to `true`. The UI
+        shows a "thread too long" indicator when `truncated` is true.
       parameters:
         - name: id
           in: path
@@ -1130,11 +1139,15 @@ paths:
                 properties:
                   total:
                     type: integer
+                    description: Number of messages returned (≤ 1000).
+                  truncated:
+                    type: boolean
+                    description: True when the thread exceeds 1000 messages and results were capped.
                   items:
                     type: array
                     items:
                       $ref: '#/components/schemas/MessageSummary'
-                required: [total, items]
+                required: [total, truncated, items]
         '404':
           $ref: '#/components/responses/NotFound'
 
@@ -1236,8 +1249,9 @@ paths:
       summary: Mark message as junk
       description: |
         Moves the message to the Junk folder (id=7) and marks it as read. Returns 400 if the
-        message is currently in the Junk folder. This check is based on the current folder_id,
-        not historical state.
+        message is currently in the Junk folder (id=7), the Scheduled folder (id=5), or the
+        Snoozed folder (id=6). The schedule or snooze must be cancelled before marking as junk.
+        These checks are based on the current folder_id, not historical state.
       parameters:
         - name: id
           in: path
@@ -1370,7 +1384,8 @@ paths:
       description: |
         Save a new draft. Nothing is sent. `send_at`, if supplied, is stored but not acted upon.
         If `source_message_id` is supplied, all attachments from that message are copied into the
-        new draft atomically (used when forwarding a message).
+        new draft atomically (used when forwarding a message). Returns 400 if `source_message_id`
+        references a message that does not exist.
       requestBody:
         required: true
         content:

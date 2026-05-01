@@ -76,6 +76,8 @@ The full REST API contract is in `openapi.yaml`. Use ogen to generate Go server 
 
 **Whitespace trimming:** Leading and trailing whitespace is trimmed from folder names, filter names, contact names, and identity names before validation and storage.
 
+**Position default (append semantics):** When `position` is omitted from `POST /folders`, `POST /filters`, or `POST /identities`, the server sets `position = COALESCE(MAX(position), -1) + 1` within the relevant table, placing the new entity at the end of the ordered list. This query must be executed inside the same transaction as the INSERT.
+
 **Reorder endpoint semantics:** `PATCH /folders/reorder`, `PATCH /filters/reorder`, and `PATCH /identities/reorder` all share the same validation rules:
 
 - The submitted `ids` array must contain **every** existing entity of that type exactly once. Partial reorders are not supported (the endpoint rewrites all positions in a single transaction).
@@ -87,7 +89,7 @@ The full REST API contract is in `openapi.yaml`. Use ogen to generate Go server 
 
 **List endpoints:** All list endpoints return `{"total": n, "items": [...]}`, whether paginated or not. The `total` field is the total number of matching records (before pagination). Non-paginated endpoints (folders, filters, identities) return all records in `items` and set `total` to the same count. The `updated` count in bulk PATCH responses equals the number of rows actually modified by the SQL UPDATE (SQLite's `changes()` function); no-op updates where the new value equals the existing value are not counted.
 
-**Search snippet:** Search results include a `snippet` field generated with `snippet(messages_fts, 4, '**', '**', '…', 15)`, where `4` is the zero-based index of the `body_text` column and `15` is the token context window. The snippet is HTML-escaped before being returned in the API response to prevent XSS. The `snippet` field appears only in search results, not in `GET /messages/{id}` responses.
+**Search snippet:** Search results include a `snippet` field generated with `snippet(messages_fts, 4, '**', '**', '…', 15)`, where `4` is the zero-based index of the `body_text` column and `15` is the token context window. The snippet is HTML-escaped before being returned in the API response to prevent XSS. The `snippet` field appears only in search results, not in `GET /messages/{id}` responses. **Snippet limitation:** `snippet()` is sourced solely from the `body_text` column. If the search term matches only in `from_addr`, `to_addr`, `cc_addr`, or `subject` (columns 0–3), the snippet may be empty or an irrelevant excerpt from `body_text`. This is a known SQLite FTS5 limitation; the UI displays an empty snippet in that case.
 
 **Contact autocomplete:** When `GET /api/v1/contacts` is used for address-field autocomplete dropdowns, the Web UI sends `limit=10`. If `total > 10`, the dropdown shows a "type more to narrow" hint rather than paginating.
 
@@ -168,7 +170,7 @@ The full REST API contract is in `openapi.yaml`. Use ogen to generate Go server 
 1. **Header-based (primary):** Build a directed graph where message A links to message B if B's `Message-ID` appears in A's `In-Reply-To` or `References` header. Take the transitive closure to find all messages in the same connected component.
 2. **Subject-based fallback:** If header-based grouping yields only the single requested message, group by normalized subject and compare case-insensitively. Normalisation strips leading reply/forward prefixes using the regex defined in REQUIREMENTS.md → Compose → Subject prefix stripping (`^[ \t]*(?i:re|fwd|fw|aw|wg|res|enc|vs|sv):[ \t]+`), applied repeatedly to the start of the subject until no further match is found, then trims surrounding whitespace.
 
-Thread results include messages from all folders, ordered by `date ASC`.
+Thread results include messages from all folders, ordered by `date ASC`. **Cap:** Thread results are limited to 1000 messages. If the transitive closure (or subject-based fallback) yields more than 1000 messages, only the 1000 with the earliest `date` are returned and the response includes `truncated: true`. The UI shows a "thread too long" indicator when `truncated` is true.
 
 Messages that initially lacked a `Message-ID` header are assigned a generated ID at storage time. Since external mailers may not reference this generated ID in their `In-Reply-To`/`References` headers, subject-based threading serves as the natural fallback for such messages.
 
@@ -274,6 +276,7 @@ No denormalized counter is maintained.
 CREATE TABLE IF NOT EXISTS messages (
     id            INTEGER PRIMARY KEY AUTOINCREMENT,
     folder_id     INTEGER NOT NULL REFERENCES folders(id),
+    identity_id   INTEGER REFERENCES identities(id) ON DELETE SET NULL,
     message_id    TEXT UNIQUE,
     in_reply_to   TEXT,
     references    TEXT,                    -- newline-separated (\n); serialized as JSON array by the API
@@ -674,7 +677,7 @@ Delimiter detection runs before HTML escaping so the literal `-- ` characters ar
 - `PUT /api/v1/drafts/{id}` (JSON endpoint) does not modify attachment rows.
 - `PUT /api/v1/drafts-with-attachments/{id}` replaces attachments wholesale.
 - To remove individual attachments, call `DELETE /api/v1/drafts/{id}/attachments/{attachment_id}`.
-- On every PUT, the server resolves `identity_id` to its `address` and updates `from_addr` in the `messages` row. If `identity_id` is absent in the PUT body it is cleared to NULL, and `from_addr` is set to the default identity's address. This keeps the Drafts message list accurate when the user changes the From identity.
+- On every PUT, the server resolves `identity_id` to its `address` and updates both the `identity_id` column and `from_addr` in the `messages` row. If `identity_id` is absent in the PUT body, `identity_id` is set to NULL and `from_addr` is set to the default identity's address. This keeps the Drafts message list accurate when the user changes the From identity. On POST (new draft), `identity_id` is stored directly from the request body (or NULL if absent).
 
 ### Send Draft Logic (`POST /api/v1/drafts/{id}/send`)
 
