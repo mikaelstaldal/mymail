@@ -51,6 +51,24 @@ Exit codes follow standard LDA conventions:
 - `1` — permanent failure (message will bounce)
 - `75` — temporary failure (MTA will retry; used e.g. if database is locked)
 
+### Init mode (`-init`)
+
+```
+mymail -init -data <dir>
+```
+
+Initializes a fresh installation:
+- Creates the data directory if it does not exist (mode `0700`).
+- Creates the SQLite database file (mode `0600`).
+- Sets `PRAGMA journal_mode=WAL`.
+- Applies the initial schema (all `CREATE TABLE`, `CREATE INDEX`, `CREATE TRIGGER`, `CREATE VIRTUAL TABLE` statements).
+- Sets `PRAGMA user_version` to the current schema version.
+- Seeds the database with the seven built-in folders.
+- Seeds the spam filter settings row.
+- Exits `0` on success, `1` on any error.
+
+The server, LDA, and import modes require the database to already exist (created by `mymail -init`). They exit with a fatal error if the database file is absent.
+
 ### Import mode (`-import`)
 
 ```
@@ -81,7 +99,8 @@ Behaviour:
 - Filters are **not** applied during import — messages go directly to the specified target folder.
 - A running count is printed to stdout as each folder completes: `inbox: 1042 imported, 3 skipped`.
 - On completion, a summary line is printed: `Total: 2381 imported, 17 skipped`.
-- Exit code `0` on success, `1` on any error. A single unparseable message logs a warning and continues. A message is considered unparseable when `net/mail.ReadMessage()` returns an error (missing or malformed headers); missing optional fields (e.g. absent `Date`) are warnings, not failures.
+- Exit code `0` on success, `1` on any error. A single unparseable message logs a warning and continues. A message is considered unparseable when `net/mail.ReadMessage()` returns an error (missing or malformed headers); missing optional fields (e.g. absent `Date`) are warnings, not failures. Exception: if a message has no `Date` header **and** no usable fallback timestamp (mtime or `From ` separator), a warning is logged and the message is skipped.
+- For each successfully imported message, the `From` address is upserted into the contacts table using the same logic as LDA (update name only when the stored name is currently empty).
 - **Concurrency:** Running import (`-import`) concurrently with a running server against the same data directory is not supported. Concurrent LDA (`-lda`) processes alongside a running server are safe — SQLite WAL mode and the LDA's busy timeout serialize access, and `INSERT OR IGNORE` guards against duplicate inserts from concurrent LDA processes.
 
 
@@ -115,7 +134,7 @@ Each message stores:
 - `From`, `To`, `Cc`, `Bcc`, `Reply-To` addresses
 - `Subject`, `Date`
 - Plain-text body (`body_text`) and HTML body (`body_html`, sanitized)
-- Original raw RFC 5322 message bytes
+- Original raw RFC 5322 message bytes (NULL for drafts, which have no raw bytes until sent)
 - Read/unread flag
 - Flagged (starred) flag
 - Whether attachments are present
@@ -158,8 +177,8 @@ Each contact has:
 - Created and updated timestamps
 
 Contacts are upserted automatically:
-- On message receipt: the `From` address is upserted. A manually set name is never overwritten automatically (only updated when the stored name is empty).
-- On send: `To`, `Cc`, and `Bcc` addresses are upserted using the same Unicode simple casefolding normalization as incoming contacts.
+- On message receipt: the `From` address is upserted. The display name from the `From` header is stored as the contact name, but only when the currently stored name is empty (a manually set name is never overwritten).
+- On send: `To`, `Cc`, and `Bcc` addresses are upserted using the same Unicode simple casefolding normalization as incoming contacts. The display name from each address string is extracted and applied with the same rule: it is stored only when the contact's current name is empty.
 
 The distinction between manually set and automatically populated names is enforced server-side. Clients cannot observe or control this distinction via the API.
 
@@ -400,7 +419,7 @@ Hash-based routing. The server serves the same `index.html` for all non-API path
 | `/#/compose?reply=:id`          | Compose pre-populated for reply                                     |
 | `/#/compose?replyall=:id`       | Compose pre-populated for reply-all                                 |
 | `/#/compose?forward=:id`        | Compose pre-populated for forward                                   |
-| `/#/search?q=...`               | Search results                                                      |
+| `/#/search?q=...`               | Search results (optional `&folder_id=N` for folder-scoped search)   |
 | `/#/settings`                   | Settings page (defaults to first tab)                               |
 | `/#/settings/:tab`              | Settings page at a specific tab                                     |
 
@@ -481,13 +500,15 @@ On first load the UI reads `localStorage` for the last selected folder and navig
 
    Signatures are pre-populated from the selected identity, with `\n-- \n` delimiter. Changing the From identity swaps the signature block.
 
+   **Signature HTML conversion:** The signature is stored as plain text but must be inserted into Quill's HTML content model. Convert it as follows: the standard email signature delimiter line (`-- ` — two hyphens followed by a space) is rendered as `<hr>`; all other lines have `&`, `<`, and `>` escaped to `&amp;`, `&lt;`, and `&gt;` respectively, and line breaks become `<br>`.
+
    **Send button behavior:** Disabled while in-flight. Performs an immediate draft save before sending. On send failure, keeps the compose form open and shows the error inline.
 
    **Auto-save failure:** If an auto-save request fails, a transient error toast is shown. The save is retried on the next 30-second tick. If the navigate-away save fails, a brief warning is shown but navigation is not blocked.
 
 4. **Scheduled folder message detail** — Shows scheduled send time; **Cancel schedule** button moves message to Drafts.
 
-5. **Search** — Global full-text search results as a message list.
+5. **Search** — Full-text search results as a message list. A folder selector (dropdown) allows limiting results to a single folder; when no folder is selected the search is global (all folders). The selected folder is passed as the `folder_id` query parameter to `GET /messages/search`. The search bar and folder selector are shown together in the search view.
 
 6. **Filter management** — CRUD UI with drag-to-reorder. The `match_to` field is labelled "To / Cc".
 
@@ -550,7 +571,7 @@ Message detail always shows the full "Apr 3, 14:32 CEST" form with timezone abbr
 
 **Junk folder:** Message detail shows a **Not junk** button (moves to Inbox) and standard Move controls (allows moving to any folder directly). All other views show a **Mark as junk** button.
 
-**Empty folder button:** Trash and Junk views show an **Empty** button (with confirmation prompt).
+**Empty folder button:** Trash and Junk views show an **Empty** button (with confirmation prompt). For Trash: messages already in Trash are permanently deleted (standard two-step semantics). For Junk: all messages are permanently deleted immediately, regardless of whether they have been in Trash previously — moving spam to Trash is not useful.
 
 ### New Message Notifications
 

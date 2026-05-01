@@ -187,13 +187,17 @@ Example: `it's a "test"` → `"it's a ""test"""`. Apply byte-by-byte (no locale-
 
 **File:** `<data>/mymail.sqlite`
 
-**File permissions:** Create data directory with mode `0700` and database file with mode `0600` on first run.
+**File permissions:** Create data directory with mode `0700` and database file with mode `0600` in init mode.
 
 **SQLite configuration:**
-- Server: `PRAGMA journal_mode=WAL`, 5-second busy timeout.
+- Init: sets `PRAGMA journal_mode=WAL` before initializing schema.
+- Server: 5-second busy timeout (`PRAGMA busy_timeout=5000`).
 - LDA: 30-second busy timeout (`PRAGMA busy_timeout=30000`).
+- Import: 5-second busy timeout (`PRAGMA busy_timeout=5000`).
 
 All timestamps stored as UTC RFC 3339 strings.
+
+k**Database existence check:** The server, LDA, and import modes check that the database file exists at startup and exit immediately with a fatal error if it does not. The database must be created by `mymail -init` before running any other mode.
 
 ### Schema Migrations
 
@@ -210,8 +214,8 @@ Each `if v < N` block is checked independently (not `else if`), so a single star
 `-import` and the server cannot safely share a data directory because import bypasses the LDA serialization model and may hold long write transactions. Enforcement: on startup the server creates a shared advisory lock file `<data>/mymail.lock` (containing the server PID) and acquires an exclusive `flock(2)` on it. `-import` acquires the same lock at startup; if it is already held, the import exits with status 1 and a message naming the holding PID. The server releases the lock on shutdown; `flock` releases automatically on process exit so a crashed server does not leave the lock orphaned. The LDA mode does not take this lock — concurrent LDA + server is supported via SQLite WAL and the LDA's busy timeout, as documented in REQUIREMENTS.md.
 
 ```
-user_version 0  →  fresh database: run all CREATE TABLE / CREATE INDEX / CREATE TRIGGER statements
-user_version 1  →  (reserved for first future migration)
+user_version 0  →  uninitialized: apply all CREATE TABLE / CREATE INDEX / CREATE TRIGGER statements, then set user_version to 1
+user_version 1  →  initial schema in place; the first future migration will bump this to 2
 ```
 
 **Current schema version: 1** (initial schema applied; no further migrations yet).
@@ -220,7 +224,7 @@ user_version 1  →  (reserved for first future migration)
 
 ```sql
 CREATE TABLE IF NOT EXISTS folders (
-    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    id         INTEGER PRIMARY KEY,
     name       TEXT    NOT NULL UNIQUE,
     slug       TEXT    NOT NULL UNIQUE,
     position   INTEGER NOT NULL DEFAULT 0,
@@ -228,7 +232,9 @@ CREATE TABLE IF NOT EXISTS folders (
 );
 ```
 
-Built-in folders seeded on first run (id=1..7); user-created folders have `id >= 100`.
+Built-in folders seeded by `mymail -init` (id=1..7); user-created folders have `id >= 100`.
+
+**User folder ID generation:** When creating a user folder, the service layer generates the ID explicitly rather than relying on `AUTOINCREMENT`. Query `SELECT COALESCE(MAX(id), 99) + 1 FROM folders WHERE id >= 100` to get the next candidate, then INSERT with that ID. Retry on `SQLITE_CONSTRAINT` (duplicate key) by re-querying. This guarantees IDs ≥ 100 without relying on SQLite's sequence table.
 
 The `unread_count` field in the `Folder` API response is computed on-the-fly:
 ```sql
@@ -264,7 +270,7 @@ CREATE TABLE IF NOT EXISTS messages (
     date          TEXT    NOT NULL,        -- RFC 3339 UTC
     body_text     TEXT    NOT NULL DEFAULT '',
     body_html     TEXT    NOT NULL DEFAULT '',
-    raw           BLOB    NOT NULL,
+    raw           BLOB,                        -- NULL for drafts (no raw RFC 5322 bytes until sent)
     read          INTEGER NOT NULL DEFAULT 0,
     flagged       INTEGER NOT NULL DEFAULT 0,
     has_attachments INTEGER NOT NULL DEFAULT 0,
@@ -458,7 +464,7 @@ Insert message record and attachments in a single transaction.
 
 ### Contacts Upsert
 
-Only the `From` address is upserted for incoming mail (To/Cc not auto-added). Lower-case the address before storage using Unicode simple casefolding (`golang.org/x/text/cases` with `language.Und` and `cases.Fold()`). The same normalization applies to outgoing contacts (To/Cc/Bcc addresses upserted on send).
+Only the `From` address is upserted for incoming mail (To/Cc not auto-added). Lower-case the address before storage using Unicode simple casefolding (`golang.org/x/text/cases` with `language.Und` and `cases.Fold()`). The same normalization applies to outgoing contacts (To/Cc/Bcc addresses upserted on send). For outgoing contacts, extract the display name from the address string (e.g. `"John Doe <john@example.com>"` → name `John Doe`) and apply the same rule as incoming: only update the stored name when it is currently empty.
 
 ### Error Handling
 
@@ -516,6 +522,7 @@ The scheduler holds the SQLite write lock only for the duration of each individu
 - Open database and run migrations before importing.
 - Use batched transactions: commit every 500 messages to bound WAL file size. If a batch fails, only that batch is rolled back; previously committed batches are retained. There is no way to identify which individual messages were committed after a partial failure — re-run the full import after fixing the source data (duplicate detection will skip already-imported messages).
 - Run the full LDA parsing pipeline (HTML sanitization, `cid:` resolution, `body_text` derivation, attachment extraction) for each message. Skip only spam detection and filter application.
+- Upsert the `From` address of each successfully imported message into the contacts table using the same upsert logic as the LDA (update name only when the stored name is empty).
 - For Maildir, map the `S` (Seen) flag to `read=1` and the `F` (Flagged) flag to `flagged=1`.
 - For mbox: call `os.Stat(path)` **before** opening the mbox reader to capture the file's mtime; this value is used as the timestamp fallback when a `From ` separator timestamp cannot be parsed, and must be available throughout the per-message loop (the `go-mbox` reader accepts an `io.Reader` and cannot provide mtime itself). Parse and save the `From ` separator line timestamp **before** stripping it (used as `date` fallback). Strip the `From ` line before storing the `raw` BLOB. Use streaming `NextMessage()` API — do not load the entire file into memory.
 - mbox `From ` timestamp parsing: the canonical format (per the historical spec used by `From ` lines) is `Mon Jan _2 15:04:05 2006` (Go layout — note the `_2` to handle single-digit days). Parse with `time.Parse("Mon Jan _2 15:04:05 2006", ts)` after splitting off the address prefix on the first ASCII space. If parsing fails, fall back to the file's mtime captured by the `os.Stat` call above; if the file mtime cannot be obtained either, log a warning and skip the message rather than substituting the current time.
@@ -617,6 +624,8 @@ Create htpasswd files with: `htpasswd -Bc htpasswd myuser`
 
 The response sets `Content-Type: message/rfc822` and `Content-Disposition: attachment; filename=...` where the filename is built as `<id>.eml` (numeric, always ASCII-safe; no header injection vector). The numeric id avoids leaking subject content into URL bars and download history while still being unique. RFC 8187 percent-encoding therefore never has to be applied to this endpoint.
 
+When the `raw` column is NULL (the message is a draft), the endpoint returns `200 OK` with `Content-Type: application/json` and body `{}` (empty JSON object) rather than a `message/rfc822` response.
+
 ## Attachment Download Response
 
 Always respond with `Content-Type: application/octet-stream`. This sanitization applies to the single-attachment download endpoint (`GET /attachments/{id}`) only; there are no multipart attachment download endpoints.
@@ -634,6 +643,14 @@ Use openapi-typescript to generate the client for REST API from `openapi.yaml`.
 
 Use [Quill](https://quilljs.com/) (vendored). On send/save, serialize as both HTML (`quill.root.innerHTML`) and plain text (`quill.getText()`). Toolbar: Bold, Italic, Underline, Ordered list, Bullet list, Link, Clean.
 
+### Signature Plain-Text → HTML Conversion
+
+When inserting a signature into Quill's HTML content model (on compose open or identity change), convert the plain-text signature as follows:
+1. Detect the standard email signature delimiter: a line whose exact content is `-- ` (two hyphens, one space). Replace that entire line (including its trailing newline) with `<hr>`.
+2. In all other lines, escape `&` → `&amp;`, `<` → `&lt;`, `>` → `&gt;`.
+3. Replace each remaining `\n` with `<br>`.
+Delimiter detection runs before HTML escaping so the literal `-- ` characters are not corrupted.
+
 ### Draft Auto-Save Logic
 
 - Auto-save fires every 30 seconds.
@@ -641,6 +658,7 @@ Use [Quill](https://quilljs.com/) (vendored). On send/save, serialize as both HT
 - `PUT /api/v1/drafts/{id}` (JSON endpoint) does not modify attachment rows.
 - `PUT /api/v1/drafts-with-attachments/{id}` replaces attachments wholesale.
 - To remove individual attachments, call `DELETE /api/v1/drafts/{id}/attachments/{attachment_id}`.
+- On every PUT, the server resolves `identity_id` to its `address` and updates `from_addr` in the `messages` row. If `identity_id` is absent in the PUT body it is cleared to NULL, and `from_addr` is set to the default identity's address. This keeps the Drafts message list accurate when the user changes the From identity.
 
 ### Send Draft Logic (`POST /api/v1/drafts/{id}/send`)
 

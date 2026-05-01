@@ -500,7 +500,8 @@ paths:
       summary: Update folder
       description: |
         Update folder name and/or position. Built-in folders (ids 1–7) may only have their
-        position updated.
+        `position` updated; supplying a `name` for a built-in folder returns
+        `400 {"error": "built-in folders cannot be renamed"}`.
 
         **Slug stability:** the `slug` field is immutable for both built-in and user folders.
         Renaming a user folder via this endpoint changes only the display `name`; the slug is
@@ -650,8 +651,12 @@ paths:
     delete:
       summary: Delete all messages in folder
       description: |
-        Delete all messages in a folder using two-step semantics: messages not in Trash are moved
-        to Trash; messages already in Trash are permanently deleted. Returns 400 for Scheduled (id=5), Snoozed (id=6), and Drafts (id=3) folders.
+        Delete all messages in a folder. Returns 400 for Scheduled (id=5), Snoozed (id=6), and Drafts (id=3) folders.
+
+        **Semantics by folder:**
+        - **Junk (id=7):** all messages are permanently deleted immediately.
+        - **Trash (id=4):** messages already in Trash are permanently deleted (standard — there is nowhere else to go).
+        - **All other folders:** messages are moved to Trash (two-step semantics). `moved_to_trash` reflects how many were moved; `permanently_deleted` will be 0.
       parameters:
         - name: folder_id
           in: path
@@ -998,7 +1003,9 @@ paths:
     delete:
       summary: Bulk delete messages
       description: |
-        Same two-step semantics as single delete.
+        Same two-step semantics as single delete: messages not in Trash are moved to Trash; messages
+        already in Trash are permanently deleted. Returns `moved_to_trash` and `permanently_deleted`
+        counts consistent with `DELETE /folders/{folder_id}/messages`.
         Returns 404 if any of the provided IDs does not exist; no changes are made in that case.
         Returns 400 if more than 1000 IDs are supplied (the `maxItems: 1000` constraint on the `ids`
         array is the enforced limit); no changes are made in that case.
@@ -1026,9 +1033,13 @@ paths:
               schema:
                 type: object
                 properties:
-                  deleted:
+                  moved_to_trash:
                     type: integer
-                required: [deleted]
+                    description: Number of messages moved to Trash (were not already in Trash).
+                  permanently_deleted:
+                    type: integer
+                    description: Number of messages permanently deleted (were already in Trash).
+                required: [moved_to_trash, permanently_deleted]
         '400':
           $ref: '#/components/responses/BadRequest'
         '404':
@@ -1041,6 +1052,10 @@ paths:
         Download the original RFC 5322 message file. The filename is `<id>.eml` (numeric, always
         ASCII-safe) so the response never needs RFC 8187 encoding and there is no header-injection
         vector via subject-derived filenames.
+
+        When the message is a draft (the `raw` column is NULL), returns `200 OK` with
+        `Content-Type: application/json` and body `{}` (empty JSON object) instead of a
+        `message/rfc822` response.
       parameters:
         - name: id
           in: path
@@ -1049,7 +1064,9 @@ paths:
             type: integer
       responses:
         '200':
-          description: OK
+          description: |
+            OK. For non-draft messages: RFC 5322 content as a file download. For drafts: empty
+            JSON object `{}`.
           headers:
             Content-Disposition:
               schema:
@@ -1060,6 +1077,9 @@ paths:
               schema:
                 type: string
                 format: binary
+            application/json:
+              schema:
+                type: object
         '404':
           $ref: '#/components/responses/NotFound'
 
@@ -1158,7 +1178,11 @@ paths:
                     format: date-time
                   snooze_folder_id:
                     type: integer
-                    description: The folder the message will return to on expiry (the folder it was in before snoozeing).
+                    nullable: true
+                    description: |
+                      The folder the message will return to on expiry (the folder it was in before
+                      snoozing). May be null if that folder was deleted after the snooze was created;
+                      in that case the scheduler falls back to Inbox (id=1) via COALESCE.
                 required: [id, folder_id, snoozed_until, snooze_folder_id]
         '400':
           $ref: '#/components/responses/BadRequest'
