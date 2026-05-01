@@ -154,7 +154,11 @@ components:
           type: string
           format: date-time
           nullable: true
-          description: Non-null only for messages in the Scheduled folder. The time at which the message will be (or was scheduled to be) sent.
+          description: |
+            Non-null only for messages in the Scheduled folder. The time at which the
+            message will be (or was scheduled to be) sent. When the scheduler moves a
+            message from Scheduled to Drafts after exhausting retries, `send_at` is
+            cleared (set to NULL) to preserve this invariant.
         send_error:
           type: string
           nullable: true
@@ -242,7 +246,10 @@ components:
       properties:
         identity_id:
           type: integer
-          description: If absent, the default identity is used.
+          description: |
+            If absent, `identity_id` is stored as NULL and `from_addr` is set to the current
+            default identity's address. If present, `from_addr` is set to the specified
+            identity's address.
         to_addr:
           type: string
           maxLength: 8192
@@ -723,12 +730,15 @@ paths:
     get:
       summary: Search messages
       description: |
-        Full-text search across all folders using FTS5 phrase-match. Results are ordered by
-        relevance using `ORDER BY rank` (SQLite FTS5 BM25 score — lower/more-negative rank means
-        higher relevance). No custom column weighting is applied.
+        Full-text search using FTS5 phrase-match. Results are ordered by relevance using
+        `ORDER BY rank` (SQLite FTS5 BM25 score — lower/more-negative rank means higher relevance).
+        No custom column weighting is applied.
         Optionally filtered by date range. The FTS5 `unicode61` tokenizer is used, so searches
         are case-insensitive. Search results include a `snippet` field (present only in search
         results, not in `GET /messages/{id}`).
+
+        When `folder_id` is not specified, the search covers all folders **except Junk** (id=7).
+        To search within Junk explicitly, pass `folder_id=7`.
 
         Returns 400 with `{"error": "q must contain at least one non-whitespace character"}` when
         `q` is empty (`q=`) or contains only ASCII whitespace after trimming. Match-all is not
@@ -1249,8 +1259,9 @@ paths:
       summary: Mark message as junk
       description: |
         Moves the message to the Junk folder (id=7) and marks it as read. Returns 400 if the
-        message is currently in the Junk folder (id=7), the Scheduled folder (id=5), or the
-        Snoozed folder (id=6). The schedule or snooze must be cancelled before marking as junk.
+        message is currently in the Junk folder (id=7), the Drafts folder (id=3), the Scheduled
+        folder (id=5), or the Snoozed folder (id=6). Drafts are managed exclusively via the
+        `/drafts` endpoints. The schedule or snooze must be cancelled before marking as junk.
         These checks are based on the current folder_id, not historical state.
       parameters:
         - name: id

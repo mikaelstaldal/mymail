@@ -74,6 +74,13 @@ The full REST API contract is in `openapi.yaml`. Use ogen to generate Go server 
 | Search `q` parameter | Full-text search | 500 characters |
 | Contact autocomplete `q` parameter | Substring filter | 500 characters |
 
+### Email Address Validation
+
+`net/mail.ParseAddress()` is used to validate addr-spec fields wherever the spec requires "a valid RFC 5322 addr-spec":
+
+- **Identity `address` and contact `address`** (create/update): call `net/mail.ParseAddress(input)`. Accept only when the returned `Address.Name` is empty — a bare addr-spec like `user@example.com` is valid; a display-name form like `"John Doe <john@example.com>"` is rejected with 400.
+- **`to_addr`, `cc_addr`, `bcc_addr`, `reply_to_addr`** in `SendRequest` and `DraftRequest`: these fields carry comma-separated address lists as they appear in email headers. When non-empty, parse with `net/mail.ParseAddressList(input)` and verify that every parsed address has a non-empty `.Address` field. An unparseable list returns 400. Empty strings are always accepted (constraints on which fields must be non-empty are validated separately).
+
 **Whitespace trimming:** Leading and trailing whitespace is trimmed from folder names, filter names, contact names, and identity names before validation and storage.
 
 **Position default (append semantics):** When `position` is omitted from `POST /folders`, `POST /filters`, or `POST /identities`, the server sets `position = COALESCE(MAX(position), -1) + 1` within the relevant table, placing the new entity at the end of the ordered list. This query must be executed inside the same transaction as the INSERT.
@@ -167,12 +174,51 @@ The full REST API contract is in `openapi.yaml`. Use ogen to generate Go server 
 
 `GET /api/v1/messages/{id}/thread` determines membership using (in order):
 
-1. **Header-based (primary):** Build a directed graph where message A links to message B if B's `Message-ID` appears in A's `In-Reply-To` or `References` header. Take the transitive closure to find all messages in the same connected component.
+1. **Header-based (primary):** Build the connected component of the message graph using an iterative Go query loop (see below). Message A has an edge to message B when B's `Message-ID` appears in A's `In-Reply-To` or A's `References` field.
 2. **Subject-based fallback:** If header-based grouping yields only the single requested message, group by normalized subject and compare case-insensitively. Normalisation strips leading reply/forward prefixes using the regex defined in REQUIREMENTS.md → Compose → Subject prefix stripping (`^[ \t]*(?i:re|fwd|fw|aw|wg|res|enc|vs|sv):[ \t]+`), applied repeatedly to the start of the subject until no further match is found, then trims surrounding whitespace.
 
 Thread results include messages from all folders, ordered by `date ASC`. **Cap:** Thread results are limited to 1000 messages. If the transitive closure (or subject-based fallback) yields more than 1000 messages, only the 1000 with the earliest `date` are returned and the response includes `truncated: true`. The UI shows a "thread too long" indicator when `truncated` is true.
 
 Messages that initially lacked a `Message-ID` header are assigned a generated ID at storage time. Since external mailers may not reference this generated ID in their `In-Reply-To`/`References` headers, subject-based threading serves as the natural fallback for such messages.
+
+**Iterative Go query loop for transitive closure:**
+
+A recursive SQL CTE cannot efficiently match against the newline-separated `references` column for multiple message IDs simultaneously. Instead, compute the transitive closure in Go:
+
+1. Fetch the seed row: `id`, `message_id`, `in_reply_to`, `"references"`.
+2. Initialize `foundIDs = {seed.id}` (row IDs), `knownMsgIDs = {seed.message_id}` (message_id strings; exclude NULL).
+3. Split `seed."references"` on `\n` to get `referencedMsgIDs`.
+4. Repeat until no new rows are added or `len(foundIDs) >= 1000`:
+
+   **Forward query** — messages that link to any ID in `knownMsgIDs`:
+   ```sql
+   SELECT id, message_id, in_reply_to, "references"
+   FROM messages
+   WHERE id NOT IN (/* foundIDs */)
+     AND (
+       in_reply_to IN (/* knownMsgIDs */)
+       OR (
+         -- Newline-framing prevents partial-ID substring matches.
+         -- Repeat the LIKE clause once per element of knownMsgIDs, OR-joined.
+         ('\n' || COALESCE("references", '') || '\n') LIKE ('%' || char(10) || ? || char(10) || '%')
+       )
+     )
+   ```
+
+   **Backward query** — messages whose `message_id` is referenced by any row in `foundIDs`:
+   collect all unique `in_reply_to` values and all individual `\n`-split entries from `"references"` for every row in `foundIDs`, then:
+   ```sql
+   SELECT id, message_id, in_reply_to, "references"
+   FROM messages
+   WHERE message_id IN (/* referencedMsgIDs */)
+     AND id NOT IN (/* foundIDs */)
+   ```
+
+   For each newly returned row, add its `id` to `foundIDs`, its `message_id` (if non-null) to `knownMsgIDs`, and its split `"references"` entries to `referencedMsgIDs`.
+
+5. After reaching a fixed point (or the 1000-row cap), fetch the full `MessageSummary` rows for all IDs in `foundIDs`, ordered by `date ASC`.
+
+The newline-framing trick (`'\n' || col || '\n'`) in the forward LIKE query ensures that a message_id value `<short@x>` does not falsely match a references entry `<short@x.longer>`, since the pattern always requires a full newline-terminated match.
 
 ### FTS Search Input Sanitization
 
@@ -215,7 +261,7 @@ Date filtering uses lexicographic string comparison on the stored `date` column 
 
 All timestamps stored as UTC RFC 3339 strings.
 
-k**Database existence check:** The server, LDA, and import modes check that the database file exists at startup and exit immediately with a fatal error if it does not. The database must be created by `mymail -init` before running any other mode.
+**Database existence check:** The server, LDA, and import modes check that the database file exists at startup and exit immediately with a fatal error if it does not. The database must be created by `mymail -init` before running any other mode.
 
 ### Schema Migrations
 
@@ -280,8 +326,8 @@ CREATE TABLE IF NOT EXISTS messages (
     message_id    TEXT UNIQUE,
     in_reply_to   TEXT,
     references    TEXT,                    -- newline-separated (\n); serialized as JSON array by the API
-    from_addr     TEXT    NOT NULL,
-    to_addr       TEXT    NOT NULL,
+    from_addr     TEXT    NOT NULL DEFAULT '',
+    to_addr       TEXT    NOT NULL DEFAULT '',
     cc_addr       TEXT    NOT NULL DEFAULT '',
     bcc_addr      TEXT    NOT NULL DEFAULT '',
     reply_to_addr TEXT    NOT NULL DEFAULT '',
@@ -407,10 +453,23 @@ CREATE TABLE IF NOT EXISTS contacts (
 CREATE INDEX IF NOT EXISTS idx_contacts_address ON contacts(address);
 ```
 
+**Contact list ordering SQL:**
+```sql
+ORDER BY CASE WHEN name = '' THEN 1 ELSE 0 END, name, address
+```
+This places empty-name contacts after named contacts, with named contacts sorted case-sensitively by name, then by address for ties.
+
 Upsert must use a single atomic statement:
 ```sql
-INSERT INTO contacts (...) ON CONFLICT(address) DO UPDATE SET name = excluded.name WHERE contacts.name = ''
+INSERT INTO contacts (address, name, created_at, updated_at)
+VALUES (?, ?, strftime('%Y-%m-%dT%H:%M:%SZ','now'), strftime('%Y-%m-%dT%H:%M:%SZ','now'))
+ON CONFLICT(address) DO UPDATE SET
+    name = excluded.name,
+    updated_at = excluded.updated_at
+WHERE contacts.name = ''
 ```
+
+`PUT /contacts/{id}` has no trigger to auto-set `updated_at`, so the UPDATE statement must include `updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now')` explicitly.
 
 ### `filters`
 
@@ -431,6 +490,8 @@ CREATE TABLE IF NOT EXISTS filters (
 `stop` stored as INTEGER (`1`/`0`), exposed as boolean in the API.
 
 A match field is "non-empty" if `TRIM(field) != ''`.
+
+Filters are listed in `position ASC, id ASC` order (consistent with the identity sort order).
 
 ### `spam_filter_settings`
 
@@ -515,6 +576,12 @@ UPDATE messages SET ... WHERE id = ? AND send_at IS NOT NULL AND folder_id = 5
 
 The `DELETE /api/v1/scheduled/{id}` handler must clear `send_at` and set `folder_id = 3` in a **single** UPDATE statement to avoid a race window.
 
+**Failure handling — clearing `send_at`:** When the scheduler moves a message to Drafts after 3 consecutive failures, `send_at` must be set to NULL in the same UPDATE that changes `folder_id` to 3. This preserves the invariant that `send_at` is non-null only for messages in the Scheduled folder:
+```sql
+UPDATE messages SET folder_id = 3, send_at = NULL, send_failure_count = send_failure_count + 1, send_error = ?
+WHERE id = ? AND folder_id = 5 AND send_failure_count >= 2
+```
+
 **Snooze expiry query:**
 ```sql
 SELECT id, snooze_folder FROM messages
@@ -539,16 +606,31 @@ The scheduler holds the SQLite write lock only for the duration of each individu
 ### Implementation Notes
 
 - Open database and run migrations before importing.
+- **Folder resolution:** For each `<folder>` value in the mapping arguments, resolve the target folder as follows: if the value matches a built-in slug (`inbox`, `sent`, `drafts`, `trash`) case-sensitively, use that built-in folder; otherwise, search user-created folders by name using a case-insensitive match (`LOWER(name) = LOWER(?)`). If no match is found, create a new user-created folder with that value as its name (applying the standard slug-generation algorithm). If the same `<folder>` value appears in multiple mapping triplets, all triplets share the single resolved/created folder — no attempt is made to create the folder twice.
 - Use batched transactions: commit every 500 messages to bound WAL file size. If a batch fails, only that batch is rolled back; previously committed batches are retained. There is no way to identify which individual messages were committed after a partial failure — re-run the full import after fixing the source data (duplicate detection will skip already-imported messages).
 - Run the full LDA parsing pipeline (HTML sanitization, `cid:` resolution, `body_text` derivation, attachment extraction) for each message. Skip only spam detection and filter application.
 - Upsert the `From` address of each successfully imported message into the contacts table using the same upsert logic as the LDA (update name only when the stored name is empty).
 - For Maildir, map the `S` (Seen) flag to `read=1` and the `F` (Flagged) flag to `flagged=1`.
-- For mbox: call `os.Stat(path)` **before** opening the mbox reader to capture the file's mtime; this value is used as the timestamp fallback when a `From ` separator timestamp cannot be parsed, and must be available throughout the per-message loop (the `go-mbox` reader accepts an `io.Reader` and cannot provide mtime itself). Parse and save the `From ` separator line timestamp **before** stripping it (used as `date` fallback). Strip the `From ` line before storing the `raw` BLOB. Use streaming `NextMessage()` API — do not load the entire file into memory.
+- For mbox: call `os.Stat(path)` **before** opening the mbox reader to capture the file's mtime; this value is used as the timestamp fallback when a `From ` separator timestamp cannot be parsed, and must be available throughout the per-message loop. The `go-mbox` `NextMessage()` call reads and discards the `From ` separator line internally before returning the message reader, so the timestamp must be captured before `NextMessage()` is called. Use a **two-pass approach**: in the first pass, open the file with `bufio.Scanner` and collect the timestamp suffix of every line matching `^From \S` in order; in the second pass, seek back to the beginning and use `mbox.NewReader()` / `NextMessage()` for message parsing. The nth timestamp collected in the first pass corresponds to the nth message yielded by `NextMessage()`. This works correctly for mboxrd files (where embedded `From ` lines are escaped as `>From ` and therefore not counted). For mboxo files, embedded unescaped `From ` lines are rare in practice; if a mismatch is detected (more messages than timestamps), fall back to the file mtime for the affected messages. Strip the `From ` line before storing the `raw` BLOB. Use streaming `NextMessage()` API — do not load the entire file into memory.
 - mbox `From ` timestamp parsing: the canonical format (per the historical spec used by `From ` lines) is `Mon Jan _2 15:04:05 2006` (Go layout — note the `_2` to handle single-digit days). Parse with `time.Parse("Mon Jan _2 15:04:05 2006", ts)` after splitting off the address prefix on the first ASCII space. If parsing fails, fall back to the file's mtime captured by the `os.Stat` call above; if the file mtime cannot be obtained either, log a warning and skip the message rather than substituting the current time.
 - `date` field: use the original `Date` header. Fallback: mtime of the Maildir file (Maildir) or `From ` separator timestamp (mbox). If the fallback is also unavailable, log a warning and skip the message. Never use current time as fallback during import.
 
 
 ## Outgoing Mail Implementation
+
+### Sendmail Path Resolution
+
+At server startup, resolve the `-sendmail` binary path:
+
+```go
+path, err := exec.LookPath(cfg.Sendmail)
+if err != nil {
+    log.Fatalf("sendmail binary %q not found or not executable: %v", cfg.Sendmail, err)
+}
+cfg.Sendmail = path // store the resolved absolute path
+```
+
+`exec.LookPath` performs PATH search when the value is not absolute and verifies the file is executable. The server exits with a fatal error and a non-zero exit code if the lookup fails; it does not start serving HTTP. The resolved absolute path is used for all subsequent `exec.Command` calls.
 
 ### Message Construction
 
@@ -677,7 +759,7 @@ Delimiter detection runs before HTML escaping so the literal `-- ` characters ar
 - `PUT /api/v1/drafts/{id}` (JSON endpoint) does not modify attachment rows.
 - `PUT /api/v1/drafts-with-attachments/{id}` replaces attachments wholesale.
 - To remove individual attachments, call `DELETE /api/v1/drafts/{id}/attachments/{attachment_id}`.
-- On every PUT, the server resolves `identity_id` to its `address` and updates both the `identity_id` column and `from_addr` in the `messages` row. If `identity_id` is absent in the PUT body, `identity_id` is set to NULL and `from_addr` is set to the default identity's address. This keeps the Drafts message list accurate when the user changes the From identity. On POST (new draft), `identity_id` is stored directly from the request body (or NULL if absent).
+- On every PUT, the server resolves `identity_id` to its `address` and updates both the `identity_id` column and `from_addr` in the `messages` row. If `identity_id` is absent in the PUT body, `identity_id` is set to NULL and `from_addr` is set to the default identity's address. This keeps the Drafts message list accurate when the user changes the From identity. On POST (new draft), `identity_id` is stored directly from the request body (or NULL if absent), and `from_addr` is set to the specified identity's address, or to the default identity's address when `identity_id` is absent — mirroring the PUT rule.
 
 ### Send Draft Logic (`POST /api/v1/drafts/{id}/send`)
 
@@ -688,7 +770,7 @@ Delimiter detection runs before HTML escaping so the literal `-- ` characters ar
 5. Determine mode from `send_at` using a single threshold (the same rule applies to `POST /messages/send`, `POST /messages/send-with-attachments`, and `POST /drafts/{id}/send`):
    - **Scheduled** when `send_at` is non-null AND `send_at > now + 60 seconds`. Insert the message and attachments into the Scheduled folder (do not call sendmail), then delete the draft. Return 202.
    - **Immediate** in every other case (`send_at` is null, in the past, equal to now, or within the next 60 seconds). Run the standard outgoing mail pipeline (sanitize body_html, construct MIME message with all attachments, pipe to sendmail). On sendmail failure: return 500 with the error; draft is preserved unchanged. On success: insert the sent message and its attachments into the Sent folder, then delete the draft row (attachments cascade-delete).
-6. Upsert recipients (To/Cc/Bcc) into the contacts table on immediate send only (same as the regular send flow). For scheduled sends, upsert happens when the scheduler actually sends the message.
+6. Upsert recipients (To/Cc/Bcc) into the contacts table on immediate send only. For scheduled sends (`send_at > now + 60s`), skip the upsert here; the scheduler performs it when it actually calls `sendmail`. This rule applies identically to `POST /messages/send`, `POST /messages/send-with-attachments`, and `POST /drafts/{id}/send`.
 
 ### Mark All As Read
 

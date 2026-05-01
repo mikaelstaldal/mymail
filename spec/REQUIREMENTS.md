@@ -79,7 +79,7 @@ Each `<mapping>` argument is a colon-separated triplet `<folder>:<format>:<path>
 
 | Part       | Values                                                      | Description                                                          |
 |------------|-------------------------------------------------------------|----------------------------------------------------------------------|
-| `<folder>` | `inbox`, `sent`, `drafts`, `trash`, or any user-folder name | Target folder in mymail. Created automatically if it does not exist. |
+| `<folder>` | `inbox`, `sent`, `drafts`, `trash`, or any user-folder name | Target folder in mymail. Created automatically if it does not exist. Lookup is by slug for built-in folders (`inbox`, `sent`, `drafts`, `trash`) and by name (case-insensitive) for user-created folders. If the same `<folder>` value appears in multiple mapping triplets, all triplets share the same target folder. |
 | `<format>` | `mbox`, `maildir`                                           | Source format                                                        |
 | `<path>`   | file or directory path                                      | Source mbox file or Maildir root directory                           |
 
@@ -178,7 +178,7 @@ Each contact has:
 
 Contacts are upserted automatically:
 - On message receipt: the `From` address is upserted. The display name from the `From` header is stored as the contact name, but only when the currently stored name is empty (a manually set name is never overwritten).
-- On send: `To`, `Cc`, and `Bcc` addresses are upserted using the same Unicode simple casefolding normalization as incoming contacts. The display name from each address string is extracted and applied with the same rule: it is stored only when the contact's current name is empty.
+- On send: `To`, `Cc`, and `Bcc` addresses are upserted at **actual send time** — when `sendmail` is invoked, whether that is immediately or when the background scheduler fires for a deferred message. Contact upserts are never performed at schedule-creation time. This rule applies identically to `POST /messages/send`, `POST /messages/send-with-attachments`, and `POST /drafts/{id}/send`. The upsert uses the same Unicode simple casefolding normalization as incoming contacts; the display name from each address string is extracted and applied with the same rule: it is stored only when the contact's current name is empty.
 
 The distinction between manually set and automatically populated names is enforced server-side. Clients cannot observe or control this distinction via the API.
 
@@ -298,7 +298,7 @@ A background process wakes every 60 seconds to:
 For each message in the Scheduled folder whose `send_at` is in the past (in order):
 1. Build and send the RFC 5322 message via `sendmail`.
 2. On success: move to Sent, clear `send_at`.
-3. On failure: increment the failure count, record the error. After 3 consecutive failures, move to Drafts.
+3. On failure: increment the failure count, record the error. After 3 consecutive failures, move to Drafts and clear `send_at` (set to NULL) so the invariant that `send_at` is non-null only for messages in the Scheduled folder is maintained.
 
 ### Snooze Expiry
 
@@ -510,7 +510,7 @@ On first load the UI reads `localStorage` for the last selected folder and navig
 
 4. **Scheduled folder message detail** — Shows scheduled send time; **Cancel schedule** button moves message to Drafts.
 
-5. **Search** — Full-text search results as a message list. A folder selector (dropdown) allows limiting results to a single folder; when no folder is selected the search is global (all folders). The selected folder is passed as the `folder_id` query parameter to `GET /messages/search`. The search bar and folder selector are shown together in the search view.
+5. **Search** — Full-text search results as a message list. A folder selector (dropdown) allows limiting results to a single folder; when no folder is selected the search is global (all folders except Junk). Two native HTML date pickers (From date, To date) allow limiting results to a date range; when set they are passed as `date_from` and `date_to` to `GET /messages/search` (the From date is sent as the start of the selected day in the user's local timezone, the To date as the start of the day after). The search bar, folder selector, and date pickers are shown together in the search view.
 
 6. **Filter management** — CRUD UI with drag-to-reorder. The `match_to` field is labelled "To / Cc".
 
