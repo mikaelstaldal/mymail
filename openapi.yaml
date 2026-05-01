@@ -955,8 +955,10 @@ paths:
     patch:
       summary: Update message metadata
       description: |
-        Partial update of folder_id, read, or flagged. Moving to/from Scheduled or Snoozed
-        folders is rejected; use the dedicated snooze and scheduled endpoints instead.
+        Partial update of folder_id, read, or flagged. Moving to/from Scheduled (5), Snoozed (6),
+        or Drafts (3) folders is rejected with 400. Drafts is forbidden because drafts are created
+        and managed only via the `/drafts` endpoints. Use the dedicated snooze and scheduled
+        endpoints for Snoozed/Scheduled.
       parameters:
         - name: id
           in: path
@@ -1168,9 +1170,9 @@ paths:
       summary: Snooze a message
       description: |
         Temporarily hide a message until a future time. The message must be in Inbox, a user
-        folder, **or already in Snoozed**. System folders (Sent, Trash, Junk, Scheduled) are
-        not allowed because each has its own specific semantics that would conflict with snooze
-        behaviour. `until` must be a future timestamp at least 1 minute ahead of the current
+        folder, **or already in Snoozed**. System folders (Drafts, Sent, Trash, Junk, Scheduled)
+        are not allowed — each has its own specific semantics that would conflict with snooze
+        behaviour. Drafts, Sent, Trash, Junk, and Scheduled folders are not valid snooze sources. `until` must be a future timestamp at least 1 minute ahead of the current
         server time. On expiry, the message is returned to the folder it was in at the time of
         the **first** snooze (recorded in `snooze_folder`); if that folder has since been
         deleted, Inbox is used.
@@ -1553,7 +1555,11 @@ paths:
         '400':
           $ref: '#/components/responses/BadRequest'
         '404':
-          $ref: '#/components/responses/NotFound'
+          description: Returned when the draft does not exist, or when it is no longer in the Drafts folder (folder_id ≠ 3).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
         '500':
           $ref: '#/components/responses/InternalError'
 
@@ -1940,7 +1946,9 @@ paths:
                 required: [total, items]
     post:
       summary: Create contact
-      description: Create a contact. `address` must be a valid RFC 5322 addr-spec.
+      description: |
+        Create a contact. `address` must be a valid RFC 5322 addr-spec. The `address` is stored
+        in Unicode-simple-casefolded form before the uniqueness check.
       requestBody:
         required: true
         content:
@@ -1969,7 +1977,10 @@ paths:
   /contacts/{id}:
     put:
       summary: Replace contact
-      description: Replace a contact entirely. Returns 409 if the new address conflicts with a different existing contact.
+      description: |
+        Replace a contact entirely. The `address` is stored in Unicode-simple-casefolded form
+        before the uniqueness check. Returns 409 if the new address conflicts with a different
+        existing contact.
       parameters:
         - name: id
           in: path

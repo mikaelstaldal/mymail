@@ -28,7 +28,7 @@ Building: `go build -tags netgo` produces a single static binary with no CGO dep
 ```
 module github.com/mikaelstaldal/mymail
 
-go 1.25.8
+go 1.26
 
 require (
     github.com/go-faster/errors v0.7.1
@@ -520,8 +520,8 @@ The scheduler holds the SQLite write lock only for the duration of each individu
 - Use batched transactions: commit every 500 messages to bound WAL file size. If a batch fails, only that batch is rolled back; previously committed batches are retained. There is no way to identify which individual messages were committed after a partial failure — re-run the full import after fixing the source data (duplicate detection will skip already-imported messages).
 - Run the full LDA parsing pipeline (HTML sanitization, `cid:` resolution, `body_text` derivation, attachment extraction) for each message. Skip only spam detection and filter application.
 - For Maildir, map the `S` (Seen) flag to `read=1` and the `F` (Flagged) flag to `flagged=1`.
-- For mbox: parse and save the `From ` separator line timestamp **before** stripping it (used as `date` fallback). Strip the `From ` line before storing the `raw` BLOB. Use streaming `NextMessage()` API — do not load the entire file into memory.
-- mbox `From ` timestamp parsing: the canonical format (per the historical spec used by `From ` lines) is `Mon Jan _2 15:04:05 2006` (Go layout — note the `_2` to handle single-digit days). Parse with `time.Parse("Mon Jan _2 15:04:05 2006", ts)` after splitting off the address prefix on the first ASCII space. If parsing fails, fall back to the file's mtime; if the file mtime cannot be obtained either, log a warning and skip the message rather than substituting the current time.
+- For mbox: call `os.Stat(path)` **before** opening the mbox reader to capture the file's mtime; this value is used as the timestamp fallback when a `From ` separator timestamp cannot be parsed, and must be available throughout the per-message loop (the `go-mbox` reader accepts an `io.Reader` and cannot provide mtime itself). Parse and save the `From ` separator line timestamp **before** stripping it (used as `date` fallback). Strip the `From ` line before storing the `raw` BLOB. Use streaming `NextMessage()` API — do not load the entire file into memory.
+- mbox `From ` timestamp parsing: the canonical format (per the historical spec used by `From ` lines) is `Mon Jan _2 15:04:05 2006` (Go layout — note the `_2` to handle single-digit days). Parse with `time.Parse("Mon Jan _2 15:04:05 2006", ts)` after splitting off the address prefix on the first ASCII space. If parsing fails, fall back to the file's mtime captured by the `os.Stat` call above; if the file mtime cannot be obtained either, log a warning and skip the message rather than substituting the current time.
 - `date` field: use the original `Date` header. Fallback: mtime of the Maildir file (Maildir) or `From ` separator timestamp (mbox). If the fallback is also unavailable, log a warning and skip the message. Never use current time as fallback during import.
 
 
@@ -553,7 +553,7 @@ The scheduler holds the SQLite write lock only for the duration of each individu
 
 `messages.in_reply_to` is a single TEXT column. RFC 5322 syntactically permits multiple Message-IDs in `In-Reply-To`; if the parsed header contains more than one, only the **first** ID is stored. The discarded IDs remain visible in `references` (most mail clients populate both headers consistently).
 
-`messages.references` is stored as the parsed Message-IDs joined by `\n`. **Maximum stored length: 16 KiB.** When the joined value exceeds 16 KiB, the **oldest** IDs are dropped from the front and the most recent IDs are retained until the value fits. The first/last semantics (oldest-first ordering of `References`) is preserved among the retained IDs.
+`messages.references` is stored as the parsed Message-IDs joined by `\n`. **Maximum stored length: 16 KiB.** When the joined value exceeds 16 KiB, the **oldest** IDs are dropped from the front and the most recent IDs are retained until the value fits. The first/last semantics (oldest-first ordering of `References`) is preserved among the retained IDs. This same truncation policy applies to client-supplied `references` arrays in `POST /messages/send`, `POST /messages/send-with-attachments`, and `PUT /drafts/{id}`: if the joined value would exceed 16 KiB, the oldest IDs are silently dropped before storage (consistent with the inbound truncation behaviour).
 
 ### Sendmail Integration
 
@@ -658,7 +658,7 @@ Use [Quill](https://quilljs.com/) (vendored). On send/save, serialize as both HT
 
 ### Mark All As Read
 
-Call `POST /api/v1/folders/{id}/mark-all-read`. This single atomic request replaces the previous client-side batching approach.
+Call `POST /api/v1/folders/{id}/mark-all-read`.
 
 ### HTML Body Display
 

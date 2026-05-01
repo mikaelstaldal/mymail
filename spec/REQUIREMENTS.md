@@ -372,6 +372,8 @@ Content-Security-Policy: default-src 'self'; img-src 'self' data:; style-src 'se
 Strict-Transport-Security: max-age=31536000
 ```
 
+> **Note on HSTS:** Browsers ignore `Strict-Transport-Security` when received over plain HTTP, so mymail emitting it directly has no effect at the mymail layer. When deployed behind a TLS-terminating reverse proxy, the HSTS header should be set by the proxy. mymail emits it regardless so that reverse proxies that forward upstream headers automatically will include it without additional configuration.
+
 External images in email bodies are blocked by the CSP (no `https:` in `img-src`) to prevent tracking pixels. A per-message opt-in for external images is provided via `has_external_images` in the message detail response.
 
 ### Authentication
@@ -438,7 +440,7 @@ On first load the UI reads `localStorage` for the last selected folder and navig
 
 1. **Folder view** — Paginated message list. Unread messages shown in bold. **Mark all as read** button marks all messages in the folder as read.
 
-2. **Message detail** — Full headers, sanitized HTML body in a sandboxed iframe (or plain-text fallback), attachment download links. Reply/Reply All/Forward/Move/Delete/Snooze/Mark as junk buttons. Opening an unread message immediately marks it as read. When the message has both body types, a toggle switches between HTML and plain text; the preference is stored. Thread display: if the message is part of a thread, a collapsed conversation strip is shown below the body; clicking an entry expands it.
+2. **Message detail** — Full headers, sanitized HTML body in a sandboxed iframe (or plain-text fallback), attachment download links. Reply/Reply All/Forward/Move/Delete/Snooze/Mark as junk buttons. Opening an unread message causes the UI to issue an explicit `PATCH /messages/{id}` request (with `{"read": true}`) after a successful GET to mark it as read; `GET /messages/{id}` itself does not alter read state. When the message has both body types, a toggle switches between HTML and plain text; the preference is stored. Thread display: if the message is part of a thread, a collapsed conversation strip is shown below the body; clicking an entry expands it.
 
 3. **Compose / Reply / Reply All / Forward** — Form with From selector, To/Cc/Bcc/Reply-To fields (To/Cc/Bcc offer address autocomplete), Subject, rich-text body editor (Quill), file upload for attachments. A **Send later** toggle reveals a date/time picker. Auto-saves to Drafts every 30 seconds. Navigate-away triggers an immediate draft save.
 
