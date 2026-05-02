@@ -9,6 +9,7 @@ yet, only work on the specification documents in spec/, REST API specification i
 web/static/mockup-*.html
 
 - REQUIREMENTS.md — high-level functional requirements (what the system does)
+- ARCHITECTURE.md — architecture of the system
 - IMPLEMENTATION.md — implementation plan with technical details (how to build it)
 
 ISSUES.md contains any currently open issues with the specification.
