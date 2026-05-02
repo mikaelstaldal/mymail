@@ -70,8 +70,10 @@ The full REST API contract is in `openapi.yaml`. Use ogen to generate Go server 
 |-------|---------|-------|
 | `match_from`, `match_to`, `match_subject` | Filter criteria | 1000 characters |
 | `score_header` | Spam filter settings | 200 characters |
-| Contact `name`, identity `name`, folder `name` | General | 200 characters |
+| Contact `name`, identity `name`, folder `name`, filter `name` | General | 200 characters |
+| Contact `address` | POST /contacts, PUT /contacts/{id} | 254 characters (RFC 5321 maximum) |
 | `to_addr`, `cc_addr`, `bcc_addr`, `reply_to_addr` | SendRequest, DraftRequest | 8192 characters each |
+| `subject` | SendRequest, DraftRequest | 998 characters (RFC 5322 per-line limit) |
 | Identity `signature` | Stored and transmitted | 50 KiB |
 | Search `q` parameter | Full-text search | 500 characters |
 | Contact autocomplete `q` parameter | Substring filter | 500 characters |
@@ -234,6 +236,18 @@ Example: `it's a "test"` → `"it's a ""test"""`. Apply byte-by-byte (no locale-
 **FTS5 tokenizer:** FTS5 uses the built-in `unicode61` tokenizer (the default), which performs Unicode-aware case folding. All FTS searches are effectively case-insensitive.
 
 **Search SQL pattern:**
+
+The `total` field in the response reflects total matches before pagination. A separate count query must be issued alongside the main query:
+
+```sql
+SELECT COUNT(*) FROM messages_fts
+JOIN messages m ON messages_fts.rowid = m.id
+WHERE messages_fts MATCH ?
+  AND m.folder_id NOT IN (3, 5, 7)  -- (same folder/date conditions as the main query)
+  -- AND m.folder_id = ?
+  -- AND m.date >= ?
+  -- AND m.date < ?
+```
 
 ```sql
 SELECT m.*, snippet(messages_fts, 4, '**', '**', '…', 15) AS snippet
@@ -449,7 +463,7 @@ The "exactly one default" invariant and address validation are enforced in the s
 ```sql
 UPDATE messages SET from_addr = '' WHERE identity_id IS NULL AND folder_id = 3 AND from_addr = ?
 ```
-binding `?` to the deleted identity's `address`. This clears `from_addr` only on draft rows whose identity was just deleted (i.e. whose `from_addr` matches the deleted address), preventing a stale sender address from appearing in the draft list. Drafts that used the default-identity convention (`identity_id IS NULL`) but were associated with a different identity via `from_addr` are left unchanged.
+binding `?` to the deleted identity's `address`. This clears `from_addr` only on draft rows whose `from_addr` matches the deleted address, regardless of how `identity_id` was stored (the FK cascade has already set `identity_id = NULL` for all drafts that referenced this identity). Drafts with a different `from_addr` are left unchanged.
 
 ### `contacts`
 
@@ -607,13 +621,20 @@ UPDATE messages SET ... WHERE id = ? AND send_at IS NOT NULL AND folder_id = 5
 
 The `DELETE /api/v1/scheduled/{id}` handler must clear `send_at`, reset `send_failure_count` to 0, clear `send_error` (set to NULL), and set `folder_id = 3` in a **single** UPDATE statement to avoid a race window and to ensure the message does not carry a failure badge in the Drafts list after cancellation.
 
-**Failure handling — clearing `send_at`:** When the scheduler moves a message to Drafts after 3 consecutive failures, `send_at` must be set to NULL in the same UPDATE that changes `folder_id` to 3. This preserves the invariant that `send_at` is non-null only for messages in the Scheduled folder:
-```sql
-UPDATE messages SET folder_id = 3, send_at = NULL, send_failure_count = send_failure_count + 1, send_error = ?
-WHERE id = ? AND folder_id = 5 AND send_failure_count >= 2
-```
+**Failure handling:** The scheduler distinguishes two cases based on `send_failure_count`:
 
-**Snooze creation handler (`POST /messages/{id}/snooze`):** Two cases must be handled separately to preserve the "original return folder" invariant:
+- **1st and 2nd failures** (`send_failure_count < 2`): increment the failure count and record the error; leave the message in the Scheduled folder so it will be retried.
+  ```sql
+  UPDATE messages SET send_failure_count = send_failure_count + 1, send_error = ?
+  WHERE id = ? AND folder_id = 5 AND send_failure_count < 2
+  ```
+- **3rd failure** (`send_failure_count >= 2`): increment the count, record the error, move to Drafts, and clear `send_at` — all in a single UPDATE. Clearing `send_at` preserves the invariant that `send_at` is non-null only for messages in the Scheduled folder.
+  ```sql
+  UPDATE messages SET folder_id = 3, send_at = NULL, send_failure_count = send_failure_count + 1, send_error = ?
+  WHERE id = ? AND folder_id = 5 AND send_failure_count >= 2
+  ```
+
+**Snooze creation handler (`POST /messages/{id}/snooze`):** Validate that `until > now + 60 seconds`; return 400 otherwise. Two cases must then be handled separately to preserve the "original return folder" invariant:
 
 - **First snooze** (message is not currently in Snoozed, i.e. `folder_id ≠ 6`): move the message to Snoozed, set `snoozed_until`, and record the current `folder_id` as `snooze_folder`.
   ```sql
@@ -676,15 +697,22 @@ The scheduler holds the SQLite write lock only for the duration of each individu
 ### Implementation Notes
 
 - Open database and run migrations before importing.
-- **Folder resolution:** For each `<folder>` value in the mapping arguments, resolve the target folder as follows: if the value matches a built-in slug (`inbox`, `sent`, `drafts`, `trash`, `junk`) case-sensitively, use that built-in folder. If the value is `scheduled` or `snoozed`, exit with code 1 and an error message (these folders have semantic fields that import cannot populate). Otherwise, search user-created folders by name using a case-insensitive match (`LOWER(name) = LOWER(?)`). If no match is found, create a new user-created folder with that value as its name (applying the standard slug-generation algorithm). If the same `<folder>` value appears in multiple mapping triplets, all triplets share the single resolved/created folder — no attempt is made to create the folder twice.
+- **Folder resolution:** For each `<folder>` value in the mapping arguments, resolve the target folder as follows: if the value matches a built-in slug (`inbox`, `sent`, `drafts`, `trash`, `junk`) case-sensitively, use that built-in folder. **Warning:** built-in slug matching is case-sensitive; `Inbox` (capital I) does not match the built-in inbox and would instead create a new user folder named "Inbox". If the value is `scheduled` or `snoozed`, exit with code 1 and an error message (these folders have semantic fields that import cannot populate). Otherwise, search user-created folders by name using a case-insensitive match (`LOWER(name) = LOWER(?)`). If no match is found, create a new user-created folder with that value as its name (applying the standard slug-generation algorithm). If the same `<folder>` value appears in multiple mapping triplets, all triplets share the single resolved/created folder — no attempt is made to create the folder twice.
 - Use batched transactions: commit every 500 messages to bound WAL file size. If a batch fails, only that batch is rolled back; previously committed batches are retained. There is no way to identify which individual messages were committed after a partial failure — re-run the full import after fixing the source data (duplicate detection will skip already-imported messages).
 - Run the full LDA parsing pipeline (HTML sanitization, `cid:` resolution, `body_text` derivation, `has_external_images` computation, attachment extraction) for each message. Skip only spam detection and filter application.
 - Upsert the `From` address of each successfully imported message into the contacts table using the same upsert logic as the LDA (update name only when the stored name is empty).
 - For Maildir, map the `S` (Seen) flag to `read=1` and the `F` (Flagged) flag to `flagged=1`.
-- For mbox: call `os.Stat(path)` **before** opening the mbox reader to capture the file's mtime; this value is used as the timestamp fallback when a `From ` separator timestamp cannot be parsed, and must be available throughout the per-message loop. The `go-mbox` `NextMessage()` call reads and discards the `From ` separator line internally before returning the message reader, so the timestamp must be captured before `NextMessage()` is called. Use a **two-pass approach**: in the first pass, open the file with `bufio.Scanner` and collect the timestamp suffix of every line matching `^From \S` in order; in the second pass, seek back to the beginning and use `mbox.NewReader()` / `NextMessage()` for message parsing. The nth timestamp collected in the first pass corresponds to the nth message yielded by `NextMessage()`. This works correctly for mboxrd files (where embedded `From ` lines are escaped as `>From ` and therefore not counted). For mboxo files, embedded unescaped `From ` lines are rare in practice; if a mismatch is detected (more messages than timestamps), fall back to the file mtime for the affected messages. Strip the `From ` line before storing the `raw` BLOB. Use streaming `NextMessage()` API — do not load the entire file into memory.
+- For mbox: call `os.Stat(path)` **before** opening the mbox reader to capture the file's mtime; this value is used as the timestamp fallback when a `From ` separator timestamp cannot be parsed, and must be available throughout the per-message loop. The `go-mbox` `NextMessage()` call reads and discards the `From ` separator line internally before returning the message reader, so the timestamp must be captured before `NextMessage()` is called. Use a **two-pass approach**: in the first pass, open the file with `bufio.Scanner` and collect the timestamp suffix of every line matching `^From \S` in order; in the second pass, seek back to the beginning and use `mbox.NewReader()` / `NextMessage()` for message parsing. The nth timestamp collected in the first pass corresponds to the nth message yielded by `NextMessage()`. This works correctly for mboxrd files (where embedded `From ` lines are escaped as `>From ` and therefore not counted). For mboxo files, embedded unescaped `From ` lines are rare in practice; if the number of timestamps collected in the first pass does not match the number of messages yielded by the second pass (in either direction), fall back to the file mtime for all messages in the file. Strip the `From ` line before storing the `raw` BLOB. Use streaming `NextMessage()` API — do not load the entire file into memory.
 - mbox `From ` timestamp parsing: the canonical format (per the historical spec used by `From ` lines) is `Mon Jan _2 15:04:05 2006` (Go layout — note the `_2` to handle single-digit days). Parse with `time.Parse("Mon Jan _2 15:04:05 2006", ts)` after splitting off the address prefix on the first ASCII space. If parsing fails, fall back to the file's mtime captured by the `os.Stat` call above; if the file mtime cannot be obtained either, log a warning and skip the message rather than substituting the current time.
 - `date` field: use the original `Date` header. Fallback: mtime of the Maildir file (Maildir) or `From ` separator timestamp (mbox). If the fallback is also unavailable, log a warning and skip the message. Never use current time as fallback during import.
 
+
+## Multipart Form-Data Attachment Extraction
+
+For `POST /messages/send-with-attachments`, `POST /drafts-with-attachments`, and `PUT /drafts-with-attachments/{id}`, extract the following from each file part of the multipart request:
+
+- **Filename:** read from the `Content-Disposition: form-data; filename="..."` parameter. For RFC 5987–encoded filenames (`filename*=UTF-8''...`), decode before use. If the filename parameter is absent, use `untitled` as the default.
+- **Content-Type:** read from the part's `Content-Type` header. If the header is absent, use `application/octet-stream` as the default.
 
 ## Outgoing Mail Implementation
 
@@ -710,6 +738,7 @@ cfg.Sendmail = path // store the resolved absolute path
 4. Encode non-ASCII header values as RFC 2047 encoded words.
 5. Encode attachment data as base64.
 6. Body structure:
+   - If neither `body_text` nor `body_html` is provided (both empty): single empty `text/plain` part.
    - If only one body part is provided: single `text/plain` or `text/html` part directly.
    - If both text and HTML are provided: `multipart/alternative` with both parts.
    - Wrap in `multipart/mixed` if attachments are present.
@@ -719,7 +748,7 @@ cfg.Sendmail = path // store the resolved absolute path
 
 ### Threading-header storage format
 
-`messages.message_id`, `messages.in_reply_to`, and the entries of `messages.references` are all stored **without** angle brackets (the brackets are syntactic delimiters from RFC 5322, not part of the identifier value). On read:
+`messages.message_id`, `messages.in_reply_to`, and the entries of `messages.references` are all stored **without** angle brackets (the brackets are syntactic delimiters from RFC 5322, not part of the identifier value). For client-supplied values in `SendRequest` and `DraftRequest`, the server strips surrounding angle brackets from `in_reply_to` before storage (consistent with the stripping applied to `references` elements). On read:
 
 - `MessageDetail.message_id` is serialized without brackets.
 - `MessageDetail.in_reply_to` is serialized without brackets.
@@ -829,7 +858,7 @@ Delimiter detection runs before HTML escaping so the literal `-- ` characters ar
 - Auto-save fires every 30 seconds.
 - **Forward exception:** `POST /api/v1/drafts` is called immediately at form-open time for Forward (because `source_message_id` for attachment copying is only valid on the initial POST). For Reply, Reply-All, and new compose, the first POST is deferred until the first 30-second tick.
 - `PUT /api/v1/drafts/{id}` (JSON endpoint) does not modify attachment rows.
-- `PUT /api/v1/drafts-with-attachments/{id}` replaces attachments wholesale.
+- `PUT /api/v1/drafts-with-attachments/{id}` replaces attachments wholesale. If no file parts are present, all existing attachments for the draft are deleted — an empty file-parts list is a valid way to clear all attachments.
 - To remove individual attachments, call `DELETE /api/v1/drafts/{id}/attachments/{attachment_id}`.
 - On every PUT, the server resolves `identity_id` to its `address` and updates both the `identity_id` column and `from_addr` in the `messages` row. If `identity_id` is absent in the PUT body, `identity_id` is set to NULL and `from_addr` is set to the default identity's address. This keeps the Drafts message list accurate when the user changes the From identity. On POST (new draft), `identity_id` is stored directly from the request body (or NULL if absent), and `from_addr` is set to the specified identity's address, or to the default identity's address when `identity_id` is absent — mirroring the PUT rule. If `identity_id` is absent and no identities exist at all, `identity_id` is stored as NULL and `from_addr` as empty string, and 201 is returned — this allows a draft to be saved during first-run before any identity is created (see REQUIREMENTS.md → First-Run Behaviour). A 500 is returned only when identities exist but none is marked as default, which would indicate a database integrity violation. If `identity_id` is supplied but does not match any existing identity row, the server returns 400 with `{"error": "identity not found"}`; this applies to both `POST /drafts` and `PUT /drafts/{id}`.
 

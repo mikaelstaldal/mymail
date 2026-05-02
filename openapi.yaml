@@ -78,6 +78,8 @@ components:
             The UI uses this to show a failure badge without fetching the full message detail:
             - In the Scheduled folder: show a yellow warning badge (send is being retried).
             - In the Drafts folder: show a red error badge (message was moved from Scheduled after exhausting all retries).
+            - In the Trash folder (folder_id=4): suppress this badge — send_failure_count is
+              intentionally preserved in Trash but the message is no longer actionable.
         created_at:
           type: string
           format: date-time
@@ -154,9 +156,11 @@ components:
           type: boolean
           description: |
             True when the message has at least one send attempt failure (send_failure_count > 0).
-            The UI uses folder_id context to distinguish the two meaningful states:
+            The UI uses folder_id context to distinguish the meaningful states:
             - In the Scheduled folder: show a yellow warning badge (send is being retried).
             - In the Drafts folder: show a red error badge (message was moved from Scheduled after exhausting all retries).
+            - In the Trash folder (folder_id=4): suppress this badge — send_failure_count is
+              intentionally preserved in Trash but the message is no longer actionable.
         read:
           type: boolean
         flagged:
@@ -221,12 +225,16 @@ components:
           maxLength: 8192
         subject:
           type: string
+          maxLength: 998
         body_text:
           type: string
         body_html:
           type: string
         in_reply_to:
           type: string
+          description: |
+            Surrounding angle brackets are stripped before storage (e.g. `<id@domain>` is
+            stored as `id@domain`), consistent with `references` handling.
         references:
           type: array
           items:
@@ -285,12 +293,16 @@ components:
           maxLength: 8192
         subject:
           type: string
+          maxLength: 998
         body_text:
           type: string
         body_html:
           type: string
         in_reply_to:
           type: string
+          description: |
+            Surrounding angle brackets are stripped before storage (e.g. `<id@domain>` is
+            stored as `id@domain`), consistent with `references` handling.
         references:
           type: array
           items:
@@ -312,8 +324,9 @@ components:
             If present on POST, attachments from this source message are copied server-side into the
             new draft atomically. Used when forwarding a message to pre-populate the draft
             with the original attachments. On PUT (replace), this field is silently ignored —
-            no attachments are copied and no error is returned. Returns 400 if the referenced
-            message does not exist.
+            no attachments are copied and no error is returned. The referenced message may be
+            in any folder, including Drafts; only existence is checked. Returns 400 if the
+            referenced message does not exist.
 
     Filter:
       type: object
@@ -353,6 +366,7 @@ components:
           description: Display order position. When omitted on POST, appended after the last existing filter.
         name:
           type: string
+          maxLength: 200
         match_from:
           type: string
           maxLength: 1000
@@ -617,11 +631,11 @@ paths:
         Update position values for multiple folders at once. The supplied order becomes the new
         position sequence (0, 1, 2, …).
 
-        The `ids` array must contain **every** existing folder exactly once; partial reorders are
-        not supported. Duplicate IDs → 400. Unknown IDs → 400. Missing IDs → 400
-        (`{"error": "incomplete reorder; all ids must be supplied"}`). An empty `ids` array is
-        also rejected with the same "incomplete reorder" 400, **unless** no folders exist at all,
-        in which case the call is a no-op returning `updated: 0`.
+        The `ids` array must contain **every** existing folder exactly once, including built-in
+        folders (ids 1–7); partial reorders are not supported. Duplicate IDs → 400. Unknown IDs
+        → 400. Missing IDs → 400 (`{"error": "incomplete reorder; all ids must be supplied"}`).
+        An empty `ids` array is also rejected with the same "incomplete reorder" 400, **unless**
+        no folders exist at all, in which case the call is a no-op returning `updated: 0`.
       requestBody:
         required: true
         content:
@@ -857,6 +871,9 @@ paths:
         Compose and send a new message, or schedule it for future delivery. See
         `SendRequest.send_at` for the immediate-vs-scheduled threshold (`send_at > now + 60s`
         schedules; otherwise immediate).
+
+        Returns `400 {"error": "no identity configured; create one in Settings → Identities first"}`
+        when no identities exist.
       requestBody:
         required: true
         content:
@@ -873,6 +890,7 @@ paths:
                 properties:
                   id:
                     type: integer
+                    description: ID of the newly created message in the Sent folder.
                 required: [id]
         '202':
           description: Scheduled for future delivery
@@ -883,6 +901,7 @@ paths:
                 properties:
                   id:
                     type: integer
+                    description: ID of the newly created message in the Scheduled folder.
                   send_at:
                     type: string
                     format: date-time
@@ -895,7 +914,12 @@ paths:
   /messages/send-with-attachments:
     post:
       summary: Send or schedule a message with attachments
-      description: Same as /messages/send but uses multipart/form-data. JSON fields in a "message" part; each attachment is a separate file part.
+      description: |
+        Same as /messages/send but uses multipart/form-data. JSON fields in a "message" part;
+        each attachment is a separate file part.
+
+        Returns `400 {"error": "no identity configured; create one in Settings → Identities first"}`
+        when no identities exist.
       requestBody:
         required: true
         content:
@@ -920,9 +944,10 @@ paths:
                 properties:
                   id:
                     type: integer
+                    description: ID of the newly created message in the Sent folder.
                 required: [id]
         '202':
-          description: Scheduled
+          description: Scheduled for future delivery
           content:
             application/json:
               schema:
@@ -930,6 +955,7 @@ paths:
                 properties:
                   id:
                     type: integer
+                    description: ID of the newly created message in the Scheduled folder.
                   send_at:
                     type: string
                     format: date-time
@@ -1535,8 +1561,8 @@ paths:
         Same as POST /drafts but uses multipart/form-data. When both `source_message_id`
         (in the `DraftRequest` JSON part) and file upload parts are supplied simultaneously,
         both are applied: the source message's attachments are copied server-side **and** the
-        uploaded file parts are stored. The resulting draft will contain attachments from both
-        sources.
+        uploaded file parts are stored. Source-message attachments are stored first (in their
+        original order), followed by the newly uploaded file parts.
       requestBody:
         required: true
         content:
@@ -1637,11 +1663,13 @@ paths:
           is sent immediately: the MIME message is constructed (including all stored attachments),
           piped to `sendmail`, and on success the draft is deleted and the sent message is stored
           in the Sent folder (201).
-        - If `send_at > now + 60 seconds`, the draft is moved to the Scheduled folder without
-          calling sendmail (202). The scheduler will send it at the specified time.
+        - If `send_at > now + 60 seconds`, a new message is created in the Scheduled folder and
+          the draft is deleted (202). The scheduler will send it at the specified time.
 
         On sendmail failure the draft is preserved unchanged and 500 is returned. Returns 400 if
-        none of `to_addr`, `cc_addr`, `bcc_addr` is non-empty.
+        none of `to_addr`, `cc_addr`, `bcc_addr` is non-empty. Returns
+        `400 {"error": "no identity configured; create one in Settings → Identities first"}`
+        when no identities exist.
       parameters:
         - name: id
           in: path
@@ -1714,7 +1742,10 @@ paths:
   /drafts-with-attachments/{id}:
     put:
       summary: Replace draft content with attachments
-      description: Same as PUT /drafts/{id} but uses multipart/form-data. Existing attachments are replaced wholesale.
+      description: |
+        Same as PUT /drafts/{id} but uses multipart/form-data. Existing attachments are replaced
+        wholesale. If no file parts are present, all existing attachments for the draft are
+        deleted — an empty file-parts list is a valid way to clear all attachments.
       parameters:
         - name: id
           in: path
@@ -2104,6 +2135,7 @@ paths:
               properties:
                 address:
                   type: string
+                  maxLength: 254
                 name:
                   type: string
                   maxLength: 200
@@ -2143,6 +2175,7 @@ paths:
               properties:
                 address:
                   type: string
+                  maxLength: 254
                 name:
                   type: string
                   maxLength: 200
