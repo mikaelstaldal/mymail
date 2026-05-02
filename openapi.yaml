@@ -78,7 +78,7 @@ components:
         created_at:
           type: string
           format: date-time
-      required: [id, folder_id, from_addr, to_addr, subject, date, read, flagged, has_attachments, send_failed, created_at]
+      required: [id, folder_id, message_id, from_addr, to_addr, subject, date, read, flagged, has_attachments, send_failed, created_at]
 
     AttachmentMeta:
       type: object
@@ -103,9 +103,17 @@ components:
         message_id:
           type: string
           nullable: true
+          description: |
+            The RFC 5322 Message-ID value, serialized **without** angle brackets
+            (e.g. `id@domain`, not `<id@domain>`). Null when the message has no Message-ID.
+            Note the asymmetry with `references`, whose elements include angle brackets.
         in_reply_to:
           type: string
           nullable: true
+          description: |
+            The RFC 5322 In-Reply-To value, serialized **without** angle brackets
+            (e.g. `id@domain`, not `<id@domain>`). Null when the header is absent.
+            Note the asymmetry with `references`, whose elements include angle brackets.
         references:
           type: array
           items:
@@ -249,7 +257,8 @@ components:
           description: |
             If absent, `identity_id` is stored as NULL and `from_addr` is set to the current
             default identity's address. If present, `from_addr` is set to the specified
-            identity's address.
+            identity's address. If no default identity exists when `identity_id` is absent,
+            the server returns 500 (malconfigured server — at least one identity must exist).
         to_addr:
           type: string
           maxLength: 8192
@@ -587,7 +596,15 @@ paths:
   /folders/reorder:
     patch:
       summary: Reorder folders
-      description: Update position values for multiple folders at once. The supplied order becomes the new position sequence (0, 1, 2, …).
+      description: |
+        Update position values for multiple folders at once. The supplied order becomes the new
+        position sequence (0, 1, 2, …).
+
+        The `ids` array must contain **every** existing folder exactly once; partial reorders are
+        not supported. Duplicate IDs → 400. Unknown IDs → 400. Missing IDs → 400
+        (`{"error": "incomplete reorder; all ids must be supplied"}`). An empty `ids` array is
+        also rejected with the same "incomplete reorder" 400, **unless** no folders exist at all,
+        in which case the call is a no-op returning `updated: 0`.
       requestBody:
         required: true
         content:
@@ -611,6 +628,8 @@ paths:
                   updated:
                     type: integer
                 required: [updated]
+        '400':
+          $ref: '#/components/responses/BadRequest'
 
   /folders/{folder_id}/messages:
     get:
@@ -737,8 +756,9 @@ paths:
         are case-insensitive. Search results include a `snippet` field (present only in search
         results, not in `GET /messages/{id}`).
 
-        When `folder_id` is not specified, the search covers all folders **except Junk** (id=7).
-        To search within Junk explicitly, pass `folder_id=7`.
+        When `folder_id` is not specified, the search covers all folders **except Junk** (id=7),
+        **Drafts** (id=3), and **Scheduled** (id=5). To search within those folders explicitly,
+        pass the corresponding `folder_id`.
 
         Returns 400 with `{"error": "q must contain at least one non-whitespace character"}` when
         `q` is empty (`q=`) or contains only ASCII whitespace after trimming. Match-all is not
@@ -927,6 +947,12 @@ paths:
         or Drafts (3) folders is rejected with 400. Drafts is forbidden because drafts are created
         and managed only via the `/drafts` endpoints. Use the dedicated snooze and scheduled
         endpoints for Snoozed/Scheduled.
+
+        When `folder_id` is set to 4 (Trash), `snoozed_until`, `snooze_folder`, and `send_at` are
+        cleared in the same UPDATE to prevent the background scheduler from acting on a message
+        that is now in Trash.
+
+        An empty body (`{}`) is valid and returns 200 as a no-op.
       parameters:
         - name: id
           in: path
@@ -979,9 +1005,7 @@ paths:
     patch:
       summary: Bulk update messages
       description: |
-        Apply the same patch to multiple messages. The same target restrictions as the single
-        PATCH apply to `folder_id`: Scheduled (5), Snoozed (6), and Drafts (3) are rejected with
-        400 (Drafts is forbidden because drafts are created only via the `/drafts` endpoints).
+        Apply the same read/flagged patch to multiple messages.
         Returns 404 if any of the provided IDs does not exist; no changes are made in that case.
         Returns 400 if more than 1000 IDs are supplied (the `maxItems: 1000` constraint on the `ids`
         array is the enforced limit); no changes are made in that case.
@@ -1002,8 +1026,6 @@ paths:
                     type: integer
                   minItems: 1
                   maxItems: 1000
-                folder_id:
-                  type: integer
                 read:
                   type: boolean
                 flagged:
@@ -1066,6 +1088,55 @@ paths:
                     type: integer
                     description: Number of messages permanently deleted (were already in Trash).
                 required: [moved_to_trash, permanently_deleted]
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /messages/move:
+    post:
+      summary: Bulk move messages to a folder
+      description: |
+        Move multiple messages to the specified folder. The destination folder must not be
+        Scheduled (5), Snoozed (6), or Drafts (3) — these are rejected with 400.
+        Messages currently in Scheduled (5), Snoozed (6), or Drafts (3) may not be moved via
+        this endpoint — they are rejected with 400. Use the dedicated endpoints to cancel
+        a schedule, cancel a snooze, or delete a draft.
+        Returns 404 if any of the provided IDs does not exist; no changes are made in that case.
+        Returns 400 if more than 1000 IDs are supplied (the `maxItems: 1000` constraint on the `ids`
+        array is the enforced limit); no changes are made in that case.
+        Returns 400 if `ids` is an empty array (`{"error": "ids must contain at least one id"}`);
+        no SQL is issued.
+        When `folder_id` is set to 4 (Trash), `snoozed_until`, `snooze_folder`, and `send_at` are
+        cleared in the same UPDATE to prevent the background scheduler from acting on messages
+        now in Trash.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                ids:
+                  type: array
+                  items:
+                    type: integer
+                  minItems: 1
+                  maxItems: 1000
+                folder_id:
+                  type: integer
+              required: [ids, folder_id]
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  updated:
+                    type: integer
+                required: [updated]
         '400':
           $ref: '#/components/responses/BadRequest'
         '404':
@@ -1230,6 +1301,11 @@ paths:
         is based on the current `folder_id`, not on the stored `snoozed_until` timestamp.
         On success, `snoozed_until` and `snooze_folder` are cleared in the database, matching
         the clearing behaviour of folder deletion and snooze-expiry processing by the scheduler.
+
+        If `snooze_folder` is null (because the original folder was deleted after the snooze was
+        set, or because it was never recorded), the message is returned to Inbox (id=1) via the
+        same `COALESCE(snooze_folder, 1)` fallback used by the scheduler. The `folder_id` in the
+        response reflects the actual folder the message was moved to.
       parameters:
         - name: id
           in: path
@@ -1355,6 +1431,10 @@ paths:
       description: |
         Cancel a scheduled message and move it to Drafts. Implemented as a single conditional
         UPDATE that requires `folder_id = 5` (Scheduled) AND `send_at IS NOT NULL`.
+
+        On success, `send_failure_count` is reset to 0 and `send_error` is cleared (set to NULL)
+        in the same UPDATE, so the message does not carry a failure badge when it reappears in the
+        Drafts list.
 
         - 200 when the cancellation moved the message back to Drafts.
         - **404** when no such row exists, including the race where the scheduler has already
@@ -1728,7 +1808,15 @@ paths:
   /filters/reorder:
     patch:
       summary: Reorder filters
-      description: Update position values for multiple filters at once. The supplied order becomes the new position sequence (0, 1, 2, …).
+      description: |
+        Update position values for multiple filters at once. The supplied order becomes the new
+        position sequence (0, 1, 2, …).
+
+        The `ids` array must contain **every** existing filter exactly once; partial reorders are
+        not supported. Duplicate IDs → 400. Unknown IDs → 400. Missing IDs → 400
+        (`{"error": "incomplete reorder; all ids must be supplied"}`). An empty `ids` array is
+        also rejected with the same "incomplete reorder" 400, **unless** no filters exist at all,
+        in which case the call is a no-op returning `updated: 0`.
       requestBody:
         required: true
         content:
@@ -1752,6 +1840,8 @@ paths:
                   updated:
                     type: integer
                 required: [updated]
+        '400':
+          $ref: '#/components/responses/BadRequest'
 
   # ── Spam Filter ────────────────────────────────────────────────────────────
 
@@ -1884,7 +1974,15 @@ paths:
   /identities/reorder:
     patch:
       summary: Reorder identities
-      description: Update position values for multiple identities at once. The supplied order becomes the new position sequence (0, 1, 2, …).
+      description: |
+        Update position values for multiple identities at once. The supplied order becomes the new
+        position sequence (0, 1, 2, …).
+
+        The `ids` array must contain **every** existing identity exactly once; partial reorders are
+        not supported. Duplicate IDs → 400. Unknown IDs → 400. Missing IDs → 400
+        (`{"error": "incomplete reorder; all ids must be supplied"}`). An empty `ids` array is
+        also rejected with the same "incomplete reorder" 400, **unless** no identities exist at
+        all, in which case the call is a no-op returning `updated: 0`.
       requestBody:
         required: true
         content:
@@ -1908,6 +2006,8 @@ paths:
                   updated:
                     type: integer
                 required: [updated]
+        '400':
+          $ref: '#/components/responses/BadRequest'
 
   # ── Contacts ───────────────────────────────────────────────────────────────
 

@@ -118,9 +118,10 @@ The full REST API contract is in `openapi.yaml`. Use ogen to generate Go server 
 - `GET /api/v1/messages/{id}/raw` — download original RFC 5322 message
 - `GET /api/v1/messages/{id}/thread` — get all messages in the same thread
 - `PATCH /api/v1/messages/{id}` — update message metadata (folder, read, flagged)
-- `PATCH /api/v1/messages` — bulk update messages
+- `PATCH /api/v1/messages` — bulk update read/flagged state for multiple messages
 - `DELETE /api/v1/messages/{id}` — delete message (to Trash, or permanently if already in Trash)
 - `DELETE /api/v1/messages` — bulk delete messages
+- `POST /api/v1/messages/move` — bulk move messages to a folder
 - `POST /api/v1/messages/send` — send or schedule a message
 - `POST /api/v1/messages/send-with-attachments` — send/schedule with `multipart/form-data`
 - `POST /api/v1/messages/{id}/snooze` — snooze a message until a future time
@@ -237,9 +238,10 @@ SELECT m.*, snippet(messages_fts, 4, '**', '**', '…', 15) AS snippet
 FROM messages_fts
 JOIN messages m ON messages_fts.rowid = m.id
 WHERE messages_fts MATCH ?
-  -- AND m.folder_id = ?       (when folder_id parameter is supplied)
-  -- AND m.date >= ?           (when date_from parameter is supplied)
-  -- AND m.date < ?            (when date_to parameter is supplied)
+  AND m.folder_id NOT IN (3, 5, 7)  -- (when no folder_id parameter is supplied: exclude Drafts, Scheduled, Junk)
+  -- AND m.folder_id = ?            (when folder_id parameter is supplied; replaces the NOT IN clause)
+  -- AND m.date >= ?                (when date_from parameter is supplied)
+  -- AND m.date < ?                 (when date_to parameter is supplied)
 ORDER BY rank
 LIMIT ? OFFSET ?;
 ```
@@ -297,6 +299,8 @@ CREATE TABLE IF NOT EXISTS folders (
 ```
 
 Built-in folders seeded by `mymail -init` (id=1..7); user-created folders have `id >= 100`.
+
+If `-identity-address` is supplied to `mymail -init`, an initial identity row is inserted into the `identities` table with `name` from `-identity-name` (empty string if omitted), `address` normalised via Unicode simple casefolding, `is_default = 1`, and `position = 0`. The address must be a valid RFC 5322 addr-spec; init exits with `1` otherwise.
 
 **User folder ID generation:** When creating a user folder, the service layer generates the ID explicitly rather than relying on `AUTOINCREMENT`. Query `SELECT COALESCE(MAX(id), 99) + 1 FROM folders WHERE id >= 100` to get the next candidate, then INSERT with that ID. Retry on `SQLITE_CONSTRAINT` (duplicate key) by re-querying. This guarantees IDs ≥ 100 without relying on SQLite's sequence table.
 
@@ -459,6 +463,21 @@ ORDER BY CASE WHEN name = '' THEN 1 ELSE 0 END, name, address
 ```
 This places empty-name contacts after named contacts, with named contacts sorted case-sensitively by name, then by address for ties.
 
+**Contact autocomplete SQL** (when the `q` query parameter is supplied):
+```sql
+SELECT * FROM contacts
+WHERE LOWER(name) LIKE '%' || LOWER(?) || '%'
+   OR LOWER(address) LIKE '%' || LOWER(?) || '%'
+ORDER BY CASE WHEN name = '' THEN 1 ELSE 0 END, name, address
+LIMIT ? OFFSET ?
+```
+The `q` value is bound twice — once for the name match, once for the address match. When `q` is absent, the WHERE clause is omitted. The total count for pagination uses the same filter:
+```sql
+SELECT COUNT(*) FROM contacts
+WHERE LOWER(name) LIKE '%' || LOWER(?) || '%'
+   OR LOWER(address) LIKE '%' || LOWER(?) || '%'
+```
+
 Upsert must use a single atomic statement:
 ```sql
 INSERT INTO contacts (address, name, created_at, updated_at)
@@ -526,6 +545,8 @@ Use Go standard library (`net/mail`, `mime`, `mime/multipart`, `mime/quotedprint
 
 **Plain-text derivation from HTML:** when the message has an HTML part but no `text/plain` part, run the **sanitized** `body_html` through `html2text.FromString(html, html2text.Options{PrettyTables: false, OmitLinks: false})`. The library is invoked after sanitization (not on the raw HTML) so any markup the sanitizer stripped is also absent from `body_text` — keeping the FTS index aligned with what the user actually sees. Treat the html2text version as part of the schema: bumping it requires a backfill pass that re-derives `body_text` for every affected row and rebuilds the FTS5 entries.
 
+**`has_external_images` computation:** After sanitization, compute and persist the `has_external_images` flag (see `has_external_images` Computation below) before inserting the message row. This step is part of both the LDA pipeline and the batch import pipeline.
+
 ### Duplicate Detection
 
 ```sql
@@ -574,7 +595,7 @@ ORDER BY send_at ASC;
 UPDATE messages SET ... WHERE id = ? AND send_at IS NOT NULL AND folder_id = 5
 ```
 
-The `DELETE /api/v1/scheduled/{id}` handler must clear `send_at` and set `folder_id = 3` in a **single** UPDATE statement to avoid a race window.
+The `DELETE /api/v1/scheduled/{id}` handler must clear `send_at`, reset `send_failure_count` to 0, clear `send_error` (set to NULL), and set `folder_id = 3` in a **single** UPDATE statement to avoid a race window and to ensure the message does not carry a failure badge in the Drafts list after cancellation.
 
 **Failure handling — clearing `send_at`:** When the scheduler moves a message to Drafts after 3 consecutive failures, `send_at` must be set to NULL in the same UPDATE that changes `folder_id` to 3. This preserves the invariant that `send_at` is non-null only for messages in the Scheduled folder:
 ```sql
@@ -589,6 +610,26 @@ WHERE folder_id = 6
   AND snoozed_until <= CURRENT_TIMESTAMP
 ORDER BY snoozed_until ASC;
 ```
+
+For each expired snooze, the scheduler moves the message to `COALESCE(snooze_folder, 1)` (falling back to Inbox if the return folder was deleted or was never set), clears `snoozed_until` and `snooze_folder`, and marks the message as unread — all in a single UPDATE:
+```sql
+UPDATE messages
+SET folder_id = COALESCE(snooze_folder, 1),
+    snoozed_until = NULL,
+    snooze_folder = NULL,
+    read = 0
+WHERE id = ? AND folder_id = 6
+```
+
+**Cancel-snooze handler (`DELETE /messages/{id}/snooze`):** Must return the message to `COALESCE(snooze_folder, 1)` (same fallback as the scheduler) and clear both `snoozed_until` and `snooze_folder` in a single UPDATE. The `folder_id` returned in the response must reflect the actual folder the message was moved to (the result of the COALESCE), not always a hard-coded value:
+```sql
+UPDATE messages
+SET folder_id = COALESCE(snooze_folder, 1),
+    snoozed_until = NULL,
+    snooze_folder = NULL
+WHERE id = ? AND folder_id = 6
+```
+Return 400 if the message is not currently in the Snoozed folder (i.e. the UPDATE affects 0 rows after confirming the message exists).
 
 The scheduler holds the SQLite write lock only for the duration of each individual UPDATE, not across the full tick.
 
@@ -608,7 +649,7 @@ The scheduler holds the SQLite write lock only for the duration of each individu
 - Open database and run migrations before importing.
 - **Folder resolution:** For each `<folder>` value in the mapping arguments, resolve the target folder as follows: if the value matches a built-in slug (`inbox`, `sent`, `drafts`, `trash`) case-sensitively, use that built-in folder; otherwise, search user-created folders by name using a case-insensitive match (`LOWER(name) = LOWER(?)`). If no match is found, create a new user-created folder with that value as its name (applying the standard slug-generation algorithm). If the same `<folder>` value appears in multiple mapping triplets, all triplets share the single resolved/created folder — no attempt is made to create the folder twice.
 - Use batched transactions: commit every 500 messages to bound WAL file size. If a batch fails, only that batch is rolled back; previously committed batches are retained. There is no way to identify which individual messages were committed after a partial failure — re-run the full import after fixing the source data (duplicate detection will skip already-imported messages).
-- Run the full LDA parsing pipeline (HTML sanitization, `cid:` resolution, `body_text` derivation, attachment extraction) for each message. Skip only spam detection and filter application.
+- Run the full LDA parsing pipeline (HTML sanitization, `cid:` resolution, `body_text` derivation, `has_external_images` computation, attachment extraction) for each message. Skip only spam detection and filter application.
 - Upsert the `From` address of each successfully imported message into the contacts table using the same upsert logic as the LDA (update name only when the stored name is empty).
 - For Maildir, map the `S` (Seen) flag to `read=1` and the `F` (Flagged) flag to `flagged=1`.
 - For mbox: call `os.Stat(path)` **before** opening the mbox reader to capture the file's mtime; this value is used as the timestamp fallback when a `From ` separator timestamp cannot be parsed, and must be available throughout the per-message loop. The `go-mbox` `NextMessage()` call reads and discards the `From ` separator line internally before returning the message reader, so the timestamp must be captured before `NextMessage()` is called. Use a **two-pass approach**: in the first pass, open the file with `bufio.Scanner` and collect the timestamp suffix of every line matching `^From \S` in order; in the second pass, seek back to the beginning and use `mbox.NewReader()` / `NextMessage()` for message parsing. The nth timestamp collected in the first pass corresponds to the nth message yielded by `NextMessage()`. This works correctly for mboxrd files (where embedded `From ` lines are escaped as `>From ` and therefore not counted). For mboxo files, embedded unescaped `From ` lines are rare in practice; if a mismatch is detected (more messages than timestamps), fall back to the file mtime for the affected messages. Strip the `From ` line before storing the `raw` BLOB. Use streaming `NextMessage()` API — do not load the entire file into memory.
@@ -759,7 +800,7 @@ Delimiter detection runs before HTML escaping so the literal `-- ` characters ar
 - `PUT /api/v1/drafts/{id}` (JSON endpoint) does not modify attachment rows.
 - `PUT /api/v1/drafts-with-attachments/{id}` replaces attachments wholesale.
 - To remove individual attachments, call `DELETE /api/v1/drafts/{id}/attachments/{attachment_id}`.
-- On every PUT, the server resolves `identity_id` to its `address` and updates both the `identity_id` column and `from_addr` in the `messages` row. If `identity_id` is absent in the PUT body, `identity_id` is set to NULL and `from_addr` is set to the default identity's address. This keeps the Drafts message list accurate when the user changes the From identity. On POST (new draft), `identity_id` is stored directly from the request body (or NULL if absent), and `from_addr` is set to the specified identity's address, or to the default identity's address when `identity_id` is absent — mirroring the PUT rule.
+- On every PUT, the server resolves `identity_id` to its `address` and updates both the `identity_id` column and `from_addr` in the `messages` row. If `identity_id` is absent in the PUT body, `identity_id` is set to NULL and `from_addr` is set to the default identity's address. This keeps the Drafts message list accurate when the user changes the From identity. On POST (new draft), `identity_id` is stored directly from the request body (or NULL if absent), and `from_addr` is set to the specified identity's address, or to the default identity's address when `identity_id` is absent — mirroring the PUT rule. If no identities exist when the default identity is needed (i.e. `identity_id` is absent and there is no default), the server returns 500 with `{"error": "no identity configured"}` and `from_addr` is set to empty string — this is a malconfigured-server condition.
 
 ### Send Draft Logic (`POST /api/v1/drafts/{id}/send`)
 

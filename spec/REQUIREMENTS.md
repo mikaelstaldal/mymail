@@ -34,7 +34,7 @@ At startup the server resolves the configured sendmail binary (using `PATH` look
 >
 > **TLS and reverse proxy note:** mymail does not terminate TLS itself. For any deployment that is not loopback-only, place mymail behind a TLS-terminating reverse proxy. HTTP Basic Auth must not be used over plain HTTP on a non-loopback interface. Rate limiting is also the responsibility of the reverse proxy layer.
 
-Identities are managed entirely through the REST API and the web UI. There is no CLI flag for the initial identity; the first identity is created via the web UI on first use.
+Identities are managed entirely through the REST API and the web UI. The initial identity can optionally be created at init time via `-identity-address` (see Init mode). The server assumes at least one identity exists at all times; operations that require a default identity (draft save without `identity_id`) return 500 if none is configured.
 
 ### LDA mode (`-lda`)
 
@@ -54,7 +54,7 @@ Exit codes follow standard LDA conventions:
 ### Init mode (`-init`)
 
 ```
-mymail -init -data <dir>
+mymail -init -data <dir> [-identity-name <name>] [-identity-address <address>]
 ```
 
 Initializes a fresh installation:
@@ -65,7 +65,14 @@ Initializes a fresh installation:
 - Sets `PRAGMA user_version` to the current schema version.
 - Seeds the database with the seven built-in folders.
 - Seeds the spam filter settings row.
+- If `-identity-address` is supplied, creates an initial identity with that address and the given name (defaults to empty string if `-identity-name` is omitted) and marks it as default.
 - Exits `0` on success, `1` on any error.
+
+| Flag                 | Default | Description                                    |
+|----------------------|---------|------------------------------------------------|
+| `-data`              | `data/` | Data directory (stores the database)           |
+| `-identity-name`     | ``      | Display name for the initial identity          |
+| `-identity-address`  | ``      | Email address for the initial identity (RFC 5322 addr-spec); if set, creates the identity |
 
 The server, LDA, and import modes require the database to already exist (created by `mymail -init`). They exit with a fatal error if the database file is absent.
 
@@ -451,7 +458,7 @@ On first load the UI reads `localStorage` for the last selected folder and navig
 
 1. **Folder view** — Paginated message list. Unread messages shown in bold. **Mark all as read** button marks all messages in the folder as read.
 
-2. **Message detail** — Full headers, sanitized HTML body in a sandboxed iframe (or plain-text fallback), attachment download links. Reply/Reply All/Forward/Move/Delete/Snooze/Mark as junk buttons. The Snooze button is available only when the message is in Inbox, Snoozed, or a user-created folder. It is not available for messages in Drafts, Sent, Trash, Junk, or Scheduled — each of those folders has its own dedicated lifecycle management that would conflict with snooze behaviour. Opening an unread message causes the UI to issue an explicit `PATCH /messages/{id}` request (with `{"read": true}`) after a successful GET to mark it as read; `GET /messages/{id}` itself does not alter read state. When the message has both body types, a toggle switches between HTML and plain text; the preference is stored. Thread display: if the message is part of a thread, a collapsed conversation strip is shown below the body; clicking an entry expands it. When the thread is truncated at the 1000-message cap (`truncated: true` in the API response), a "thread too long" indicator is shown in place of the missing entries.
+2. **Message detail** — Full headers, sanitized HTML body in a sandboxed iframe (or plain-text fallback), attachment download links. Reply/Reply All/Forward/Move/Delete/Snooze/Mark as junk buttons. The Snooze button is available only when the message is in Inbox, Snoozed, or a user-created folder. It is not available for messages in Drafts, Sent, Trash, Junk, or Scheduled — each of those folders has its own dedicated lifecycle management that would conflict with snooze behaviour. The snooze `until` time must be at least 1 minute ahead of the current server time; a shorter value is rejected. **Re-snooze:** if the message is already in Snoozed, submitting a new snooze request updates the expiry time; the original return folder (the folder the message was in when first snoozed) is preserved unchanged. Opening an unread message causes the UI to issue an explicit `PATCH /messages/{id}` request (with `{"read": true}`) after a successful GET to mark it as read; `GET /messages/{id}` itself does not alter read state. When the message has both body types, a toggle switches between HTML and plain text; the preference is stored. Thread display: if the message is part of a thread, a collapsed conversation strip is shown below the body; clicking an entry expands it. When the thread is truncated at the 1000-message cap (`truncated: true` in the API response), a "thread too long" indicator is shown in place of the missing entries.
 
 3. **Compose / Reply / Reply All / Forward** — Form with From selector, To/Cc/Bcc/Reply-To fields (To/Cc/Bcc offer address autocomplete), Subject, rich-text body editor (Quill), file upload for attachments. A **Send later** toggle reveals a date/time picker. Auto-saves to Drafts every 30 seconds. Navigate-away triggers an immediate draft save.
 
@@ -510,7 +517,7 @@ On first load the UI reads `localStorage` for the last selected folder and navig
 
 4. **Scheduled folder message detail** — Shows scheduled send time; **Cancel schedule** button moves message to Drafts.
 
-5. **Search** — Full-text search results as a message list. A folder selector (dropdown) allows limiting results to a single folder; when no folder is selected the search is global (all folders except Junk). Two native HTML date pickers (From date, To date) allow limiting results to a date range; when set they are passed as `date_from` and `date_to` to `GET /messages/search` (the From date is sent as the start of the selected day in the user's local timezone, the To date as the start of the day after). The search bar, folder selector, and date pickers are shown together in the search view.
+5. **Search** — Full-text search results as a message list. A folder selector (dropdown) allows limiting results to a single folder; when no folder is selected the search is global (all folders except Junk, Drafts, and Scheduled). Two native HTML date pickers (From date, To date) allow limiting results to a date range; when set they are passed as `date_from` and `date_to` to `GET /messages/search` (the From date is sent as the start of the selected day in the user's local timezone, the To date as the start of the day after). The search bar, folder selector, and date pickers are shown together in the search view.
 
 6. **Filter management** — CRUD UI with drag-to-reorder. The `match_to` field is labelled "To / Cc".
 
@@ -571,7 +578,7 @@ Message detail always shows the full "Apr 3, 14:32 CEST" form with timezone abbr
 - **404 on navigation:** shows inline "Not found" in the detail pane.
 - **Auth failure (401):** redirects to the browser's built-in Basic Auth dialog.
 
-**Junk folder:** Message detail shows a **Not junk** button (moves to Inbox and marks as unread — mirroring snooze-expiry behaviour so the message appears as new on return to Inbox) and standard Move controls (allows moving to any folder directly). All other views show a **Mark as junk** button.
+**Junk folder:** Message detail shows a **Not junk** button (moves to Inbox and marks as unread — mirroring snooze-expiry behaviour so the message appears as new on return to Inbox) and standard Move controls (allows moving to any folder directly). All other views show a **Mark as junk** button, **except** messages in Snoozed, Scheduled, or Drafts — for those the **Mark as junk** button is not shown. The schedule or snooze must be cancelled (or the draft discarded) before marking a message as junk.
 
 **Empty folder button:** Trash and Junk views show an **Empty** button (with confirmation prompt). For Trash: messages already in Trash are permanently deleted (standard two-step semantics). For Junk: all messages are permanently deleted immediately, regardless of whether they have been in Trash previously — moving spam to Trash is not useful. Drafts, Scheduled, and Snoozed do not show the Empty button; those folders have dedicated lifecycle management (draft deletion, schedule cancellation, and snooze cancellation respectively) and bulk-emptying them would bypass that logic.
 
