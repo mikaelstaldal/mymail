@@ -557,7 +557,9 @@ paths:
       description: |
         Update folder name and/or position. Built-in folders (ids 1–7) may only have their
         `position` updated; supplying a `name` for a built-in folder returns
-        `400 {"error": "built-in folders cannot be renamed"}`.
+        `400 {"error": "built-in folders cannot be renamed"}`. The entire request is rejected
+        with 400 when `name` is supplied for a built-in folder, regardless of whether `position`
+        is also present — `position` is not applied in that case.
 
         **Slug stability:** the `slug` field is immutable for both built-in and user folders.
         Renaming a user folder via this endpoint changes only the display `name`; the slug is
@@ -874,6 +876,9 @@ paths:
 
         Returns `400 {"error": "no identity configured; create one in Settings → Identities first"}`
         when no identities exist.
+
+        If `identity_id` is supplied but does not match any existing identity, returns
+        `400 {"error": "identity not found"}`.
       requestBody:
         required: true
         content:
@@ -920,6 +925,9 @@ paths:
 
         Returns `400 {"error": "no identity configured; create one in Settings → Identities first"}`
         when no identities exist.
+
+        If `identity_id` is supplied but does not match any existing identity, returns
+        `400 {"error": "identity not found"}`.
       requestBody:
         required: true
         content:
@@ -1036,7 +1044,7 @@ paths:
         If in Trash (id=4) or Junk (id=7), permanently deletes immediately. Otherwise, moves to Trash.
         Messages currently in Scheduled (5), Snoozed (6), or Drafts (3) may not be deleted via
         this endpoint — they are rejected with 400. Use the dedicated endpoints to cancel
-        a schedule (`DELETE /messages/{id}/scheduled`), cancel a snooze (`DELETE /messages/{id}/snooze`),
+        a schedule (`DELETE /scheduled/{id}`), cancel a snooze (`DELETE /messages/{id}/snooze`),
         or delete a draft (`DELETE /drafts/{id}`).
         When moving to Trash, `snoozed_until`, `snooze_folder`, and `send_at` are cleared in the
         same UPDATE to prevent the background scheduler from acting on a message that is now in Trash.
@@ -1051,6 +1059,8 @@ paths:
       responses:
         '204':
           description: OK
+        '400':
+          $ref: '#/components/responses/BadRequest'
         '404':
           $ref: '#/components/responses/NotFound'
 
@@ -1066,6 +1076,9 @@ paths:
         no SQL is issued.
         The `updated` count equals the number of rows actually modified (no-op updates where the
         new value equals the existing value are not counted).
+        When neither `read` nor `flagged` is supplied, all specified messages are considered already
+        matching (no SQL UPDATE is issued), `updated` is 0, and 200 is returned. This mirrors the
+        single-message no-op behaviour.
       requestBody:
         required: true
         content:
@@ -1976,7 +1989,8 @@ paths:
     post:
       summary: Create identity
       description: |
-        Create an identity. `address` must be a valid RFC 5322 addr-spec.
+        Create an identity. `address` must be a valid RFC 5322 addr-spec. The `address` is stored
+        in Unicode-simple-casefolded form before the uniqueness check.
         If `is_default` is true, all other identities are set to is_default=false.
         When `is_default` is absent or false and at least one identity already exists, the new
         identity is created as non-default and the existing default identity is unchanged.
@@ -2004,9 +2018,13 @@ paths:
     put:
       summary: Replace identity
       description: |
-        Replace an identity entirely. Same validation as POST. When the identity's `address`
+        Replace an identity entirely. Same validation as POST. The `address` is stored in
+        Unicode-simple-casefolded form before the uniqueness check. When the identity's `address`
         changes, all drafts referencing this identity have their `from_addr` updated to the
         new address in the same transaction, preventing stale sender addresses in the Drafts list.
+        If `is_default` is true, this identity becomes the default and all others are set to
+        is_default=false. If `is_default` is absent or false, the default status of this identity
+        is left unchanged (i.e. the field only has effect when explicitly set to true).
       parameters:
         - name: id
           in: path

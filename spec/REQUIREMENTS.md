@@ -476,6 +476,8 @@ On first load the UI reads `localStorage` for the last selected folder and navig
    | **References**  | Original references + original `Message-ID`                  | Original references + original `Message-ID`                        | Empty                                           |
    | **Attachments** | Empty                                                        | Empty                                                              | Copies of all original attachments (server-side) |
 
+   **"All own identity addresses"** (used in the Reply-All column above): the set of `address` values from **all** identity rows in the database, not just the identity selected for the From field. For example, if the user has identities `alice@example.com` and `alice@work.example.com`, both are excluded from Reply-All To/Cc regardless of which identity is selected as From.
+
    The **Reply-To** compose field is not pre-populated for Reply, Reply-All, or Forward; it starts empty and is editable by the user.
 
    **Subject prefix stripping** (used both for "no double Re:" / "no double Fwd:" in compose and for subject-based thread fallback):

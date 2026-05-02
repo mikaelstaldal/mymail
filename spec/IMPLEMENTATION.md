@@ -182,7 +182,7 @@ The full REST API contract is in `openapi.yaml`. Use ogen to generate Go server 
 1. **Header-based (primary):** Build the connected component of the message graph using an iterative Go query loop (see below). Message A has an edge to message B when B's `Message-ID` appears in A's `In-Reply-To` or A's `References` field.
 2. **Subject-based fallback:** If header-based grouping yields only the single requested message, group by normalized subject and compare case-insensitively. Normalisation strips leading reply/forward prefixes using the regex defined in REQUIREMENTS.md → Compose → Subject prefix stripping (`^[ \t]*(?i:re|fwd|fw|aw|wg|res|enc|vs|sv):[ \t]+`), applied repeatedly to the start of the subject until no further match is found, then trims surrounding whitespace.
 
-Thread results include messages from all folders, ordered by `date ASC`. **Cap:** Thread results are limited to 1000 messages. If the transitive closure (or subject-based fallback) yields more than 1000 messages, only the 1000 with the earliest `date` are returned and the response includes `truncated: true`. The UI shows a "thread too long" indicator when `truncated` is true.
+Thread results include messages from all folders, ordered by `date ASC`. **Cap:** Thread results are limited to 1000 messages. If the transitive closure (or subject-based fallback) yields more than 1000 messages, only the 1000 with the earliest `date` are returned and the response includes `truncated: true`. The UI shows a "thread too long" indicator when `truncated` is true. **`truncated` flag semantics:** set `truncated: true` whenever the iterative loop terminated because `len(foundIDs) == 1000` (i.e. the cap was reached), regardless of whether the full transitive closure is known to exceed 1000. Once the loop exits early, it is impossible to determine the true thread size, so reaching the cap is sufficient evidence to set the flag.
 
 Messages received via the LDA that lacked a `Message-ID` header are assigned a generated ID at storage time (see LDA Implementation → Message-ID Generation). Messages imported in batch mode may have a NULL `message_id` — import does not generate IDs for messages without a `Message-ID` header. Since external mailers may not reference a generated ID in their `In-Reply-To`/`References` headers, and imported messages may have a NULL `message_id` entirely, subject-based threading serves as the natural fallback for such messages.
 
@@ -277,7 +277,7 @@ Date filtering uses lexicographic string comparison on the stored `date` column 
 - LDA: 30-second busy timeout (`PRAGMA busy_timeout=30000`).
 - Import: 5-second busy timeout (`PRAGMA busy_timeout=5000`).
 
-All timestamps stored as UTC RFC 3339 strings.
+All timestamps stored as UTC RFC 3339 strings. All incoming `date-time` fields (`send_at` in `SendRequest`/`DraftRequest`, and `until` in the snooze request) are normalized to UTC before storage and before any threshold comparison (e.g. `> now + 60 seconds`). A value with a non-UTC offset such as `2025-06-01T15:00:00+02:00` is converted to `2025-06-01T13:00:00Z` before being stored or compared.
 
 **Database existence check:** The server, LDA, and import modes check that the database file exists at startup and exit immediately with a fatal error if it does not. The database must be created by `mymail -init` before running any other mode.
 
@@ -465,6 +465,8 @@ UPDATE messages SET from_addr = '' WHERE identity_id IS NULL AND folder_id = 3 A
 ```
 binding `?` to the deleted identity's `address`. This clears `from_addr` only on draft rows whose `from_addr` matches the deleted address, regardless of how `identity_id` was stored (the FK cascade has already set `identity_id = NULL` for all drafts that referenced this identity). Drafts with a different `from_addr` are left unchanged.
 
+**`PUT /identities/{id}` default handling:** If `is_default: true` is supplied, that identity becomes the default and all others are updated to `is_default = 0` in the same transaction. If `is_default` is absent or `false`, the identity's current default status is preserved unchanged — the field only acts when explicitly `true`. This rule ensures the "exactly one default" invariant cannot be violated by a PUT request.
+
 **Identity address-change cleanup:** When `PUT /identities/{id}` is processed and the identity's `address` changes, the handler must also update `from_addr` on drafts that reference this identity:
 ```sql
 UPDATE messages SET from_addr = ? WHERE identity_id = ? AND folder_id = 3
@@ -640,7 +642,7 @@ The `DELETE /api/v1/scheduled/{id}` handler must clear `send_at`, reset `send_fa
   WHERE id = ? AND folder_id = 5 AND send_failure_count >= 2
   ```
 
-**Snooze creation handler (`POST /messages/{id}/snooze`):** Validate that `until > now + 60 seconds`; return 400 otherwise. Two cases must then be handled separately to preserve the "original return folder" invariant:
+**Snooze creation handler (`POST /messages/{id}/snooze`):** Validate that `until >= now + 60 seconds` (i.e. at least 1 minute ahead, inclusive); return 400 otherwise. Two cases must then be handled separately to preserve the "original return folder" invariant:
 
 - **First snooze** (message is not currently in Snoozed, i.e. `folder_id ≠ 6`): move the message to Snoozed, set `snoozed_until`, and record the current `folder_id` as `snooze_folder`.
   ```sql
@@ -709,8 +711,13 @@ The scheduler holds the SQLite write lock only for the duration of each individu
 - Run the full LDA parsing pipeline (HTML sanitization, `cid:` resolution, `body_text` derivation, `has_external_images` computation, attachment extraction) for each message. Skip only spam detection and filter application.
 - Upsert the `From` address of each successfully imported message into the contacts table using the same upsert logic as the LDA (update name only when the stored name is empty).
 - For Maildir, map the `S` (Seen) flag to `read=1` and the `F` (Flagged) flag to `flagged=1`.
+- **Maildir message ordering:** sort the keys returned by `Keys()` lexicographically (ascending) before processing. Standard Maildir filenames begin with a Unix timestamp, so lexicographic order approximates delivery order. This defines "source order (oldest first)" for Maildir imports.
 - For mbox: call `os.Stat(path)` **before** opening the mbox reader to capture the file's mtime; this value is used as the timestamp fallback when a `From ` separator timestamp cannot be parsed, and must be available throughout the per-message loop. The `go-mbox` `NextMessage()` call reads and discards the `From ` separator line internally before returning the message reader, so the timestamp must be captured before `NextMessage()` is called. Use a **two-pass approach**: in the first pass, open the file with `bufio.Scanner` and collect the timestamp suffix of every line matching `^From \S` in order; in the second pass, seek back to the beginning and use `mbox.NewReader()` / `NextMessage()` for message parsing. The nth timestamp collected in the first pass corresponds to the nth message yielded by `NextMessage()`. This works correctly for mboxrd files (where embedded `From ` lines are escaped as `>From ` and therefore not counted). For mboxo files, embedded unescaped `From ` lines are rare in practice; if the number of timestamps collected in the first pass does not match the number of messages yielded by the second pass (in either direction), fall back to the file mtime for all messages in the file. Strip the `From ` line before storing the `raw` BLOB. Use streaming `NextMessage()` API — do not load the entire file into memory.
-- mbox `From ` timestamp parsing: the canonical format (per the historical spec used by `From ` lines) is `Mon Jan _2 15:04:05 2006` (Go layout — note the `_2` to handle single-digit days). Parse with `time.Parse("Mon Jan _2 15:04:05 2006", ts)` after splitting off the address prefix on the first ASCII space. If parsing fails, fall back to the file's mtime captured by the `os.Stat` call above; if the file mtime cannot be obtained either, log a warning and skip the message rather than substituting the current time.
+- mbox `From ` timestamp parsing: after splitting off the address prefix on the first ASCII space, try the following Go layouts in order:
+  1. `"Mon Jan _2 15:04:05 2006"` — canonical format (no timezone)
+  2. `"Mon Jan _2 15:04:05 MST 2006"` — three-letter timezone abbreviation (e.g. `CST`)
+  3. `"Mon Jan _2 15:04:05 -0700 2006"` — numeric UTC offset (e.g. `+0200`)
+  If all three layouts fail, fall back to the file's mtime captured by the `os.Stat` call above; if the file mtime cannot be obtained either, log a warning and skip the message rather than substituting the current time.
 - `date` field: use the original `Date` header. Fallback: mtime of the Maildir file (Maildir) or `From ` separator timestamp (mbox). If the fallback is also unavailable, log a warning and skip the message. Never use current time as fallback during import.
 
 
@@ -855,19 +862,22 @@ Use [Quill](https://quilljs.com/) (vendored). On send/save, serialize as both HT
 ### Signature Plain-Text → HTML Conversion
 
 When inserting a signature into Quill's HTML content model (on compose open or identity change), convert the plain-text signature as follows:
-1. Detect the standard email signature delimiter: a line whose exact content is `-- ` (two hyphens, one space). Replace that entire line (including its trailing newline) with `<hr>`.
-2. In all other lines, escape `&` → `&amp;`, `<` → `&lt;`, `>` → `&gt;`.
-3. Replace each remaining `\n` with `<br>`.
-Delimiter detection runs before HTML escaping so the literal `-- ` characters are not corrupted.
+1. Normalize line endings: replace all `\r\n` sequences with `\n`, then replace any remaining bare `\r` with `\n`.
+2. Detect the standard email signature delimiter: a line whose exact content is `-- ` (two hyphens, one space). Replace that entire line (including its trailing newline) with `<hr>`.
+3. In all other lines, escape `&` → `&amp;`, `<` → `&lt;`, `>` → `&gt;`.
+4. Replace each remaining `\n` with `<br>`.
+Line-ending normalization runs first so that delimiter detection reliably matches `-- ` regardless of how the signature was stored.
 
 ### Draft Auto-Save Logic
 
 - Auto-save fires every 30 seconds.
 - **Forward exception:** `POST /api/v1/drafts` is called immediately at form-open time for Forward (because `source_message_id` for attachment copying is only valid on the initial POST). For Reply, Reply-All, and new compose, the first POST is deferred until the first 30-second tick.
+- **Navigate-away before first tick:** for Reply, Reply-All, and new compose, if the user navigates away before the first 30-second tick fires (i.e. no draft ID exists yet), perform a `POST /api/v1/drafts` immediately — the same request that the first tick would have issued. If this POST fails, show a brief warning but do not block navigation (consistent with the documented failure behaviour for the navigate-away save on subsequent ticks).
 - `PUT /api/v1/drafts/{id}` (JSON endpoint) does not modify attachment rows.
 - `PUT /api/v1/drafts-with-attachments/{id}` replaces attachments wholesale. If no file parts are present, all existing attachments for the draft are deleted — an empty file-parts list is a valid way to clear all attachments.
 - To remove individual attachments, call `DELETE /api/v1/drafts/{id}/attachments/{attachment_id}`.
 - On every PUT, the server resolves `identity_id` to its `address` and updates both the `identity_id` column and `from_addr` in the `messages` row. If `identity_id` is absent in the PUT body, `identity_id` is set to NULL and `from_addr` is set to the default identity's address. This keeps the Drafts message list accurate when the user changes the From identity. On POST (new draft), `identity_id` is stored directly from the request body (or NULL if absent), and `from_addr` is set to the specified identity's address, or to the default identity's address when `identity_id` is absent — mirroring the PUT rule. A 500 is returned when no default identity exists, which would indicate a database integrity violation. If `identity_id` is supplied but does not match any existing identity row, the server returns 400 with `{"error": "identity not found"}`; this applies to both `POST /drafts` and `PUT /drafts/{id}`.
+- **No-identities-at-all case (first-run state):** when no identity rows exist in the database and `identity_id` is absent from the request body, `identity_id` is stored as NULL and `from_addr` is stored as empty string; 201 (or 200 for PUT) is returned without error. This allows drafts to be saved before any identity has been created.
 
 ### Draft Folder Check (`PUT`, `DELETE`, `POST .../send` on `/api/v1/drafts/{id}`)
 
@@ -883,6 +893,15 @@ All three handlers (`PUT /api/v1/drafts/{id}`, `DELETE /api/v1/drafts/{id}`, and
    - **Scheduled** when `send_at` is non-null AND `send_at > now + 60 seconds`. Insert the message and attachments into the Scheduled folder (do not call sendmail), then delete the draft. Return 202.
    - **Immediate** in every other case (`send_at` is null, in the past, equal to now, or within the next 60 seconds). Run the standard outgoing mail pipeline (sanitize body_html, construct MIME message with all attachments, pipe to sendmail). On sendmail failure: return 500 with the error; draft is preserved unchanged. On success: insert the sent message and its attachments into the Sent folder, then delete the draft row (attachments cascade-delete).
 6. Upsert recipients (To/Cc/Bcc) into the contacts table on immediate send only. For scheduled sends (`send_at > now + 60s`), skip the upsert here; the scheduler performs it when it actually calls `sendmail`. This rule applies identically to `POST /messages/send`, `POST /messages/send-with-attachments`, and `POST /drafts/{id}/send`.
+
+### Direct Send Logic (`POST /api/v1/messages/send` and `POST /api/v1/messages/send-with-attachments`)
+
+These endpoints follow the same pipeline as Send Draft Logic, applied directly to the request body:
+
+1. Validate: at least one of `to_addr`, `cc_addr`, `bcc_addr` must be non-empty. Return 400 otherwise.
+2. Resolve the identity: if `identity_id` is supplied in the request body, look it up; if no identity with that ID exists, return `400 {"error": "identity not found"}`. If `identity_id` is absent, use the default identity. If no identities exist at all, return `400 {"error": "no identity configured; create one in Settings → Identities first"}`.
+3. Determine mode from `send_at` and execute the same Scheduled vs. Immediate logic described in Send Draft Logic.
+4. Upsert recipients on immediate send only (same rule as Send Draft Logic).
 
 ### Mark All As Read
 
