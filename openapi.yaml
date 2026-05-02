@@ -992,10 +992,10 @@ paths:
         and managed only via the `/drafts` endpoints. Use the dedicated snooze and scheduled
         endpoints for Snoozed/Scheduled.
 
-        When `folder_id` is set to 4 (Trash), `snoozed_until`, `snooze_folder`, and `send_at` are
-        cleared in the same UPDATE to prevent the background scheduler from acting on a message
-        that is now in Trash. `send_failure_count` and `send_error` are preserved; the UI must
-        suppress the send-failure badge when `folder_id = 4`.
+        When `folder_id` is set to 4 (Trash) or 7 (Junk), `snoozed_until`, `snooze_folder`, and
+        `send_at` are cleared in the same UPDATE to prevent the background scheduler from acting on
+        a message that is now in Trash or Junk. `send_failure_count` and `send_error` are preserved;
+        the UI must suppress the send-failure badge when `folder_id = 4`.
 
         An empty body (`{}`) is valid and returns 200 as a no-op.
 
@@ -1034,6 +1034,10 @@ paths:
       summary: Delete message
       description: |
         If in Trash (id=4) or Junk (id=7), permanently deletes immediately. Otherwise, moves to Trash.
+        Messages currently in Scheduled (5), Snoozed (6), or Drafts (3) may not be deleted via
+        this endpoint — they are rejected with 400. Use the dedicated endpoints to cancel
+        a schedule (`DELETE /messages/{id}/scheduled`), cancel a snooze (`DELETE /messages/{id}/snooze`),
+        or delete a draft (`DELETE /drafts/{id}`).
         When moving to Trash, `snoozed_until`, `snooze_folder`, and `send_at` are cleared in the
         same UPDATE to prevent the background scheduler from acting on a message that is now in Trash.
         `send_failure_count` and `send_error` are preserved in Trash; the UI must suppress the
@@ -1101,6 +1105,9 @@ paths:
         Same semantics as single delete: messages in Trash (id=4) or Junk (id=7) are permanently
         deleted immediately; all other messages are moved to Trash. Returns `moved_to_trash` and
         `permanently_deleted` counts consistent with `DELETE /folders/{folder_id}/messages`.
+        Messages currently in Scheduled (5), Snoozed (6), or Drafts (3) may not be deleted via
+        this endpoint — they are rejected with 400 (the entire request is rejected; no changes are
+        made). Use the dedicated endpoints to cancel a schedule, cancel a snooze, or delete a draft.
         When moving messages to Trash, `snoozed_until`, `snooze_folder`, and `send_at` are cleared
         in the same UPDATE to prevent the background scheduler from acting on messages now in Trash.
         `send_failure_count` and `send_error` are preserved in Trash; the UI must suppress the
@@ -1351,8 +1358,8 @@ paths:
         Cancel a snooze early, returning the message to its original folder immediately.
         Returns 400 when the message is not currently in the Snoozed folder (id=6); the check
         is based on the current `folder_id`, not on the stored `snoozed_until` timestamp.
-        On success, `snoozed_until` and `snooze_folder` are cleared in the database, matching
-        the clearing behaviour of folder deletion and snooze-expiry processing by the scheduler.
+        On success, `snoozed_until` and `snooze_folder` are cleared and the message is marked
+        unread (`read = 0`) — matching the behaviour of natural snooze expiry by the scheduler.
 
         If `snooze_folder` is null (because the original folder was deleted after the snooze was
         set, or because it was never recorded), the message is returned to Inbox (id=1) via the
@@ -1996,7 +2003,10 @@ paths:
   /identities/{id}:
     put:
       summary: Replace identity
-      description: Replace an identity entirely. Same validation as POST.
+      description: |
+        Replace an identity entirely. Same validation as POST. When the identity's `address`
+        changes, all drafts referencing this identity have their `from_addr` updated to the
+        new address in the same transaction, preventing stale sender addresses in the Drafts list.
       parameters:
         - name: id
           in: path

@@ -465,6 +465,12 @@ UPDATE messages SET from_addr = '' WHERE identity_id IS NULL AND folder_id = 3 A
 ```
 binding `?` to the deleted identity's `address`. This clears `from_addr` only on draft rows whose `from_addr` matches the deleted address, regardless of how `identity_id` was stored (the FK cascade has already set `identity_id = NULL` for all drafts that referenced this identity). Drafts with a different `from_addr` are left unchanged.
 
+**Identity address-change cleanup:** When `PUT /identities/{id}` is processed and the identity's `address` changes, the handler must also update `from_addr` on drafts that reference this identity:
+```sql
+UPDATE messages SET from_addr = ? WHERE identity_id = ? AND folder_id = 3
+```
+binding the new address and the identity id. This keeps draft `from_addr` values consistent until the next draft auto-save re-resolves the identity. If the address is unchanged, this UPDATE is a no-op and may be skipped.
+
 ### `contacts`
 
 ```sql
@@ -671,12 +677,13 @@ SET folder_id = COALESCE(snooze_folder, 1),
 WHERE id = ? AND folder_id = 6
 ```
 
-**Cancel-snooze handler (`DELETE /messages/{id}/snooze`):** Must return the message to `COALESCE(snooze_folder, 1)` (same fallback as the scheduler) and clear both `snoozed_until` and `snooze_folder` in a single UPDATE. The `folder_id` returned in the response must reflect the actual folder the message was moved to (the result of the COALESCE), not always a hard-coded value:
+**Cancel-snooze handler (`DELETE /messages/{id}/snooze`):** Must return the message to `COALESCE(snooze_folder, 1)` (same fallback as the scheduler), clear both `snoozed_until` and `snooze_folder`, and mark the message unread — all in a single UPDATE. Marking unread matches natural snooze expiry so the message reappears as new in the destination folder regardless of how the snooze ended. The `folder_id` returned in the response must reflect the actual folder the message was moved to (the result of the COALESCE), not always a hard-coded value:
 ```sql
 UPDATE messages
 SET folder_id = COALESCE(snooze_folder, 1),
     snoozed_until = NULL,
-    snooze_folder = NULL
+    snooze_folder = NULL,
+    read = 0
 WHERE id = ? AND folder_id = 6
 ```
 Return 400 if the message is not currently in the Snoozed folder (i.e. the UPDATE affects 0 rows after confirming the message exists).
