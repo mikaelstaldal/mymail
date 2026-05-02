@@ -778,8 +778,9 @@ paths:
         pass the corresponding `folder_id`.
 
         Returns 400 with `{"error": "q must contain at least one non-whitespace character"}` when
-        `q` is empty (`q=`) or contains only ASCII whitespace after trimming. Match-all is not
-        supported via this endpoint — list a folder via `GET /folders/{folder_id}/messages` instead.
+        `q` is empty (`q=`) or contains only whitespace after trimming. Whitespace trimming uses
+        Unicode rules (`strings.TrimSpace`). Match-all is not supported via this endpoint — list a
+        folder via `GET /folders/{folder_id}/messages` instead.
       parameters:
         - name: q
           in: query
@@ -1006,7 +1007,7 @@ paths:
     delete:
       summary: Delete message
       description: |
-        If not in Trash, moves to Trash. If already in Trash, permanently deletes.
+        If in Trash (id=4) or Junk (id=7), permanently deletes immediately. Otherwise, moves to Trash.
         When moving to Trash, `snoozed_until`, `snooze_folder`, and `send_at` are cleared in the
         same UPDATE to prevent the background scheduler from acting on a message that is now in Trash.
         `send_failure_count` and `send_error` are preserved in Trash; the UI must suppress the
@@ -1071,9 +1072,9 @@ paths:
     delete:
       summary: Bulk delete messages
       description: |
-        Same two-step semantics as single delete: messages not in Trash are moved to Trash; messages
-        already in Trash are permanently deleted. Returns `moved_to_trash` and `permanently_deleted`
-        counts consistent with `DELETE /folders/{folder_id}/messages`.
+        Same semantics as single delete: messages in Trash (id=4) or Junk (id=7) are permanently
+        deleted immediately; all other messages are moved to Trash. Returns `moved_to_trash` and
+        `permanently_deleted` counts consistent with `DELETE /folders/{folder_id}/messages`.
         When moving messages to Trash, `snoozed_until`, `snooze_folder`, and `send_at` are cleared
         in the same UPDATE to prevent the background scheduler from acting on messages now in Trash.
         `send_failure_count` and `send_error` are preserved in Trash; the UI must suppress the

@@ -83,7 +83,7 @@ The full REST API contract is in `openapi.yaml`. Use ogen to generate Go server 
 - **Identity `address` and contact `address`** (create/update): call `net/mail.ParseAddress(input)`. Accept only when the returned `Address.Name` is empty — a bare addr-spec like `user@example.com` is valid; a display-name form like `"John Doe <john@example.com>"` is rejected with 400.
 - **`to_addr`, `cc_addr`, `bcc_addr`, `reply_to_addr`** in `SendRequest` and `DraftRequest`: these fields carry comma-separated address lists as they appear in email headers. When non-empty, parse with `net/mail.ParseAddressList(input)` and verify that every parsed address has a non-empty `.Address` field. An unparseable list returns 400. Empty strings are always accepted (constraints on which fields must be non-empty are validated separately).
 
-**Whitespace trimming:** Leading and trailing whitespace is trimmed from folder names, filter names, contact names, and identity names before validation and storage.
+**Whitespace trimming:** Leading and trailing Unicode whitespace (using `strings.TrimSpace`) is trimmed from folder names, filter names, contact names, identity names, and the search `q` parameter before validation and storage.
 
 **Position default (append semantics):** When `position` is omitted from `POST /folders`, `POST /filters`, or `POST /identities`, the server sets `position = COALESCE(MAX(position), -1) + 1` within the relevant table, placing the new entity at the end of the ordered list. This query must be executed inside the same transaction as the INSERT.
 
