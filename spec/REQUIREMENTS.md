@@ -15,6 +15,31 @@ mymail stores, organizes, and presents email. It does **not** speak IMAP/POP3 or
 
 ## Operational Modes
 
+### Init mode (`-init`)
+
+```
+mymail -init -data <dir> [-identity-name <name>] [-identity-address <address>]
+```
+
+Initializes a fresh installation:
+- Creates the data directory if it does not exist (mode `0700`).
+- Creates the SQLite database file (mode `0600`).
+- Sets `PRAGMA journal_mode=WAL`.
+- Applies the initial schema (all `CREATE TABLE`, `CREATE INDEX`, `CREATE TRIGGER`, `CREATE VIRTUAL TABLE` statements).
+- Sets `PRAGMA user_version` to the current schema version.
+- Seeds the database with the seven built-in folders.
+- Seeds the spam filter settings row.
+- `-identity-address` is mandatory, it creates an initial identity with that address and the given name (defaults to empty string if `-identity-name` is omitted) and marks it as default.
+- Exits `0` on success, `1` on any error.
+
+| Flag                 | Default | Description                                    |
+|----------------------|---------|------------------------------------------------|
+| `-data`              | `data/` | Data directory (stores the database)           |
+| `-identity-address`  |         | Email address for the initial identity (RFC 5322 addr-spec) |
+| `-identity-name`     | ``      | Display name for the initial identity          |
+
+The server, LDA, and import modes require the database to already exist (created by `mymail -init`). They exit with a fatal error if the database file is absent.
+
 ### Server mode (default)
 
 Starts an HTTP server that serves the REST API and the embedded web UI.
@@ -34,7 +59,8 @@ At startup the server resolves the configured sendmail binary (using `PATH` look
 >
 > **TLS and reverse proxy note:** mymail does not terminate TLS itself. For any deployment that is not loopback-only, place mymail behind a TLS-terminating reverse proxy. HTTP Basic Auth must not be used over plain HTTP on a non-loopback interface. Rate limiting is also the responsibility of the reverse proxy layer.
 
-Identities are managed entirely through the REST API and the web UI. The initial identity can optionally be created at init time via `-identity-address` (see Init mode). The server assumes at least one identity exists at all times once the initial identity is created. `POST /api/v1/drafts` and `POST /api/v1/drafts-with-attachments` are permitted with no identities (see First-Run Behaviour); in that case `from_addr` is stored as empty string and `identity_id` as NULL. Other operations that require a default identity return 500 only if identities exist but none is marked as default — an internal data-integrity violation that should never occur under normal operation.
+Identities are managed entirely through the REST API and the web UI. The initial identity is created at init time via `-identity-address` (see Init mode). 
+The server assumes that exactly one identity marked as default exists at all times, operations that require a default identity return 500 otherwise — an internal data-integrity violation that should never occur under normal operation.
 
 ### LDA mode (`-lda`)
 
@@ -50,31 +76,6 @@ Exit codes follow standard LDA conventions:
 - `0` — success
 - `1` — permanent failure (message will bounce)
 - `75` — temporary failure (MTA will retry; used e.g. if database is locked)
-
-### Init mode (`-init`)
-
-```
-mymail -init -data <dir> [-identity-name <name>] [-identity-address <address>]
-```
-
-Initializes a fresh installation:
-- Creates the data directory if it does not exist (mode `0700`).
-- Creates the SQLite database file (mode `0600`).
-- Sets `PRAGMA journal_mode=WAL`.
-- Applies the initial schema (all `CREATE TABLE`, `CREATE INDEX`, `CREATE TRIGGER`, `CREATE VIRTUAL TABLE` statements).
-- Sets `PRAGMA user_version` to the current schema version.
-- Seeds the database with the seven built-in folders.
-- Seeds the spam filter settings row.
-- If `-identity-address` is supplied, creates an initial identity with that address and the given name (defaults to empty string if `-identity-name` is omitted) and marks it as default.
-- Exits `0` on success, `1` on any error.
-
-| Flag                 | Default | Description                                    |
-|----------------------|---------|------------------------------------------------|
-| `-data`              | `data/` | Data directory (stores the database)           |
-| `-identity-name`     | ``      | Display name for the initial identity          |
-| `-identity-address`  | ``      | Email address for the initial identity (RFC 5322 addr-spec); if set, creates the identity |
-
-The server, LDA, and import modes require the database to already exist (created by `mymail -init`). They exit with a fatal error if the database file is absent.
 
 ### Import mode (`-import`)
 
@@ -167,14 +168,13 @@ Each identity has:
 
 **Constraints:**
 - At least one identity must exist at all times.
-- Exactly one identity has the default flag. When a new default is set, all others are cleared. When the default is deleted, the identity with the lowest position (then lowest id) becomes the new default.
+- Exactly one identity has the default flag. When a new default is set, all others are cleared. When the default is deleted, the identity with the lowest position (then lowest id) becomes the new default. Deleting the last identity is not allowed.
 
 **Identity matching for Reply / Reply All:**
 The compose pre-population logic (see Web UI → Compose) selects the From identity by:
 1. Building the candidate set: every addr-spec that appears in the original message's `To` and `Cc` headers (parsed with `net/mail` — group syntax flattened, comments stripped, addr-spec only). Casefold each candidate using Unicode simple casefolding.
 2. Iterating identities in `position ASC, id ASC` order. The first identity whose casefolded address matches any candidate is selected.
 3. If no identity matches, the default identity is used.
-4. If no identities exist, the compose form is unavailable (see Web UI → First-Run Behaviour).
 
 ### Contacts
 
@@ -531,17 +531,6 @@ On first load the UI reads `localStorage` for the last selected folder and navig
 
 11. **Preferences** — Client-side display preferences: dark mode toggle, message list density (Compact/Normal/Relaxed), default body view (HTML/Plain text), browser notifications toggle.
 
-### First-Run Behaviour
-
-A fresh install has no identities. The constraint "at least one identity must exist at all times" is enforced once the first identity is created; until then the UI and API behave as follows:
-
-- On any UI navigation (any hash route), if `GET /api/v1/identities` returns `total: 0` the UI immediately replaces the current route with `/#/settings/identities` and shows an inline banner explaining that an identity must be created before mail can be composed or sent. The banner remains until at least one identity exists. Other settings tabs and read-only views (folder lists, message detail, search) remain navigable but the **Compose** button in the sidebar is disabled and shows a tooltip referring the user to the identities tab.
-- The **Reply / Reply All / Forward** buttons in message detail are likewise disabled while no identity exists.
-- `POST /api/v1/messages/send`, `POST /api/v1/messages/send-with-attachments`, and `POST /api/v1/drafts/{id}/send` return `400` with `{"error": "no identity configured; create one in Settings → Identities first"}` when called with no identities present and no `identity_id` supplied (or with an `identity_id` that does not resolve).
-- `POST /api/v1/drafts` and `POST /api/v1/drafts-with-attachments` are permitted with no identities so that a partially composed message is not lost when the user navigates away — but the draft cannot be sent until an identity exists.
-
-The first identity created is automatically marked as default; the "exactly one default" invariant takes effect from that point on.
-
 ### Settings Navigation
 
 A gear icon in the sidebar footer opens `/#/settings`. The page uses a tabbed layout:
@@ -569,6 +558,7 @@ All timestamps displayed in the browser's local timezone. Display format is adap
 | Previous years         | Short date with year         | "Apr 3, 2023"      |
 
 Message detail always shows the full "Apr 3, 14:32 CEST" form with timezone abbreviation.
+Simple timestamps have a tooltip with the full form. 
 
 ### Error Handling UX
 
