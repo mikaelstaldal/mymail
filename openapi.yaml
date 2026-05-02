@@ -11,6 +11,9 @@ info:
 
     **Error responses** use the schema `{"error": "human-readable message"}` with status
     `400`, `401`, `404`, `409`, or `500`.
+
+    **Request body size limit:** 32 MiB, applied to the entire encoded request body. For
+    `multipart/form-data` endpoints, this limit covers all parts combined (not per-part).
   version: 1.0.0
 
 servers:
@@ -228,6 +231,11 @@ components:
           type: array
           items:
             type: string
+          description: |
+            Threading Reference IDs. Elements may include or omit angle brackets
+            (e.g. `<id@domain>` or `id@domain`); the server strips surrounding angle brackets
+            before storage. When reading back via `MessageDetail.references`, elements always
+            include angle brackets (e.g. `<id@domain>`).
         send_at:
           type: string
           format: date-time
@@ -256,9 +264,13 @@ components:
           type: integer
           description: |
             If absent, `identity_id` is stored as NULL and `from_addr` is set to the current
-            default identity's address. If present, `from_addr` is set to the specified
-            identity's address. If no default identity exists when `identity_id` is absent,
-            the server returns 500 (malconfigured server — at least one identity must exist).
+            default identity's address. If no identities exist at all (first-run state),
+            `from_addr` is stored as empty string and 201 is returned — drafts may be saved
+            before any identity exists. If present, `from_addr` is set to the specified
+            identity's address. If the supplied `identity_id` does not match any existing
+            identity, the server returns 400 with `{"error": "identity not found"}`.
+            A 500 is returned only if identities exist but none is marked as default
+            (database integrity violation).
         to_addr:
           type: string
           maxLength: 8192
@@ -283,6 +295,11 @@ components:
           type: array
           items:
             type: string
+          description: |
+            Threading Reference IDs. Elements may include or omit angle brackets
+            (e.g. `<id@domain>` or `id@domain`); the server strips surrounding angle brackets
+            before storage. When reading back via `MessageDetail.references`, elements always
+            include angle brackets (e.g. `<id@domain>`).
         send_at:
           type: string
           format: date-time
@@ -950,7 +967,8 @@ paths:
 
         When `folder_id` is set to 4 (Trash), `snoozed_until`, `snooze_folder`, and `send_at` are
         cleared in the same UPDATE to prevent the background scheduler from acting on a message
-        that is now in Trash.
+        that is now in Trash. `send_failure_count` and `send_error` are preserved; the UI must
+        suppress the send-failure badge when `folder_id = 4`.
 
         An empty body (`{}`) is valid and returns 200 as a no-op.
       parameters:
@@ -989,6 +1007,8 @@ paths:
         If not in Trash, moves to Trash. If already in Trash, permanently deletes.
         When moving to Trash, `snoozed_until`, `snooze_folder`, and `send_at` are cleared in the
         same UPDATE to prevent the background scheduler from acting on a message that is now in Trash.
+        `send_failure_count` and `send_error` are preserved in Trash; the UI must suppress the
+        send-failure badge when `folder_id = 4`.
       parameters:
         - name: id
           in: path
@@ -1054,6 +1074,8 @@ paths:
         counts consistent with `DELETE /folders/{folder_id}/messages`.
         When moving messages to Trash, `snoozed_until`, `snooze_folder`, and `send_at` are cleared
         in the same UPDATE to prevent the background scheduler from acting on messages now in Trash.
+        `send_failure_count` and `send_error` are preserved in Trash; the UI must suppress the
+        send-failure badge when `folder_id = 4`.
         Returns 404 if any of the provided IDs does not exist; no changes are made in that case.
         Returns 400 if more than 1000 IDs are supplied (the `maxItems: 1000` constraint on the `ids`
         array is the enforced limit); no changes are made in that case.
@@ -1109,7 +1131,8 @@ paths:
         no SQL is issued.
         When `folder_id` is set to 4 (Trash), `snoozed_until`, `snooze_folder`, and `send_at` are
         cleared in the same UPDATE to prevent the background scheduler from acting on messages
-        now in Trash.
+        now in Trash. `send_failure_count` and `send_error` are preserved; the UI must suppress
+        the send-failure badge when `folder_id = 4`.
       requestBody:
         required: true
         content:
@@ -1338,7 +1361,9 @@ paths:
         message is currently in the Junk folder (id=7), the Drafts folder (id=3), the Scheduled
         folder (id=5), or the Snoozed folder (id=6). Drafts are managed exclusively via the
         `/drafts` endpoints. The schedule or snooze must be cancelled before marking as junk.
-        These checks are based on the current folder_id, not historical state.
+        These checks are based on the current folder_id, not historical state. Marking a
+        message in the Trash (id=4) or Sent (id=2) folder as junk is **permitted** — no 400 is
+        returned for those source folders.
       parameters:
         - name: id
           in: path
@@ -1503,7 +1528,12 @@ paths:
   /drafts-with-attachments:
     post:
       summary: Save new draft with attachments
-      description: Same as POST /drafts but uses multipart/form-data.
+      description: |
+        Same as POST /drafts but uses multipart/form-data. When both `source_message_id`
+        (in the `DraftRequest` JSON part) and file upload parts are supplied simultaneously,
+        both are applied: the source message's attachments are copied server-side **and** the
+        uploaded file parts are stored. The resulting draft will contain attachments from both
+        sources.
       requestBody:
         required: true
         content:
@@ -2087,9 +2117,10 @@ paths:
     put:
       summary: Replace contact
       description: |
-        Replace a contact entirely. The `address` is stored in Unicode-simple-casefolded form
-        before the uniqueness check. Returns 409 if the new address conflicts with a different
-        existing contact.
+        Replace a contact entirely. **PUT replacement semantics:** any field omitted from the
+        request body is cleared — omitting `name` sets it to empty string. The `address` is
+        stored in Unicode-simple-casefolded form before the uniqueness check. Returns 409 if
+        the new address conflicts with a different existing contact.
       parameters:
         - name: id
           in: path

@@ -50,13 +50,15 @@ require (
 
 The full REST API contract is in `openapi.yaml`. Use ogen to generate Go server stubs from it.
 
+**Route priority:** ogen's generated router (backed by chi) gives static path segments priority over path parameters. `PATCH /folders/reorder` matches as a static route before `PATCH /folders/{id}` would match with `{id}="reorder"`, and identically for `/filters/reorder` and `/identities/reorder`. No additional router configuration is required — chi's default behaviour is correct for this API.
+
 **Base path:** `/api/v1`
 
 **Content type:** `application/json` for all request/response bodies except attachment downloads.
 
 **Error responses:** `{ "error": "human-readable message" }` with status `400`, `401`, `404`, `409`, or `500`.
 
-**Max request body:** 32 MiB.
+**Max request body:** 32 MiB. This limit applies to the entire encoded request body, including all parts of a `multipart/form-data` request combined.
 
 **Entity counts:** The number of user-defined folders, filters, identities, and contacts is unbounded at the API level. No 400 is returned for exceeding any count; growth is bounded only by SQLite file size and available disk space.
 
@@ -360,7 +362,7 @@ CREATE INDEX IF NOT EXISTS idx_messages_read         ON messages(read);
 CREATE INDEX IF NOT EXISTS idx_messages_send_at      ON messages(send_at) WHERE send_at IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_messages_snoozed_until ON messages(snoozed_until) WHERE snoozed_until IS NOT NULL;
 
-CREATE TRIGGER IF NOT EXISTS messages_updated_at AFTER UPDATE ON messages BEGIN
+CREATE TRIGGER IF NOT EXISTS messages_updated_at AFTER UPDATE ON messages WHEN new.updated_at = old.updated_at BEGIN
     UPDATE messages SET updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now') WHERE id = new.id;
 END;
 
@@ -374,7 +376,7 @@ CREATE TRIGGER IF NOT EXISTS attachments_delete_flag AFTER DELETE ON attachments
 END;
 ```
 
-The API exposes `send_failure_count > 0` as the boolean `send_failed`; the raw count is not exposed.
+The API exposes `send_failure_count > 0` as the boolean `send_failed`; the raw count is not exposed. `send_failure_count` and `send_error` are intentionally not cleared when a message is moved to Trash; the UI must suppress the `send_failed` badge when the message is in Trash (`folder_id = 4`).
 
 ### `messages_fts` (FTS5)
 
@@ -390,7 +392,7 @@ CREATE VIRTUAL TABLE IF NOT EXISTS messages_fts USING fts5(
 );
 ```
 
-Content table: tokens stored in FTS index, row content in `messages`. `body_html` is not indexed directly; `body_text` is derived from sanitized HTML when no plain-text part is present, so all content is searchable. Content removed by the sanitizer (e.g. `<script>` text) is intentionally not indexed.
+Content table: tokens stored in FTS index, row content in `messages`. `body_html` is not indexed directly; `body_text` is derived from sanitized HTML when no plain-text part is present, so all content is searchable. Content removed by the sanitizer (e.g. `<script>` text) is intentionally not indexed. `bcc_addr` and `reply_to_addr` are intentionally excluded from the index: BCC data is private recipient metadata (including it would expose BCC relationships via search), and `reply_to_addr` is rarely a meaningful search target.
 
 Maintained by triggers:
 
@@ -443,6 +445,12 @@ CREATE TABLE IF NOT EXISTS identities (
 
 The "exactly one default" invariant and address validation are enforced in the service layer (not as SQL constraints) for human-readable error messages. Because SQLite serializes all write operations, concurrent identity deletions are naturally serialized: if two DELETE requests arrive concurrently, only one finds the count > 1; the other returns 400. Position values need not be contiguous; gaps are allowed. The server sorts by `position ASC, id ASC`. The reorder endpoint assigns contiguous 0-based positions for convenience, but direct position assignment via POST/PUT may use arbitrary non-negative integers.
 
+**Identity deletion cleanup:** When `DELETE /identities/{id}` is processed, after the identity row is deleted (which sets `messages.identity_id = NULL` via the `ON DELETE SET NULL` foreign key), the handler must also issue:
+```sql
+UPDATE messages SET from_addr = '' WHERE identity_id IS NULL AND folder_id = 3
+```
+This clears `from_addr` on any draft rows whose identity was just deleted, preventing a stale sender address from appearing in the draft list.
+
 ### `contacts`
 
 ```sql
@@ -459,16 +467,16 @@ CREATE INDEX IF NOT EXISTS idx_contacts_address ON contacts(address);
 
 **Contact list ordering SQL:**
 ```sql
-ORDER BY CASE WHEN name = '' THEN 1 ELSE 0 END, name, address
+ORDER BY CASE WHEN name = '' THEN 1 ELSE 0 END, LOWER(name), LOWER(address)
 ```
-This places empty-name contacts after named contacts, with named contacts sorted case-sensitively by name, then by address for ties.
+This places empty-name contacts after named contacts, with named contacts sorted case-insensitively by name, then case-insensitively by address for ties.
 
 **Contact autocomplete SQL** (when the `q` query parameter is supplied):
 ```sql
 SELECT * FROM contacts
 WHERE LOWER(name) LIKE '%' || LOWER(?) || '%'
    OR LOWER(address) LIKE '%' || LOWER(?) || '%'
-ORDER BY CASE WHEN name = '' THEN 1 ELSE 0 END, name, address
+ORDER BY CASE WHEN name = '' THEN 1 ELSE 0 END, LOWER(name), LOWER(address)
 LIMIT ? OFFSET ?
 ```
 The `q` value is bound twice — once for the name match, once for the address match. When `q` is absent, the WHERE clause is omitted. The total count for pagination uses the same filter:
@@ -800,7 +808,7 @@ Delimiter detection runs before HTML escaping so the literal `-- ` characters ar
 - `PUT /api/v1/drafts/{id}` (JSON endpoint) does not modify attachment rows.
 - `PUT /api/v1/drafts-with-attachments/{id}` replaces attachments wholesale.
 - To remove individual attachments, call `DELETE /api/v1/drafts/{id}/attachments/{attachment_id}`.
-- On every PUT, the server resolves `identity_id` to its `address` and updates both the `identity_id` column and `from_addr` in the `messages` row. If `identity_id` is absent in the PUT body, `identity_id` is set to NULL and `from_addr` is set to the default identity's address. This keeps the Drafts message list accurate when the user changes the From identity. On POST (new draft), `identity_id` is stored directly from the request body (or NULL if absent), and `from_addr` is set to the specified identity's address, or to the default identity's address when `identity_id` is absent — mirroring the PUT rule. If no identities exist when the default identity is needed (i.e. `identity_id` is absent and there is no default), the server returns 500 with `{"error": "no identity configured"}` and `from_addr` is set to empty string — this is a malconfigured-server condition.
+- On every PUT, the server resolves `identity_id` to its `address` and updates both the `identity_id` column and `from_addr` in the `messages` row. If `identity_id` is absent in the PUT body, `identity_id` is set to NULL and `from_addr` is set to the default identity's address. This keeps the Drafts message list accurate when the user changes the From identity. On POST (new draft), `identity_id` is stored directly from the request body (or NULL if absent), and `from_addr` is set to the specified identity's address, or to the default identity's address when `identity_id` is absent — mirroring the PUT rule. If `identity_id` is absent and no identities exist at all, `identity_id` is stored as NULL and `from_addr` as empty string, and 201 is returned — this allows a draft to be saved during first-run before any identity is created (see REQUIREMENTS.md → First-Run Behaviour). A 500 is returned only when identities exist but none is marked as default, which would indicate a database integrity violation. If `identity_id` is supplied but does not match any existing identity row, the server returns 400 with `{"error": "identity not found"}`; this applies to both `POST /drafts` and `PUT /drafts/{id}`.
 
 ### Send Draft Logic (`POST /api/v1/drafts/{id}/send`)
 

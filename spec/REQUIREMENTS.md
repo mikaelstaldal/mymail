@@ -34,7 +34,7 @@ At startup the server resolves the configured sendmail binary (using `PATH` look
 >
 > **TLS and reverse proxy note:** mymail does not terminate TLS itself. For any deployment that is not loopback-only, place mymail behind a TLS-terminating reverse proxy. HTTP Basic Auth must not be used over plain HTTP on a non-loopback interface. Rate limiting is also the responsibility of the reverse proxy layer.
 
-Identities are managed entirely through the REST API and the web UI. The initial identity can optionally be created at init time via `-identity-address` (see Init mode). The server assumes at least one identity exists at all times; operations that require a default identity (draft save without `identity_id`) return 500 if none is configured.
+Identities are managed entirely through the REST API and the web UI. The initial identity can optionally be created at init time via `-identity-address` (see Init mode). The server assumes at least one identity exists at all times once the initial identity is created. `POST /api/v1/drafts` and `POST /api/v1/drafts-with-attachments` are permitted with no identities (see First-Run Behaviour); in that case `from_addr` is stored as empty string and `identity_id` as NULL. Other operations that require a default identity return 500 only if identities exist but none is marked as default — an internal data-integrity violation that should never occur under normal operation.
 
 ### LDA mode (`-lda`)
 
