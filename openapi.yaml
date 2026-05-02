@@ -971,6 +971,8 @@ paths:
         suppress the send-failure badge when `folder_id = 4`.
 
         An empty body (`{}`) is valid and returns 200 as a no-op.
+
+        **Moving to Junk via PATCH:** Setting `folder_id: 7` moves the message to Junk but does **not** automatically mark it as read. To get the full "mark as junk" semantics (move to Junk + mark read), use `POST /messages/{id}/mark-junk` instead. API clients that use PATCH to move to `folder_id: 7` must include `"read": true` explicitly if they want the message marked as read.
       parameters:
         - name: id
           in: path
@@ -1574,6 +1576,8 @@ paths:
         **Attachments are not modified by this endpoint** — existing attachment rows remain unchanged.
         Use `DELETE /drafts/{id}/attachments/{attachment_id}` to remove individual attachments, or
         `PUT /drafts-with-attachments/{id}` to replace all attachments wholesale.
+
+        Returns 404 if the message does not exist or if its `folder_id` is not 3 (Drafts).
       parameters:
         - name: id
           in: path
@@ -1606,7 +1610,9 @@ paths:
           $ref: '#/components/responses/NotFound'
     delete:
       summary: Delete draft
-      description: Permanently delete a draft (no Trash step).
+      description: |
+        Permanently delete a draft (no Trash step).
+        Returns 404 if the message does not exist or if its `folder_id` is not 3 (Drafts).
       parameters:
         - name: id
           in: path

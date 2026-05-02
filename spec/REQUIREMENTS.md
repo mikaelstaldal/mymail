@@ -86,7 +86,7 @@ Each `<mapping>` argument is a colon-separated triplet `<folder>:<format>:<path>
 
 | Part       | Values                                                      | Description                                                          |
 |------------|-------------------------------------------------------------|----------------------------------------------------------------------|
-| `<folder>` | `inbox`, `sent`, `drafts`, `trash`, or any user-folder name | Target folder in mymail. Created automatically if it does not exist. Lookup is by slug for built-in folders (`inbox`, `sent`, `drafts`, `trash`) and by name (case-insensitive) for user-created folders. If the same `<folder>` value appears in multiple mapping triplets, all triplets share the same target folder. |
+| `<folder>` | `inbox`, `sent`, `drafts`, `trash`, `junk`, or any user-folder name | Target folder in mymail. Created automatically if it does not exist. Lookup is by slug for built-in folders (`inbox`, `sent`, `drafts`, `trash`, `junk`) and by name (case-insensitive) for user-created folders. If the same `<folder>` value appears in multiple mapping triplets, all triplets share the same target folder. **`scheduled` and `snoozed` are rejected with an error** — they have semantic fields (`send_at`/`snoozed_until`) that won't be populated by import, making them invalid import targets. |
 | `<format>` | `mbox`, `maildir`                                           | Source format                                                        |
 | `<path>`   | file or directory path                                      | Source mbox file or Maildir root directory                           |
 

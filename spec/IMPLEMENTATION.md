@@ -182,7 +182,7 @@ The full REST API contract is in `openapi.yaml`. Use ogen to generate Go server 
 
 Thread results include messages from all folders, ordered by `date ASC`. **Cap:** Thread results are limited to 1000 messages. If the transitive closure (or subject-based fallback) yields more than 1000 messages, only the 1000 with the earliest `date` are returned and the response includes `truncated: true`. The UI shows a "thread too long" indicator when `truncated` is true.
 
-Messages that initially lacked a `Message-ID` header are assigned a generated ID at storage time. Since external mailers may not reference this generated ID in their `In-Reply-To`/`References` headers, subject-based threading serves as the natural fallback for such messages.
+Messages received via the LDA that lacked a `Message-ID` header are assigned a generated ID at storage time (see LDA Implementation → Message-ID Generation). Messages imported in batch mode may have a NULL `message_id` — import does not generate IDs for messages without a `Message-ID` header. Since external mailers may not reference a generated ID in their `In-Reply-To`/`References` headers, and imported messages may have a NULL `message_id` entirely, subject-based threading serves as the natural fallback for such messages.
 
 **Iterative Go query loop for transitive closure:**
 
@@ -447,9 +447,9 @@ The "exactly one default" invariant and address validation are enforced in the s
 
 **Identity deletion cleanup:** When `DELETE /identities/{id}` is processed, after the identity row is deleted (which sets `messages.identity_id = NULL` via the `ON DELETE SET NULL` foreign key), the handler must also issue:
 ```sql
-UPDATE messages SET from_addr = '' WHERE identity_id IS NULL AND folder_id = 3
+UPDATE messages SET from_addr = '' WHERE identity_id IS NULL AND folder_id = 3 AND from_addr = ?
 ```
-This clears `from_addr` on any draft rows whose identity was just deleted, preventing a stale sender address from appearing in the draft list.
+binding `?` to the deleted identity's `address`. This clears `from_addr` only on draft rows whose identity was just deleted (i.e. whose `from_addr` matches the deleted address), preventing a stale sender address from appearing in the draft list. Drafts that used the default-identity convention (`identity_id IS NULL`) but were associated with a different identity via `from_addr` are left unchanged.
 
 ### `contacts`
 
@@ -563,6 +563,8 @@ SELECT EXISTS(SELECT 1 FROM messages WHERE message_id = ?)
 
 Run before spam detection and filter evaluation. Use `INSERT OR IGNORE` on the `messages` table as a race-safe guard for concurrent LDA processes. Matching is a case-sensitive byte comparison (`=` operator). Messages without a `Message-ID` header have `NULL` stored; since `NULL = NULL` is false in SQL, messages without a Message-ID are never considered duplicates of each other and are always stored.
 
+**Race case exit code:** After the final `INSERT OR IGNORE`, check `changes()` (or the Go driver's `RowsAffected`). If it returns 0, a concurrent LDA process inserted the same message between the initial `SELECT EXISTS` check and the INSERT. This is not an error — the message is already in the database. The LDA must exit 0 in this case (same as a detected duplicate at the `SELECT EXISTS` step).
+
 ### Message-ID Generation in LDA Mode
 
 When an incoming message lacks a `Message-ID` header, generate one as `<uuid@domain>` where `domain` is extracted from the first address in the `To` header. If the `To` header is absent or unparseable, fall back to `localhost`.
@@ -611,6 +613,25 @@ UPDATE messages SET folder_id = 3, send_at = NULL, send_failure_count = send_fai
 WHERE id = ? AND folder_id = 5 AND send_failure_count >= 2
 ```
 
+**Snooze creation handler (`POST /messages/{id}/snooze`):** Two cases must be handled separately to preserve the "original return folder" invariant:
+
+- **First snooze** (message is not currently in Snoozed, i.e. `folder_id ≠ 6`): move the message to Snoozed, set `snoozed_until`, and record the current `folder_id` as `snooze_folder`.
+  ```sql
+  UPDATE messages
+  SET snooze_folder = folder_id,
+      folder_id = 6,
+      snoozed_until = ?
+  WHERE id = ? AND folder_id != 6
+  ```
+- **Re-snooze** (message is already in Snoozed, i.e. `folder_id = 6`): update `snoozed_until` only — do **not** change `snooze_folder`, so the original return folder is preserved across reschedules.
+  ```sql
+  UPDATE messages
+  SET snoozed_until = ?
+  WHERE id = ? AND folder_id = 6
+  ```
+
+Determine which case applies by inspecting the current `folder_id` before issuing the UPDATE (or check `changes()` after the conditional UPDATE). Return 400 if the message's current `folder_id` is one of the forbidden folders (Drafts=3, Sent=2, Trash=4, Junk=7, Scheduled=5).
+
 **Snooze expiry query:**
 ```sql
 SELECT id, snooze_folder FROM messages
@@ -655,7 +676,7 @@ The scheduler holds the SQLite write lock only for the duration of each individu
 ### Implementation Notes
 
 - Open database and run migrations before importing.
-- **Folder resolution:** For each `<folder>` value in the mapping arguments, resolve the target folder as follows: if the value matches a built-in slug (`inbox`, `sent`, `drafts`, `trash`) case-sensitively, use that built-in folder; otherwise, search user-created folders by name using a case-insensitive match (`LOWER(name) = LOWER(?)`). If no match is found, create a new user-created folder with that value as its name (applying the standard slug-generation algorithm). If the same `<folder>` value appears in multiple mapping triplets, all triplets share the single resolved/created folder — no attempt is made to create the folder twice.
+- **Folder resolution:** For each `<folder>` value in the mapping arguments, resolve the target folder as follows: if the value matches a built-in slug (`inbox`, `sent`, `drafts`, `trash`, `junk`) case-sensitively, use that built-in folder. If the value is `scheduled` or `snoozed`, exit with code 1 and an error message (these folders have semantic fields that import cannot populate). Otherwise, search user-created folders by name using a case-insensitive match (`LOWER(name) = LOWER(?)`). If no match is found, create a new user-created folder with that value as its name (applying the standard slug-generation algorithm). If the same `<folder>` value appears in multiple mapping triplets, all triplets share the single resolved/created folder — no attempt is made to create the folder twice.
 - Use batched transactions: commit every 500 messages to bound WAL file size. If a batch fails, only that batch is rolled back; previously committed batches are retained. There is no way to identify which individual messages were committed after a partial failure — re-run the full import after fixing the source data (duplicate detection will skip already-imported messages).
 - Run the full LDA parsing pipeline (HTML sanitization, `cid:` resolution, `body_text` derivation, `has_external_images` computation, attachment extraction) for each message. Skip only spam detection and filter application.
 - Upsert the `From` address of each successfully imported message into the contacts table using the same upsert logic as the LDA (update name only when the stored name is empty).
@@ -719,6 +740,8 @@ cfg.Sendmail = path // store the resolved absolute path
 ### Outgoing HTML Sanitization
 
 Sanitize `body_html` using the standard email HTML sanitization policy before constructing the MIME message and before storing the message in the Sent folder. This applies to all outgoing HTML content regardless of source (composed, quoted, or forwarded). Client-side sanitization by the rich-text editor is defence in depth only; server-side sanitization is authoritative.
+
+**`has_external_images` for outgoing messages:** After sanitizing `body_html`, compute the `has_external_images` flag using the same algorithm as the LDA and import pipelines (see `has_external_images` Computation below) before storing the message in the Sent folder. The same computation applies when storing a message in the Scheduled folder (deferred send) — the flag is computed at schedule-creation time so message list and detail responses are accurate before the message is actually sent.
 
 ### Bcc Handling
 
@@ -809,6 +832,10 @@ Delimiter detection runs before HTML escaping so the literal `-- ` characters ar
 - `PUT /api/v1/drafts-with-attachments/{id}` replaces attachments wholesale.
 - To remove individual attachments, call `DELETE /api/v1/drafts/{id}/attachments/{attachment_id}`.
 - On every PUT, the server resolves `identity_id` to its `address` and updates both the `identity_id` column and `from_addr` in the `messages` row. If `identity_id` is absent in the PUT body, `identity_id` is set to NULL and `from_addr` is set to the default identity's address. This keeps the Drafts message list accurate when the user changes the From identity. On POST (new draft), `identity_id` is stored directly from the request body (or NULL if absent), and `from_addr` is set to the specified identity's address, or to the default identity's address when `identity_id` is absent — mirroring the PUT rule. If `identity_id` is absent and no identities exist at all, `identity_id` is stored as NULL and `from_addr` as empty string, and 201 is returned — this allows a draft to be saved during first-run before any identity is created (see REQUIREMENTS.md → First-Run Behaviour). A 500 is returned only when identities exist but none is marked as default, which would indicate a database integrity violation. If `identity_id` is supplied but does not match any existing identity row, the server returns 400 with `{"error": "identity not found"}`; this applies to both `POST /drafts` and `PUT /drafts/{id}`.
+
+### Draft Folder Check (`PUT`, `DELETE`, `POST .../send` on `/api/v1/drafts/{id}`)
+
+All three handlers (`PUT /api/v1/drafts/{id}`, `DELETE /api/v1/drafts/{id}`, and `POST /api/v1/drafts/{id}/send`) must verify that the referenced message exists **and** has `folder_id = 3` (Drafts). If the message does not exist, return 404. If the message exists but `folder_id ≠ 3`, return 404 (indistinguishable from not found, to avoid exposing non-draft message metadata via the drafts API surface).
 
 ### Send Draft Logic (`POST /api/v1/drafts/{id}/send`)
 
