@@ -1,7 +1,12 @@
 /ignored
+/mymail
+/data
 /.claude/settings.local.json
+/.playwright
+/.playwright-mcp
+/.playwright-cli
 /TODO.md
 /DOING.md
 /DONE.md
-/.playwright-cli/
-/mymail
+*_gen.go
+*.gen.go

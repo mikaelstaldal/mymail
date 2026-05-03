@@ -15,6 +15,7 @@ Layered architecture: `handler → service → repository → SQLite`
 mymail/
 ├── main.go                   # Entry point, CLI flags, routing, startup
 ├── internal/
+│   ├── api/                  # Code generated from OpenAPI specification (do not edit)
 │   ├── auth/                 # HTTP Basic Auth middleware (htpasswd)
 │   ├── handler/              # HTTP handlers (REST API)
 │   ├── lda/                  # Local delivery agent (parse & store incoming mail)

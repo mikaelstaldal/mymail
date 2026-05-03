@@ -40,8 +40,8 @@ Do **not** implement any logic in this task — just get `go mod tidy` to succee
 
 Set up `ogen` code generation from `openapi.yaml` as the first substantive task, so all subsequent tasks can refer to the generated types.
 
-1. Add a `//go:generate go run github.com/ogen-go/ogen/cmd/ogen --target internal/handler/oas --clean openapi.yaml` directive in a file at `internal/handler/generate.go`.
-2. Run `go generate ./internal/handler/` to produce the generated stubs under `internal/handler/oas/`.
+1. Add a `//go:generate go run github.com/ogen-go/ogen/cmd/ogen --target internal/api --clean openapi.yaml` directive in a file at `internal/generate.go`.
+2. Run `go generate ./internal/` to produce the generated stubs under `internal//`.
 3. Create `internal/handler/handler.go` defining a `Handler` struct and implementing every method of the generated `Handler` interface. Stub all methods with `return nil, oas.ErrNotImplemented` (or the appropriate ogen not-implemented response) — subsequent tasks (T21–T24) will replace these stubs with real logic.
 4. Confirm `go build ./...` succeeds with the generated code in place. Do **not** wire the router into `main.go` yet — that happens in T25.
 
@@ -50,10 +50,10 @@ Set up `ogen` code generation from `openapi.yaml` as the first substantive task,
 
 ## T03: Data Model Types (`internal/model`)
 
-Define Go data types for the database layer in `internal/model/`. Because T02 has already generated API-facing types under `internal/handler/oas/`, this task reuses those generated types wherever the field set and Go types are compatible, and only defines new types for representations that differ at the DB layer.
+Define Go data types for the database layer in `internal/model/`. Because T02 has already generated API-facing types under `internal/api/`, this task reuses those generated types wherever the field set and Go types are compatible, and only defines new types for representations that differ at the DB layer.
 
 **Strategy:**
-- Inspect the structs generated in `internal/handler/oas/` for each entity (Folder, Message, MessageSummary, Attachment, Identity, Contact, Filter, SpamFilterSettings, etc.).
+- Inspect the structs generated in `internal/api/` for each entity (Folder, Message, MessageSummary, Attachment, Identity, Contact, Filter, SpamFilterSettings, etc.).
 - Where a generated struct maps cleanly to what the repository needs to scan from SQLite (field names align, Go types are compatible — e.g., `string`, `bool`, `int64`, `time.Time`), import and use the generated type directly in the repository and service layers. Do not redefine it in `internal/model/`.
 - Where a generated struct differs from the DB representation (e.g., uses ogen's `opt.String`/`oas.OptNilString` for nullable fields that SQLite returns as `sql.NullString`, or omits DB-only columns), define a dedicated internal struct in `internal/model/` and write a conversion function to/from the ogen type.
 
