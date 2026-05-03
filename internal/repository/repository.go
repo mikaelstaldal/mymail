@@ -11,4 +11,6 @@ var (
 	ErrDuplicateID       = errors.New("duplicate id")
 	ErrUnknownID         = errors.New("unknown id")
 	ErrIncompleteReorder = errors.New("incomplete reorder; all ids must be supplied")
+	ErrInvalidAddress    = errors.New("invalid address")
+	ErrLastIdentity      = errors.New("cannot delete the last identity")
 )
