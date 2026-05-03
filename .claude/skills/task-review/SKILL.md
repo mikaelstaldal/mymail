@@ -15,4 +15,4 @@ Focus on:
 - Performance implications
 - Test coverage
 - Security considerations
-Format your review as action points to address your findings. If there is nothing worth changing, do not output anything.
+Format your review as action points to address your findings. If there are no action points, DO NOT OUTPUT ANYTHING!

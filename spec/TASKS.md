@@ -471,6 +471,10 @@ Content-Security-Policy: default-src 'self'; img-src 'self' data:; style-src 'se
 Strict-Transport-Security: max-age=31536000
 ```
 
+## Fix OpenAPI specification
+
+Update @openapi.yaml and add default error response to all endpoints, to enable ogen's convenient errors https://ogen.dev/docs/concepts/convenient_errors
+
 
 ## T21: REST API — Folder & Folder-Message Endpoints
 
