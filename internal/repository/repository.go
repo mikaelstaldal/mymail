@@ -5,6 +5,7 @@ import "errors"
 var (
 	ErrNotFound              = errors.New("not found")
 	ErrConflict              = errors.New("conflict")
+	ErrUnknownIdentity       = errors.New("unknown identity")
 	ErrTooManyIDs            = errors.New("too many ids")
 	ErrForbiddenFolder       = errors.New("operation not permitted in this folder")
 	ErrSnoozeTimeTooSoon     = errors.New("snooze time must be at least 60 seconds in the future")
