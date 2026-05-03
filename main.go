@@ -10,12 +10,20 @@ import (
 )
 
 func main() {
+	initMode := flag.Bool("init", false, "Initialize database and exit")
 	port := flag.Int("port", 8080, "HTTP listen port (1-65535)")
 	addr := flag.String("addr", "", "Bind address")
-	flag.String("data", "data/", "Data directory")
+	dataDir := flag.String("data", "data/", "Data directory")
 	flag.String("basic-auth-file", "", "Path to htpasswd file")
 	flag.String("basic-auth-realm", "mymail", "Auth realm")
+	identityAddress := flag.String("identity-address", "", "Initial identity email address (used with -init)")
+	identityName := flag.String("identity-name", "", "Initial identity display name (used with -init)")
 	flag.Parse()
+
+	if *initMode {
+		runInit(*dataDir, *identityAddress, *identityName)
+		return
+	}
 
 	staticFS := http.FS(web.Static)
 	mux := http.NewServeMux()
