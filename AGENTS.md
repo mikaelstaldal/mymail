@@ -4,7 +4,8 @@ A self-hosted personal (single-user) email client with backend storage, REST API
 
 ## Specification
 
-Adhere to the functional requirements in `spec/REQUIREMENTS.md` and the architecture in `spec/ARCHITECTURE.md`. Detailed implementation decisions (SQL schema, endpoint semantics, edge cases) are in `spec/IMPLEMENTATION.md`.
+Adhere to the functional requirements in `spec/REQUIREMENTS.md` and the architecture in `spec/ARCHITECTURE.md`.
+Update the architecture spec if necessary. Detailed implementation decisions (SQL schema, endpoint semantics, edge cases) are in `spec/IMPLEMENTATION.md`.
 
 ## Build & Development Commands
 
@@ -108,6 +109,18 @@ Piped to `sendmail -t -oi` (no internal send queue). Path resolved at startup vi
 ### Scheduled Sends & Snooze
 
 60-second polling goroutine (background, mutex-guarded). Deferred send threshold: `send_at > now + 60 seconds`. Snooze minimum: `until >= now + 60 seconds`.
+
+## Testing
+
+Each layer has its own test scope:
+
+- **Repository:** use an in-memory SQLite DB (`modernc.org/sqlite` supports `file::memory:?cache=shared`). Run the full schema migration before each test. Test SQL queries and constraints directly.
+- **Service:** unit-test business logic with a fake/stub repository interface. No SQLite required.
+- **Handler:** integration-test HTTP endpoints by wiring the full `handler → service → repository` stack against an in-memory DB. Use `net/http/httptest`.
+- **LDA:** test the parsing pipeline end-to-end by feeding raw RFC 5322 messages and asserting what lands in the DB.
+- **FTS search input sanitization:** `spec/IMPLEMENTATION.md` requires a unit test verifying that `"`, non-ASCII characters, and FTS5 operator keywords (`AND`, `OR`, `NOT`, `NEAR`) are all treated as literals.
+
+Place tests in `_test.go` files alongside the package under test. Use table-driven tests for endpoint/edge-case coverage.
 
 ## Important Implementation Notes
 
