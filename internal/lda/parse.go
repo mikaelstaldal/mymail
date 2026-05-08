@@ -132,6 +132,7 @@ func ParseMessage(raw []byte) (*model.ParsedMessage, error) {
 		BodyHTML:          bodyHTML,
 		Attachments:       attachments,
 		HasExternalImages: sanitize.HasExternalImages(bodyHTML),
+		Headers:           map[string][]string(msg.Header),
 	}, nil
 }
 

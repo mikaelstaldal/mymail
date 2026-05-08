@@ -155,6 +155,8 @@ type ParsedMessage struct {
 	BodyHTML          string
 	Attachments       []DBAttachment
 	HasExternalImages bool
+	// retained to avoid re-parsing raw bytes for spam detection
+	Headers map[string][]string
 }
 
 // nullStringToNilString converts sql.NullString to oas.NilString.
