@@ -26,7 +26,10 @@ var (
 	reNumeric     = regexp.MustCompile(`^[0-9]+$`)
 	reAlign       = regexp.MustCompile(`^(left|right|center|justify)$`)
 	reHref        = regexp.MustCompile(`(?i)^(https?://|mailto:)`)
-	reSrc         = regexp.MustCompile(`(?i)^(https?://|data:image/(?!svg)[a-z+\-]+;base64,[a-zA-Z0-9+/]+=*$)`)
+	// reSrc allows http/https URLs and base64-encoded non-SVG image data URIs.
+	// SVG is excluded by enumerating allowed subtypes (RE2 lacks lookaheads).
+	// Padding = is restricted to at most two trailing characters per the base64 spec.
+	reSrc         = regexp.MustCompile(`(?i)^(https?://|data:image/(gif|jpe?g|pjpeg|png|webp|bmp|tiff?|ico|avif|apng|jfif|x-icon|vnd\.microsoft\.icon);base64,[a-zA-Z0-9+/]+={0,2}$)`)
 	reExternalSrc = regexp.MustCompile(`(?i)^https?://`)
 )
 
