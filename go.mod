@@ -3,6 +3,8 @@ module github.com/mikaelstaldal/mymail
 go 1.26
 
 require (
+	github.com/emersion/go-maildir v0.6.0
+	github.com/emersion/go-mbox v1.0.4
 	github.com/go-faster/errors v0.7.1
 	github.com/go-faster/jx v1.2.0
 	github.com/google/uuid v1.6.0

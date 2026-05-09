@@ -5,12 +5,17 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"os"
+	"path/filepath"
 
+	"github.com/mikaelstaldal/mymail/internal/lda"
+	"github.com/mikaelstaldal/mymail/internal/repository"
 	"github.com/mikaelstaldal/mymail/web"
 )
 
 func main() {
 	initMode := flag.Bool("init", false, "Initialize database and exit")
+	importMode := flag.Bool("import", false, "Import messages from mbox/Maildir and exit")
 	port := flag.Int("port", 8080, "HTTP listen port (1-65535)")
 	addr := flag.String("addr", "", "Bind address")
 	dataDir := flag.String("data", "data/", "Data directory")
@@ -22,6 +27,11 @@ func main() {
 
 	if *initMode {
 		runInit(*dataDir, *identityAddress, *identityName)
+		return
+	}
+
+	if *importMode {
+		runImport(*dataDir, flag.Args())
 		return
 	}
 
@@ -41,4 +51,30 @@ func main() {
 	if err := http.ListenAndServe(listenAddr, mux); err != nil {
 		log.Fatal(err)
 	}
+}
+
+func runImport(dataDir string, mappingArgs []string) {
+	dbPath := filepath.Join(dataDir, "mymail.sqlite")
+	if err := repository.CheckDBExists(dbPath); err != nil {
+		log.Printf("error: %v", err)
+		os.Exit(1)
+	}
+
+	lockFile, err := lda.AcquireImportLock(dataDir)
+	if err != nil {
+		log.Printf("error: %v", err)
+		os.Exit(1)
+	}
+
+	db, err := repository.OpenDB(dbPath, 5000)
+	if err != nil {
+		log.Printf("error: open database: %v", err)
+		lockFile.Close()
+		os.Exit(1)
+	}
+
+	code := lda.RunImport(db, mappingArgs)
+	db.Close()
+	lockFile.Close()
+	os.Exit(code)
 }
