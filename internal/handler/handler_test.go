@@ -34,7 +34,11 @@ func openTestDB(t *testing.T) *sql.DB {
 
 func newServer(t *testing.T, db *sql.DB) http.Handler {
 	t.Helper()
-	h := handler.New(repository.NewFolderRepository(db))
+	h := handler.New(
+		repository.NewFolderRepository(db),
+		repository.NewMessageRepository(db),
+		repository.NewAttachmentRepository(db),
+	)
 	srv, err := api.NewServer(h)
 	if err != nil {
 		t.Fatalf("NewServer: %v", err)

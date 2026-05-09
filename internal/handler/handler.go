@@ -11,11 +11,13 @@ import (
 
 type Handler struct {
 	api.UnimplementedHandler
-	folders *repository.FolderRepository
+	folders     *repository.FolderRepository
+	messages    *repository.MessageRepository
+	attachments *repository.AttachmentRepository
 }
 
-func New(folders *repository.FolderRepository) *Handler {
-	return &Handler{folders: folders}
+func New(folders *repository.FolderRepository, messages *repository.MessageRepository, attachments *repository.AttachmentRepository) *Handler {
+	return &Handler{folders: folders, messages: messages, attachments: attachments}
 }
 
 var _ api.Handler = (*Handler)(nil)

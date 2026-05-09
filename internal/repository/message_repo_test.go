@@ -108,7 +108,7 @@ func TestListMessages(t *testing.T) {
 		}
 	}
 
-	items, total, err := r.ListMessages(ctx, 1, 10, 0)
+	items, total, err := r.ListMessages(ctx, 1, 10, 0, nil, nil)
 	if err != nil {
 		t.Fatalf("ListMessages: %v", err)
 	}
@@ -195,7 +195,7 @@ func TestBulkDeleteMessages(t *testing.T) {
 	id1, _ := r.InsertMessage(ctx, makeMsg(1, "a"))
 	id2, _ := r.InsertMessage(ctx, makeMsg(4, "b")) // already in Trash → permanent
 
-	if err := r.BulkDeleteMessages(ctx, []int64{id1, id2}); err != nil {
+	if _, _, err := r.BulkDeleteMessages(ctx, []int64{id1, id2}); err != nil {
 		t.Fatalf("BulkDeleteMessages: %v", err)
 	}
 	// id1 should have moved to Trash.
@@ -215,7 +215,7 @@ func TestBulkDeleteMissingID(t *testing.T) {
 	r := NewMessageRepository(db)
 
 	id, _ := r.InsertMessage(ctx, makeMsg(1, "x"))
-	err := r.BulkDeleteMessages(ctx, []int64{id, 99999})
+	_, _, err := r.BulkDeleteMessages(ctx, []int64{id, 99999})
 	if err != ErrNotFound {
 		t.Errorf("expected ErrNotFound, got %v", err)
 	}
@@ -532,7 +532,7 @@ func TestBulkLimitExceeded(t *testing.T) {
 		ids[i] = int64(i + 1)
 	}
 
-	if err := r.BulkDeleteMessages(ctx, ids); err == nil {
+	if _, _, err := r.BulkDeleteMessages(ctx, ids); err == nil {
 		t.Error("expected error for BulkDeleteMessages with >1000 ids")
 	}
 	if _, err := r.BulkUpdateMessages(ctx, ids, nil, nil); err == nil {

@@ -209,17 +209,39 @@ const dbMessageColumns = `id, folder_id, identity_id, message_id, in_reply_to, "
 	send_at, snoozed_until, snooze_folder, send_error, send_failure_count, created_at, updated_at`
 
 // ListMessages returns paginated messages in a folder ordered by date DESC, plus total count.
-func (r *MessageRepository) ListMessages(ctx context.Context, folderID int64, limit, offset int) ([]oas.MessageSummary, int, error) {
+// unread and flagged are optional filters; nil means no filter for that field.
+func (r *MessageRepository) ListMessages(ctx context.Context, folderID int64, limit, offset int, unread, flagged *bool) ([]oas.MessageSummary, int, error) {
+	conditions := []string{"m.folder_id = ?"}
+	filterArgs := []any{folderID}
+
+	if unread != nil {
+		if *unread {
+			conditions = append(conditions, "m.read = 0")
+		} else {
+			conditions = append(conditions, "m.read = 1")
+		}
+	}
+	if flagged != nil {
+		if *flagged {
+			conditions = append(conditions, "m.flagged = 1")
+		} else {
+			conditions = append(conditions, "m.flagged = 0")
+		}
+	}
+
+	where := strings.Join(conditions, " AND ")
+
 	var total int
 	if err := r.db.QueryRowContext(ctx,
-		`SELECT COUNT(*) FROM messages m WHERE m.folder_id = ?`, folderID,
+		`SELECT COUNT(*) FROM messages m WHERE `+where, filterArgs...,
 	).Scan(&total); err != nil {
 		return nil, 0, err
 	}
 
+	listArgs := append(filterArgs, limit, offset)
 	rows, err := r.db.QueryContext(ctx,
-		`SELECT `+summaryColumns+` FROM messages m WHERE m.folder_id = ? ORDER BY m.date DESC LIMIT ? OFFSET ?`,
-		folderID, limit, offset,
+		`SELECT `+summaryColumns+` FROM messages m WHERE `+where+` ORDER BY m.date DESC LIMIT ? OFFSET ?`,
+		listArgs...,
 	)
 	if err != nil {
 		return nil, 0, err
@@ -367,6 +389,7 @@ func (r *MessageRepository) InsertMessage(ctx context.Context, msg model.DBMessa
 
 // UpdateMessage applies a PATCH update on the provided fields and returns the updated row.
 // Allowed keys: "folder_id" (int64), "read" (bool), "flagged" (bool).
+// When folder_id is set to 4 (Trash) or 7 (Junk), scheduling fields are cleared atomically.
 func (r *MessageRepository) UpdateMessage(ctx context.Context, id int64, fields map[string]any) (model.DBMessage, error) {
 	if len(fields) == 0 {
 		return r.GetMessage(ctx, id)
@@ -394,6 +417,11 @@ func (r *MessageRepository) UpdateMessage(ctx context.Context, id int64, fields 
 	if len(setClauses) == 0 {
 		return r.GetMessage(ctx, id)
 	}
+
+	if newFolderID, ok := fields["folder_id"].(int64); ok && (newFolderID == 4 || newFolderID == 7) {
+		setClauses = append(setClauses, "snoozed_until = NULL", "snooze_folder = NULL", "send_at = NULL")
+	}
+
 	args = append(args, id)
 
 	res, err := r.db.ExecContext(ctx,
@@ -411,12 +439,24 @@ func (r *MessageRepository) UpdateMessage(ctx context.Context, id int64, fields 
 }
 
 // BulkUpdateMessages sets read and/or flagged on a set of messages. Returns count changed.
+// Returns ErrNotFound if any ID is missing; ErrTooManyIDs if len > 1000.
 func (r *MessageRepository) BulkUpdateMessages(ctx context.Context, ids []int64, read *bool, flagged *bool) (int, error) {
 	if len(ids) > 1000 {
 		return 0, ErrTooManyIDs
 	}
 	if len(ids) == 0 || (read == nil && flagged == nil) {
 		return 0, nil
+	}
+
+	var count int
+	if err := r.db.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM messages WHERE id IN (`+placeholders(len(ids))+`)`,
+		int64Args(ids)...,
+	).Scan(&count); err != nil {
+		return 0, err
+	}
+	if count != len(ids) {
+		return 0, ErrNotFound
 	}
 
 	var setClauses []string
@@ -451,7 +491,8 @@ func (r *MessageRepository) BulkUpdateMessages(ctx context.Context, ids []int64,
 }
 
 // DeleteMessage moves message to Trash unless it is already in Trash (4) or Junk (7),
-// in which case it is permanently deleted.
+// in which case it is permanently deleted. Returns ErrForbiddenFolder for Drafts (3),
+// Scheduled (5), or Snoozed (6). When moving to Trash, scheduling fields are cleared.
 func (r *MessageRepository) DeleteMessage(ctx context.Context, id int64) error {
 	var folderID int64
 	err := r.db.QueryRowContext(ctx, `SELECT folder_id FROM messages WHERE id = ?`, id).Scan(&folderID)
@@ -462,78 +503,95 @@ func (r *MessageRepository) DeleteMessage(ctx context.Context, id int64) error {
 		return err
 	}
 
-	if folderID == 4 || folderID == 7 {
+	switch folderID {
+	case 3, 5, 6:
+		return ErrForbiddenFolder
+	case 4, 7:
 		_, err = r.db.ExecContext(ctx, `DELETE FROM messages WHERE id = ?`, id)
-	} else {
-		_, err = r.db.ExecContext(ctx, `UPDATE messages SET folder_id = 4 WHERE id = ?`, id)
+	default:
+		_, err = r.db.ExecContext(ctx,
+			`UPDATE messages SET folder_id = 4, snoozed_until = NULL, snooze_folder = NULL, send_at = NULL WHERE id = ?`, id)
 	}
 	return err
 }
 
 // BulkDeleteMessages applies delete logic for a batch of messages (all-or-nothing).
 // Returns ErrNotFound if any ID is missing; ErrTooManyIDs if len > 1000.
-func (r *MessageRepository) BulkDeleteMessages(ctx context.Context, ids []int64) error {
+// Returns ErrForbiddenFolder if any message is in Drafts (3), Scheduled (5), or Snoozed (6).
+// When moving to Trash, scheduling fields are cleared. Returns (movedToTrash, permanentlyDeleted, error).
+func (r *MessageRepository) BulkDeleteMessages(ctx context.Context, ids []int64) (int, int, error) {
 	if len(ids) > 1000 {
-		return ErrTooManyIDs
+		return 0, 0, ErrTooManyIDs
 	}
 	if len(ids) == 0 {
-		return nil
+		return 0, 0, nil
 	}
 
 	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
-		return err
+		return 0, 0, err
 	}
 	defer tx.Rollback()
 
-	// Verify all IDs exist.
+	// Verify all IDs exist and check folder restrictions.
 	rows, err := tx.QueryContext(ctx,
-		`SELECT id FROM messages WHERE id IN (`+placeholders(len(ids))+`)`,
+		`SELECT id, folder_id FROM messages WHERE id IN (`+placeholders(len(ids))+`)`,
 		int64Args(ids)...,
 	)
 	if err != nil {
-		return err
+		return 0, 0, err
 	}
-	found := make(map[int64]bool, len(ids))
+	found := make(map[int64]int64, len(ids))
 	for rows.Next() {
-		var rid int64
-		if err := rows.Scan(&rid); err != nil {
+		var rid, rfid int64
+		if err := rows.Scan(&rid, &rfid); err != nil {
 			rows.Close()
-			return err
+			return 0, 0, err
 		}
-		found[rid] = true
+		found[rid] = rfid
 	}
 	rows.Close()
 	if err := rows.Err(); err != nil {
-		return err
+		return 0, 0, err
 	}
 	for _, id := range ids {
-		if !found[id] {
-			return ErrNotFound
+		fid, ok := found[id]
+		if !ok {
+			return 0, 0, ErrNotFound
+		}
+		if fid == 3 || fid == 5 || fid == 6 {
+			return 0, 0, ErrForbiddenFolder
 		}
 	}
 
 	// Permanently delete those in Trash (4) or Junk (7).
-	if _, err := tx.ExecContext(ctx,
+	res, err := tx.ExecContext(ctx,
 		`DELETE FROM messages WHERE id IN (`+placeholders(len(ids))+`) AND folder_id IN (4, 7)`,
 		int64Args(ids)...,
-	); err != nil {
-		return err
+	)
+	if err != nil {
+		return 0, 0, err
 	}
+	perm, _ := res.RowsAffected()
 
-	// Move the rest to Trash.
-	if _, err := tx.ExecContext(ctx,
-		`UPDATE messages SET folder_id = 4 WHERE id IN (`+placeholders(len(ids))+`) AND folder_id NOT IN (4, 7)`,
+	// Move the rest to Trash, clearing scheduling fields.
+	res, err = tx.ExecContext(ctx,
+		`UPDATE messages SET folder_id = 4, snoozed_until = NULL, snooze_folder = NULL, send_at = NULL
+		 WHERE id IN (`+placeholders(len(ids))+`) AND folder_id NOT IN (4, 7)`,
 		int64Args(ids)...,
-	); err != nil {
-		return err
+	)
+	if err != nil {
+		return 0, 0, err
 	}
+	moved, _ := res.RowsAffected()
 
-	return tx.Commit()
+	return int(moved), int(perm), tx.Commit()
 }
 
 // MoveMessages moves all listed messages to the target folder.
 // Returns ErrNotFound if any ID is missing; ErrTooManyIDs if len > 1000.
+// Returns ErrForbiddenFolder if any source message is in Drafts (3), Scheduled (5), or Snoozed (6).
+// When moving to Trash (4), scheduling fields are cleared atomically.
 func (r *MessageRepository) MoveMessages(ctx context.Context, ids []int64, folderID int64) (int, error) {
 	if len(ids) > 1000 {
 		return 0, ErrTooManyIDs
@@ -549,35 +607,48 @@ func (r *MessageRepository) MoveMessages(ctx context.Context, ids []int64, folde
 	defer tx.Rollback()
 
 	rows, err := tx.QueryContext(ctx,
-		`SELECT id FROM messages WHERE id IN (`+placeholders(len(ids))+`)`,
+		`SELECT id, folder_id FROM messages WHERE id IN (`+placeholders(len(ids))+`)`,
 		int64Args(ids)...,
 	)
 	if err != nil {
 		return 0, err
 	}
-	found := make(map[int64]bool, len(ids))
+	found := make(map[int64]int64, len(ids))
 	for rows.Next() {
-		var rid int64
-		if err := rows.Scan(&rid); err != nil {
+		var rid, rfid int64
+		if err := rows.Scan(&rid, &rfid); err != nil {
 			rows.Close()
 			return 0, err
 		}
-		found[rid] = true
+		found[rid] = rfid
 	}
 	rows.Close()
 	if err := rows.Err(); err != nil {
 		return 0, err
 	}
 	for _, id := range ids {
-		if !found[id] {
+		srcFID, ok := found[id]
+		if !ok {
 			return 0, ErrNotFound
+		}
+		if srcFID == 3 || srcFID == 5 || srcFID == 6 {
+			return 0, ErrForbiddenFolder
 		}
 	}
 
-	res, err := tx.ExecContext(ctx,
-		`UPDATE messages SET folder_id = ? WHERE id IN (`+placeholders(len(ids))+`)`,
-		append([]any{folderID}, int64Args(ids)...)...,
-	)
+	var res sql.Result
+	if folderID == 4 {
+		res, err = tx.ExecContext(ctx,
+			`UPDATE messages SET folder_id = ?, snoozed_until = NULL, snooze_folder = NULL, send_at = NULL
+			 WHERE id IN (`+placeholders(len(ids))+`)`,
+			append([]any{folderID}, int64Args(ids)...)...,
+		)
+	} else {
+		res, err = tx.ExecContext(ctx,
+			`UPDATE messages SET folder_id = ? WHERE id IN (`+placeholders(len(ids))+`)`,
+			append([]any{folderID}, int64Args(ids)...)...,
+		)
+	}
 	if err != nil {
 		return 0, err
 	}
@@ -943,33 +1014,48 @@ func (r *MessageRepository) CancelSnooze(ctx context.Context, id int64) (model.D
 }
 
 // MarkJunk moves the message to Junk (folder_id=7) and marks it as read.
+// Returns ErrForbiddenFolder if the message is in Junk (7), Drafts (3), Scheduled (5), or Snoozed (6).
 // Returns ErrNotFound if the message does not exist.
 func (r *MessageRepository) MarkJunk(ctx context.Context, id int64) (model.DBMessage, error) {
-	res, err := r.db.ExecContext(ctx,
-		`UPDATE messages SET folder_id = 7, read = 1 WHERE id = ?`, id,
-	)
+	var folderID int64
+	err := r.db.QueryRowContext(ctx, `SELECT folder_id FROM messages WHERE id = ?`, id).Scan(&folderID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return model.DBMessage{}, ErrNotFound
+	}
 	if err != nil {
 		return model.DBMessage{}, err
 	}
-	n, _ := res.RowsAffected()
-	if n == 0 {
-		return model.DBMessage{}, ErrNotFound
+	switch folderID {
+	case 3, 5, 6, 7:
+		return model.DBMessage{}, ErrForbiddenFolder
+	}
+
+	_, err = r.db.ExecContext(ctx, `UPDATE messages SET folder_id = 7, read = 1 WHERE id = ?`, id)
+	if err != nil {
+		return model.DBMessage{}, err
 	}
 	return r.GetMessage(ctx, id)
 }
 
-// MarkNotJunk moves the message to Inbox (folder_id=1) and marks it unread.
+// MarkNotJunk moves the message from Junk to Inbox and marks it unread.
+// Returns ErrForbiddenFolder if the message is not in Junk (7).
 // Returns ErrNotFound if the message does not exist.
 func (r *MessageRepository) MarkNotJunk(ctx context.Context, id int64) (model.DBMessage, error) {
-	res, err := r.db.ExecContext(ctx,
-		`UPDATE messages SET folder_id = 1, read = 0 WHERE id = ?`, id,
-	)
+	var folderID int64
+	err := r.db.QueryRowContext(ctx, `SELECT folder_id FROM messages WHERE id = ?`, id).Scan(&folderID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return model.DBMessage{}, ErrNotFound
+	}
 	if err != nil {
 		return model.DBMessage{}, err
 	}
-	n, _ := res.RowsAffected()
-	if n == 0 {
-		return model.DBMessage{}, ErrNotFound
+	if folderID != 7 {
+		return model.DBMessage{}, ErrForbiddenFolder
+	}
+
+	_, err = r.db.ExecContext(ctx, `UPDATE messages SET folder_id = 1, read = 0 WHERE id = ?`, id)
+	if err != nil {
+		return model.DBMessage{}, err
 	}
 	return r.GetMessage(ctx, id)
 }
