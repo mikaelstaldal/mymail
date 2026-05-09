@@ -1,4 +1,5 @@
 generator:
+  convenient_errors: "on"
   features:
     disable:
       - "ogen/otel"

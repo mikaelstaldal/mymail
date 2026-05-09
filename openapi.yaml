@@ -495,6 +495,12 @@ components:
         application/json:
           schema:
             $ref: '#/components/schemas/Error'
+    Default:
+      description: Default error response
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
 
 paths:
   # ── Folders ────────────────────────────────────────────────────────────────
@@ -518,6 +524,8 @@ paths:
                     items:
                       $ref: '#/components/schemas/Folder'
                 required: [total, items]
+        'default':
+          $ref: '#/components/responses/Default'
     post:
       summary: Create folder
       description: |
@@ -550,6 +558,8 @@ paths:
                 $ref: '#/components/schemas/Folder'
         '409':
           $ref: '#/components/responses/Conflict'
+        'default':
+          $ref: '#/components/responses/Default'
 
   /folders/{id}:
     patch:
@@ -596,6 +606,8 @@ paths:
           $ref: '#/components/responses/NotFound'
         '409':
           $ref: '#/components/responses/Conflict'
+        'default':
+          $ref: '#/components/responses/Default'
     delete:
       summary: Delete folder
       description: |
@@ -625,6 +637,8 @@ paths:
           $ref: '#/components/responses/BadRequest'
         '404':
           $ref: '#/components/responses/NotFound'
+        'default':
+          $ref: '#/components/responses/Default'
 
   /folders/reorder:
     patch:
@@ -663,6 +677,8 @@ paths:
                 required: [updated]
         '400':
           $ref: '#/components/responses/BadRequest'
+        'default':
+          $ref: '#/components/responses/Default'
 
   /folders/{folder_id}/messages:
     get:
@@ -716,6 +732,8 @@ paths:
                 required: [total, items]
         '404':
           $ref: '#/components/responses/NotFound'
+        'default':
+          $ref: '#/components/responses/Default'
     delete:
       summary: Delete all messages in folder
       description: |
@@ -750,6 +768,8 @@ paths:
           $ref: '#/components/responses/BadRequest'
         '404':
           $ref: '#/components/responses/NotFound'
+        'default':
+          $ref: '#/components/responses/Default'
 
   /folders/{folder_id}/mark-all-read:
     post:
@@ -775,6 +795,8 @@ paths:
                 required: [updated]
         '404':
           $ref: '#/components/responses/NotFound'
+        'default':
+          $ref: '#/components/responses/Default'
 
   # ── Messages ───────────────────────────────────────────────────────────────
 
@@ -865,6 +887,8 @@ paths:
                 required: [total, items]
         '400':
           $ref: '#/components/responses/BadRequest'
+        'default':
+          $ref: '#/components/responses/Default'
 
   /messages/send:
     post:
@@ -915,6 +939,8 @@ paths:
           $ref: '#/components/responses/BadRequest'
         '500':
           $ref: '#/components/responses/InternalError'
+        'default':
+          $ref: '#/components/responses/Default'
 
   /messages/send-with-attachments:
     post:
@@ -972,6 +998,8 @@ paths:
           $ref: '#/components/responses/BadRequest'
         '500':
           $ref: '#/components/responses/InternalError'
+        'default':
+          $ref: '#/components/responses/Default'
 
   /messages/{id}:
     get:
@@ -992,6 +1020,8 @@ paths:
                 $ref: '#/components/schemas/MessageDetail'
         '404':
           $ref: '#/components/responses/NotFound'
+        'default':
+          $ref: '#/components/responses/Default'
     patch:
       summary: Update message metadata
       description: |
@@ -1038,6 +1068,8 @@ paths:
           $ref: '#/components/responses/BadRequest'
         '404':
           $ref: '#/components/responses/NotFound'
+        'default':
+          $ref: '#/components/responses/Default'
     delete:
       summary: Delete message
       description: |
@@ -1063,6 +1095,8 @@ paths:
           $ref: '#/components/responses/BadRequest'
         '404':
           $ref: '#/components/responses/NotFound'
+        'default':
+          $ref: '#/components/responses/Default'
 
   /messages:
     patch:
@@ -1112,6 +1146,8 @@ paths:
           $ref: '#/components/responses/BadRequest'
         '404':
           $ref: '#/components/responses/NotFound'
+        'default':
+          $ref: '#/components/responses/Default'
     delete:
       summary: Bulk delete messages
       description: |
@@ -1163,6 +1199,8 @@ paths:
           $ref: '#/components/responses/BadRequest'
         '404':
           $ref: '#/components/responses/NotFound'
+        'default':
+          $ref: '#/components/responses/Default'
 
   /messages/move:
     post:
@@ -1213,6 +1251,8 @@ paths:
           $ref: '#/components/responses/BadRequest'
         '404':
           $ref: '#/components/responses/NotFound'
+        'default':
+          $ref: '#/components/responses/Default'
 
   /messages/{id}/raw:
     get:
@@ -1251,6 +1291,8 @@ paths:
                 type: object
         '404':
           $ref: '#/components/responses/NotFound'
+        'default':
+          $ref: '#/components/responses/Default'
 
   /messages/{id}/thread:
     get:
@@ -1303,6 +1345,8 @@ paths:
                 required: [total, truncated, items]
         '404':
           $ref: '#/components/responses/NotFound'
+        'default':
+          $ref: '#/components/responses/Default'
 
   /messages/{id}/snooze:
     post:
@@ -1365,6 +1409,8 @@ paths:
           $ref: '#/components/responses/BadRequest'
         '404':
           $ref: '#/components/responses/NotFound'
+        'default':
+          $ref: '#/components/responses/Default'
     delete:
       summary: Cancel snooze
       description: |
@@ -1401,6 +1447,8 @@ paths:
           $ref: '#/components/responses/BadRequest'
         '404':
           $ref: '#/components/responses/NotFound'
+        'default':
+          $ref: '#/components/responses/Default'
 
   /messages/{id}/mark-junk:
     post:
@@ -1436,6 +1484,8 @@ paths:
           $ref: '#/components/responses/BadRequest'
         '404':
           $ref: '#/components/responses/NotFound'
+        'default':
+          $ref: '#/components/responses/Default'
 
   /messages/{id}/mark-not-junk:
     post:
@@ -1464,6 +1514,8 @@ paths:
           $ref: '#/components/responses/BadRequest'
         '404':
           $ref: '#/components/responses/NotFound'
+        'default':
+          $ref: '#/components/responses/Default'
 
   # ── Attachments ────────────────────────────────────────────────────────────
 
@@ -1496,6 +1548,8 @@ paths:
                 format: binary
         '404':
           $ref: '#/components/responses/NotFound'
+        'default':
+          $ref: '#/components/responses/Default'
 
   # ── Scheduled ──────────────────────────────────────────────────────────────
 
@@ -1540,6 +1594,8 @@ paths:
           $ref: '#/components/responses/BadRequest'
         '404':
           $ref: '#/components/responses/NotFound'
+        'default':
+          $ref: '#/components/responses/Default'
 
   # ── Drafts ─────────────────────────────────────────────────────────────────
 
@@ -1573,6 +1629,8 @@ paths:
                 required: [id, updated_at]
         '400':
           $ref: '#/components/responses/BadRequest'
+        'default':
+          $ref: '#/components/responses/Default'
 
   /drafts-with-attachments:
     post:
@@ -1613,6 +1671,8 @@ paths:
                 required: [id, updated_at]
         '400':
           $ref: '#/components/responses/BadRequest'
+        'default':
+          $ref: '#/components/responses/Default'
 
   /drafts/{id}:
     put:
@@ -1655,6 +1715,8 @@ paths:
           $ref: '#/components/responses/BadRequest'
         '404':
           $ref: '#/components/responses/NotFound'
+        'default':
+          $ref: '#/components/responses/Default'
     delete:
       summary: Delete draft
       description: |
@@ -1671,6 +1733,8 @@ paths:
           description: Deleted
         '404':
           $ref: '#/components/responses/NotFound'
+        'default':
+          $ref: '#/components/responses/Default'
 
   /drafts/{id}/send:
     post:
@@ -1732,6 +1796,8 @@ paths:
                 $ref: '#/components/schemas/Error'
         '500':
           $ref: '#/components/responses/InternalError'
+        'default':
+          $ref: '#/components/responses/Default'
 
   /drafts/{id}/attachments/{attachment_id}:
     delete:
@@ -1758,6 +1824,8 @@ paths:
           $ref: '#/components/responses/BadRequest'
         '404':
           $ref: '#/components/responses/NotFound'
+        'default':
+          $ref: '#/components/responses/Default'
 
   /drafts-with-attachments/{id}:
     put:
@@ -1804,6 +1872,8 @@ paths:
           $ref: '#/components/responses/BadRequest'
         '404':
           $ref: '#/components/responses/NotFound'
+        'default':
+          $ref: '#/components/responses/Default'
 
   # ── Filters ────────────────────────────────────────────────────────────────
 
@@ -1826,6 +1896,8 @@ paths:
                     items:
                       $ref: '#/components/schemas/Filter'
                 required: [total, items]
+        'default':
+          $ref: '#/components/responses/Default'
     post:
       summary: Create filter
       description: |
@@ -1849,6 +1921,8 @@ paths:
                 $ref: '#/components/schemas/Filter'
         '400':
           $ref: '#/components/responses/BadRequest'
+        'default':
+          $ref: '#/components/responses/Default'
 
   /filters/{id}:
     put:
@@ -1879,6 +1953,8 @@ paths:
           $ref: '#/components/responses/BadRequest'
         '404':
           $ref: '#/components/responses/NotFound'
+        'default':
+          $ref: '#/components/responses/Default'
     delete:
       summary: Delete filter
       parameters:
@@ -1892,6 +1968,8 @@ paths:
           description: Deleted
         '404':
           $ref: '#/components/responses/NotFound'
+        'default':
+          $ref: '#/components/responses/Default'
 
   /filters/reorder:
     patch:
@@ -1930,6 +2008,8 @@ paths:
                 required: [updated]
         '400':
           $ref: '#/components/responses/BadRequest'
+        'default':
+          $ref: '#/components/responses/Default'
 
   # ── Spam Filter ────────────────────────────────────────────────────────────
 
@@ -1943,6 +2023,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/SpamFilterSettings'
+        'default':
+          $ref: '#/components/responses/Default'
     put:
       summary: Replace spam filter settings
       description: |
@@ -1964,6 +2046,8 @@ paths:
                 $ref: '#/components/schemas/SpamFilterSettings'
         '400':
           $ref: '#/components/responses/BadRequest'
+        'default':
+          $ref: '#/components/responses/Default'
 
   # ── Identities ─────────────────────────────────────────────────────────────
 
@@ -1986,6 +2070,8 @@ paths:
                     items:
                       $ref: '#/components/schemas/Identity'
                 required: [total, items]
+        'default':
+          $ref: '#/components/responses/Default'
     post:
       summary: Create identity
       description: |
@@ -2013,6 +2099,8 @@ paths:
           $ref: '#/components/responses/BadRequest'
         '409':
           $ref: '#/components/responses/Conflict'
+        'default':
+          $ref: '#/components/responses/Default'
 
   /identities/{id}:
     put:
@@ -2050,6 +2138,8 @@ paths:
           $ref: '#/components/responses/NotFound'
         '409':
           $ref: '#/components/responses/Conflict'
+        'default':
+          $ref: '#/components/responses/Default'
     delete:
       summary: Delete identity
       description: Delete an identity. Returns 400 if it is the only identity. If the default is deleted, the next identity by position/id is promoted.
@@ -2066,6 +2156,8 @@ paths:
           $ref: '#/components/responses/BadRequest'
         '404':
           $ref: '#/components/responses/NotFound'
+        'default':
+          $ref: '#/components/responses/Default'
 
   /identities/reorder:
     patch:
@@ -2104,6 +2196,8 @@ paths:
                 required: [updated]
         '400':
           $ref: '#/components/responses/BadRequest'
+        'default':
+          $ref: '#/components/responses/Default'
 
   # ── Contacts ───────────────────────────────────────────────────────────────
 
@@ -2149,6 +2243,8 @@ paths:
                     items:
                       $ref: '#/components/schemas/Contact'
                 required: [total, items]
+        'default':
+          $ref: '#/components/responses/Default'
     post:
       summary: Create contact
       description: |
@@ -2179,6 +2275,8 @@ paths:
           $ref: '#/components/responses/BadRequest'
         '409':
           $ref: '#/components/responses/Conflict'
+        'default':
+          $ref: '#/components/responses/Default'
 
   /contacts/{id}:
     put:
@@ -2221,6 +2319,8 @@ paths:
           $ref: '#/components/responses/NotFound'
         '409':
           $ref: '#/components/responses/Conflict'
+        'default':
+          $ref: '#/components/responses/Default'
     delete:
       summary: Delete contact
       parameters:
@@ -2234,6 +2334,8 @@ paths:
           description: Deleted
         '404':
           $ref: '#/components/responses/NotFound'
+        'default':
+          $ref: '#/components/responses/Default'
 
   # ── Health ─────────────────────────────────────────────────────────────────
 
@@ -2256,3 +2358,5 @@ paths:
                     type: string
                     enum: [ok]
                 required: [status]
+        'default':
+          $ref: '#/components/responses/Default'
