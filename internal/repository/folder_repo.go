@@ -327,14 +327,22 @@ func (r *FolderRepository) ReorderFolders(ctx context.Context, ids []int64) (int
 }
 
 // DeleteAllMessagesInFolder permanently deletes messages if the folder is Trash (4) or Junk (7),
-// otherwise moves them to Trash.
-func (r *FolderRepository) DeleteAllMessagesInFolder(ctx context.Context, folderID int64) error {
-	if folderID == 4 || folderID == 7 {
-		_, err := r.db.ExecContext(ctx, `DELETE FROM messages WHERE folder_id = ?`, folderID)
-		return err
+// otherwise moves them to Trash. Returns (movedToTrash, permanentlyDeleted, error).
+func (r *FolderRepository) DeleteAllMessagesInFolder(ctx context.Context, folderID int64) (movedToTrash, permanentlyDeleted int, err error) {
+	if folderID == 4 || folderID == 7 { // Trash, Junk — permanent delete
+		res, err := r.db.ExecContext(ctx, `DELETE FROM messages WHERE folder_id = ?`, folderID)
+		if err != nil {
+			return 0, 0, err
+		}
+		n, _ := res.RowsAffected()
+		return 0, int(n), nil
 	}
-	_, err := r.db.ExecContext(ctx, `UPDATE messages SET folder_id = 4 WHERE folder_id = ?`, folderID)
-	return err
+	res, err := r.db.ExecContext(ctx, `UPDATE messages SET folder_id = 4 WHERE folder_id = ?`, folderID)
+	if err != nil {
+		return 0, 0, err
+	}
+	n, _ := res.RowsAffected()
+	return int(n), 0, nil
 }
 
 // MarkAllRead marks all unread messages in a folder as read and returns the number of rows changed.
