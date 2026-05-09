@@ -127,6 +127,88 @@ func TestParseMessage_CharsetISO8859(t *testing.T) {
 	}
 }
 
+func TestParseMessage_HTMLOnly_DerivedBodyText(t *testing.T) {
+	raw := []byte(
+		"From: sender@example.com\r\n" +
+			"Content-Type: text/html\r\n" +
+			"\r\n" +
+			"<p>Hello, world!</p>\r\n",
+	)
+
+	pm, err := ParseMessage(raw)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if pm.BodyText == "" {
+		t.Error("BodyText is empty, want non-empty derived text")
+	}
+	if !strings.Contains(pm.BodyText, "Hello, world!") {
+		t.Errorf("BodyText = %q, want to contain 'Hello, world!'", pm.BodyText)
+	}
+	if pm.BodyHTML == "" {
+		t.Error("BodyHTML is empty, want non-empty")
+	}
+}
+
+func TestParseMessage_HTMLOnly_BrBecomesNewline(t *testing.T) {
+	raw := []byte(
+		"From: sender@example.com\r\n" +
+			"Content-Type: text/html\r\n" +
+			"\r\n" +
+			"<p>Line one<br>Line two</p>\r\n",
+	)
+
+	pm, err := ParseMessage(raw)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	idx1 := strings.Index(pm.BodyText, "Line one")
+	idx2 := strings.Index(pm.BodyText, "Line two")
+	if idx1 < 0 || idx2 < 0 {
+		t.Fatalf("BodyText = %q, missing expected lines", pm.BodyText)
+	}
+	if idx2 <= idx1+len("Line one") {
+		t.Fatalf("BodyText = %q, 'Line two' not after 'Line one'", pm.BodyText)
+	}
+	between := pm.BodyText[idx1+len("Line one") : idx2]
+	if !strings.Contains(between, "\n") {
+		t.Errorf("<br> did not produce newline between lines, got %q", between)
+	}
+}
+
+func TestParseMessage_PlainAndHTML_UsesNativePlain(t *testing.T) {
+	raw := []byte(
+		"From: sender@example.com\r\n" +
+			"MIME-Version: 1.0\r\n" +
+			"Content-Type: multipart/alternative; boundary=\"b\"\r\n" +
+			"\r\n" +
+			"--b\r\n" +
+			"Content-Type: text/plain\r\n" +
+			"\r\n" +
+			"native plain text\r\n" +
+			"--b\r\n" +
+			"Content-Type: text/html\r\n" +
+			"\r\n" +
+			"<p>HTML only content</p>\r\n" +
+			"--b--\r\n",
+	)
+
+	pm, err := ParseMessage(raw)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(pm.BodyText, "native plain text") {
+		t.Errorf("BodyText = %q, want native plain text", pm.BodyText)
+	}
+	// If the derived path were used, html2text would produce "HTML only content".
+	if strings.Contains(pm.BodyText, "HTML only content") {
+		t.Errorf("BodyText = %q, derived path was used instead of native plain part", pm.BodyText)
+	}
+	if !strings.Contains(pm.BodyHTML, "HTML only content") {
+		t.Errorf("BodyHTML = %q, want to contain 'HTML only content'", pm.BodyHTML)
+	}
+}
+
 func TestParseMessage_NoDate(t *testing.T) {
 	raw := []byte(
 		"From: sender@example.com\r\n" +

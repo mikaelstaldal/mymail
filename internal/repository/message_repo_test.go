@@ -481,6 +481,28 @@ func TestSearchMessages(t *testing.T) {
 	}
 }
 
+func TestSanitizeFTSQuery(t *testing.T) {
+	cases := []struct {
+		name  string
+		input string
+		want  string
+	}{
+		{"empty", ``, `""`},
+		{"quoted", `"quoted"`, `"""quoted"""`},
+		{"operators", `AND OR NOT NEAR`, `"AND OR NOT NEAR"`},
+		{"non-ascii", `café résumé`, `"café résumé"`},
+		{"mixed", `it's a "test"`, `"it's a ""test"""`},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := sanitizeFTSQuery(tc.input)
+			if got != tc.want {
+				t.Errorf("got %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
 func TestSearchMessagesFTSSanitization(t *testing.T) {
 	// Verify that ", non-ASCII, and FTS5 operators are treated as literals (no error).
 	ctx := context.Background()
