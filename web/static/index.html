@@ -3,117 +3,22 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>mymail — Mockup Index</title>
-<style>
-  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif; font-size: 14px; background: #f8fafc; color: #1e293b; padding: 40px; }
-  h1 { font-size: 24px; font-weight: 700; margin-bottom: 4px; }
-  .subtitle { color: #64748b; margin-bottom: 32px; font-size: 14px; }
-  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 20px; }
-  .card { background: #fff; border: 1px solid #e2e8f0; border-radius: 10px; overflow: hidden; transition: box-shadow 0.2s, transform 0.1s; }
-  .card:hover { box-shadow: 0 8px 24px rgba(0,0,0,0.1); transform: translateY(-2px); }
-  .card a { text-decoration: none; color: inherit; display: block; }
-  .card-preview { background: linear-gradient(135deg, #1c2b3a 0%, #1e4d7b 100%); height: 120px; display: flex; align-items: center; justify-content: center; font-size: 48px; }
-  .card-body { padding: 16px; }
-  .card-title { font-size: 15px; font-weight: 700; margin-bottom: 6px; }
-  .card-desc { font-size: 12.5px; color: #64748b; line-height: 1.5; }
-  .views-list { margin-top: 8px; display: flex; flex-wrap: wrap; gap: 4px; }
-  .view-tag { background: #f1f5f9; color: #475569; font-size: 11px; padding: 2px 7px; border-radius: 4px; }
-  hr { border: none; border-top: 1px solid #e2e8f0; margin: 32px 0 24px; }
-  .spec-note { background: #eff6ff; border-left: 4px solid #3b82f6; padding: 14px 18px; border-radius: 0 8px 8px 0; font-size: 13px; color: #1d4ed8; line-height: 1.6; max-width: 680px; }
-  .spec-note strong { display: block; font-size: 14px; margin-bottom: 4px; }
-</style>
+<title>mymail</title>
+<script type="importmap">
+{
+  "imports": {
+    "preact": "./vendor/preact/preact.module.js",
+    "preact/hooks": "./vendor/preact/hooks.module.js",
+    "preact/jsx-runtime": "./vendor/preact/jsx-runtime.module.js"
+  }
+}
+</script>
+<link rel="stylesheet" href="vendor/quill/quill.snow.css">
+<link rel="stylesheet" href="app.css">
 </head>
 <body>
-
-<h1>✉ mymail — UI Mockups</h1>
-<p class="subtitle">Static HTML+CSS mockups for the mymail web client. Click any card to open the mockup.</p>
-
-<div class="grid">
-
-  <div class="card">
-    <a href="mockup-main.html">
-      <div class="card-preview">📥</div>
-      <div class="card-body">
-        <div class="card-title">Main Mail View</div>
-        <div class="card-desc">The primary 3-pane layout: folder sidebar, message list, and message detail pane. Shows the Inbox with an email open.</div>
-        <div class="views-list">
-          <span class="view-tag">Folder sidebar</span>
-          <span class="view-tag">Message list</span>
-          <span class="view-tag">Message detail</span>
-          <span class="view-tag">Attachments</span>
-          <span class="view-tag">HTML body</span>
-          <span class="view-tag">Reply/Forward</span>
-        </div>
-      </div>
-    </a>
-  </div>
-
-  <div class="card">
-    <a href="mockup-compose.html">
-      <div class="card-preview">✏</div>
-      <div class="card-body">
-        <div class="card-title">Compose / Reply</div>
-        <div class="card-desc">Full compose form with To/Cc/Bcc fields (address autocomplete, tag pills), subject, HTML body editor, attachments, and Send Later scheduling.</div>
-        <div class="views-list">
-          <span class="view-tag">Address autocomplete</span>
-          <span class="view-tag">Send later</span>
-          <span class="view-tag">Attachments</span>
-          <span class="view-tag">Auto-save draft</span>
-          <span class="view-tag">Signature</span>
-          <span class="view-tag">Quoted reply</span>
-        </div>
-      </div>
-    </a>
-  </div>
-
-  <div class="card">
-    <a href="mockup-special-views.html">
-      <div class="card-preview">🔍</div>
-      <div class="card-body">
-        <div class="card-title">Special Views</div>
-        <div class="card-desc">Search results, Scheduled folder, Snoozed folder, Junk folder, empty Trash state, Snooze picker modal, and Move to folder modal.</div>
-        <div class="views-list">
-          <span class="view-tag">Search results</span>
-          <span class="view-tag">Scheduled</span>
-          <span class="view-tag">Snoozed</span>
-          <span class="view-tag">Junk</span>
-          <span class="view-tag">Snooze picker</span>
-          <span class="view-tag">Move picker</span>
-          <span class="view-tag">Empty state</span>
-        </div>
-      </div>
-    </a>
-  </div>
-
-  <div class="card">
-    <a href="mockup-settings.html">
-      <div class="card-preview">⚙</div>
-      <div class="card-body">
-        <div class="card-title">Settings</div>
-        <div class="card-desc">Tabbed settings panel covering all configuration areas accessible via the left navigation.</div>
-        <div class="views-list">
-          <span class="view-tag">Identities</span>
-          <span class="view-tag">Contacts</span>
-          <span class="view-tag">Folders</span>
-          <span class="view-tag">Filters</span>
-          <span class="view-tag">Spam filter</span>
-          <span class="view-tag">Preferences</span>
-        </div>
-      </div>
-    </a>
-  </div>
-
-</div>
-
-<hr>
-
-<div class="spec-note">
-  <strong>Layout summary (from SPEC.md)</strong>
-  Two-column layout: dark sidebar (left) with folder list; right side split vertically into message list (top) and message detail / compose pane (bottom). Bottom bar spans the full width with a Compose button and search field.
-  <br><br>
-  Built with: plain HTML + CSS, no build step, no frameworks — matching the same no-build-step approach as the planned Preact + HTM frontend.
-</div>
-
+<div id="app"></div>
+<script src="vendor/quill/quill.js"></script>
+<script type="module" src="app.js"></script>
 </body>
 </html>

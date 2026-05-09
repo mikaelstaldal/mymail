@@ -386,9 +386,11 @@ All HTTP responses include:
 X-Content-Type-Options: nosniff
 X-Frame-Options: DENY
 Referrer-Policy: same-origin
-Content-Security-Policy: default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'
+Content-Security-Policy: default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self' '<importmap-hash>'
 Strict-Transport-Security: max-age=31536000
 ```
+
+`<importmap-hash>` is a `'sha256-…'` token computed at server startup by hashing the exact text content of the `<script type="importmap">` element in the embedded `index.html` (see `web.ImportMapCSPHash`). This permits the importmap and same-origin `.js` files while excluding `'unsafe-inline'`, preserving XSS protection.
 
 > **Note on HSTS:** Browsers ignore `Strict-Transport-Security` when received over plain HTTP, so mymail emitting it directly has no effect at the mymail layer. When deployed behind a TLS-terminating reverse proxy, the HSTS header should be set by the proxy. mymail emits it regardless so that reverse proxies that forward upstream headers automatically will include it without additional configuration.
 

@@ -155,7 +155,11 @@ func runServer(dataDir, addr string, port int, basicAuthFile, basicAuthRealm, se
 	var httpHandler http.Handler = mux
 	httpHandler = auth.NewCSRF(serverOrigin)(httpHandler)
 	httpHandler = auth.NewBasicAuth(basicAuthFile, basicAuthRealm)(httpHandler)
-	httpHandler = auth.SecurityHeaders(httpHandler)
+	importMapHash, err := web.ImportMapCSPHash(web.Static)
+	if err != nil {
+		log.Fatalf("error: compute importmap CSP hash: %v", err)
+	}
+	httpHandler = auth.NewSecurityHeaders(importMapHash)(httpHandler)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()

@@ -9,11 +9,25 @@ Update the architecture spec if necessary. Detailed implementation decisions (SQ
 
 ## Build & Development Commands
 
+**Prerequisites:** `go` must be on PATH. `build.sh` additionally needs `tsc` (TypeScript compiler), `openapi-typescript`, `ogen` (Go code generator), and `golangci-lint`.
+
 ```bash
-# Build (single static binary, no CGO)
+# Full build: TypeScript compilation + Go binary + tests + lint
+bash build.sh
+
+# Build Go binary only (requires web/static/*.js already compiled)
 go build -tags netgo
 
-# Regenerate API server stubs from openapi.yaml (run after editing openapi.yaml)
+# Compile TypeScript → .js files alongside .ts sources
+make -C web compile
+
+# Type-check TypeScript without emitting files
+make -C web typecheck
+
+# Regenerate TypeScript API types from openapi.yaml
+make -C web gen-api
+
+# Regenerate Go API server stubs from openapi.yaml (run after editing openapi.yaml)
 go generate ./internal
 
 # Run tests
@@ -24,6 +38,8 @@ go test ./internal/handler/... -run TestFolderCreate
 ```
 
 The `go generate` directive in `internal/generate.go` runs `ogen --target ./api --clean --package api ../openapi.yaml`. The `internal/api/` package is fully generated — do not edit it manually.
+
+The `make -C web` commands use `tsc` and `openapi-typescript` directly from PATH.
 
 ## Architecture
 
