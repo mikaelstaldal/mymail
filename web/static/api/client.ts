@@ -63,6 +63,12 @@ export const api = {
     get: (id: number) =>
       request<components['schemas']['MessageDetail']>('GET', `/messages/${id}`),
 
+    patch: (id: number, updates: { folder_id?: number; read?: boolean; flagged?: boolean }) =>
+      request<components['schemas']['MessageSummary']>('PATCH', `/messages/${id}`, updates),
+
+    deleteSingle: (id: number) =>
+      request<void>('DELETE', `/messages/${id}`),
+
     bulkUpdate: (ids: number[], updates: { read?: boolean; flagged?: boolean }) =>
       request<{ updated: number }>('PATCH', '/messages', { ids, ...updates }),
 
@@ -73,5 +79,29 @@ export const api = {
       request<{ moved_to_trash: number; permanently_deleted: number }>(
         'DELETE', '/messages', { ids }
       ),
+
+    thread: (id: number) =>
+      request<{ total: number; truncated: boolean; items: components['schemas']['MessageSummary'][] }>(
+        'GET', `/messages/${id}/thread`
+      ),
+
+    snooze: (id: number, until: string) =>
+      request<{ id: number; folder_id: number; snoozed_until: string; snooze_folder_id: number | null }>(
+        'POST', `/messages/${id}/snooze`, { until }
+      ),
+
+    markJunk: (id: number) =>
+      request<{ id: number; folder_id: number }>('POST', `/messages/${id}/mark-junk`),
+
+    markNotJunk: (id: number) =>
+      request<{ id: number; folder_id: number }>('POST', `/messages/${id}/mark-not-junk`),
+
+    cancelSnooze: (id: number) =>
+      request<{ id: number; folder_id: number }>('DELETE', `/messages/${id}/snooze`),
+  },
+
+  scheduled: {
+    cancel: (id: number) =>
+      request<{ id: number; folder_id: number }>('DELETE', `/scheduled/${id}`),
   },
 };

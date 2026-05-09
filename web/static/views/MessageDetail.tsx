@@ -1,0 +1,574 @@
+import { useState, useEffect, useRef } from 'preact/hooks';
+import { api } from '../api/client.js';
+import { navigate } from '../router.js';
+import type { components } from '../api/types.js';
+
+type MessageDetailType = components['schemas']['MessageDetail'];
+type MessageSummary = components['schemas']['MessageSummary'];
+type Folder = components['schemas']['Folder'];
+
+const INBOX_ID = 1;
+const DRAFTS_ID = 3;
+const TRASH_ID = 4;
+const SCHEDULED_ID = 5;
+const SNOOZED_ID = 6;
+const JUNK_ID = 7;
+
+const MANAGED_FOLDER_IDS = new Set([DRAFTS_ID, SCHEDULED_ID, SNOOZED_ID]);
+const NO_MOVE_DEST_IDS = new Set([DRAFTS_ID, SCHEDULED_ID, SNOOZED_ID]);
+
+function formatDateFull(dateStr: string): string {
+  return new Date(dateStr).toLocaleString(undefined, {
+    month: 'short',
+    day: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+    timeZoneName: 'short',
+    hour12: false,
+  });
+}
+
+function formatDateShort(dateStr: string): string {
+  return new Date(dateStr).toLocaleString(undefined, {
+    month: 'short',
+    day: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  });
+}
+
+function formatBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function senderName(addr: string): string {
+  const m = addr.match(/^([^<>]+?)\s*<[^>]+>$/);
+  return m ? m[1].trim() : addr;
+}
+
+function autoResizeIframe(iframe: HTMLIFrameElement | null): void {
+  if (!iframe) return;
+  try {
+    const h = iframe.contentDocument?.documentElement.scrollHeight;
+    if (h) iframe.style.height = h + 'px';
+  } catch (_) { /* sandboxed - CSS fallback applies */ }
+}
+
+interface BodyIframeProps {
+  html: string;
+  externalImages: boolean;
+}
+
+function BodyIframe({ html, externalImages }: BodyIframeProps) {
+  const ref = useRef<HTMLIFrameElement>(null);
+  const handleLoad = () => autoResizeIframe(ref.current);
+
+  if (externalImages) {
+    // Keep sandbox="allow-same-origin" so the iframe can load external images,
+    // but still blocks scripts/forms/navigation. The CSP meta restricts to images
+    // + inline styles only (defence-in-depth).
+    const csp = `<meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src https:; style-src 'unsafe-inline'">`;
+    return (
+      <iframe
+        ref={ref}
+        class="body-iframe"
+        srcdoc={csp + '\n' + html}
+        sandbox="allow-same-origin"
+        onLoad={handleLoad}
+        title="Message body"
+      />
+    );
+  }
+  return (
+    <iframe
+      ref={ref}
+      class="body-iframe"
+      srcdoc={html}
+      sandbox=""
+      onLoad={handleLoad}
+      title="Message body"
+    />
+  );
+}
+
+interface ThreadEntryProps {
+  entry: MessageSummary;
+  isCurrent: boolean;
+  expanded: boolean;
+  expandedMsg: MessageDetailType | null;
+  expandedLoading: boolean;
+  onToggle: (id: number) => void;
+}
+
+function ThreadEntry({ entry, isCurrent, expanded, expandedMsg, expandedLoading, onToggle }: ThreadEntryProps) {
+  return (
+    <li class={`thread-entry${isCurrent ? ' thread-current' : ''}`}>
+      <button
+        class="thread-entry-btn"
+        onClick={() => !isCurrent && onToggle(entry.id)}
+        disabled={isCurrent}
+      >
+        <span class="thread-from">{senderName(entry.from_addr)}</span>
+        <span class="thread-subject">{entry.subject || '(no subject)'}</span>
+        <span class="thread-date">{formatDateShort(entry.date)}</span>
+        {!entry.read && <span class="thread-unread-dot" aria-label="Unread" />}
+      </button>
+      {expanded && (
+        <div class="thread-expanded">
+          {expandedLoading ? (
+            <div class="thread-expanded-status">Loading…</div>
+          ) : expandedMsg ? (
+            <>
+              <div class="thread-expanded-meta">
+                <span class="msg-detail-label">From</span>
+                <span class="msg-detail-value">{expandedMsg.from_addr}</span>
+                <span class="thread-expanded-sep" />
+                <span class="msg-detail-label">Date</span>
+                <span class="msg-detail-value">{formatDateFull(expandedMsg.date)}</span>
+              </div>
+              {expandedMsg.body_html ? (
+                <BodyIframe html={expandedMsg.body_html} externalImages={false} />
+              ) : (
+                <pre class="body-text">{expandedMsg.body_text}</pre>
+              )}
+            </>
+          ) : (
+            <div class="thread-expanded-status">Failed to load</div>
+          )}
+        </div>
+      )}
+    </li>
+  );
+}
+
+export interface MessageDetailProps {
+  id: number;
+  folders: Folder[];
+}
+
+export function MessageDetail({ id, folders }: MessageDetailProps) {
+  const [msg, setMsg] = useState<MessageDetailType | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [bodyView, setBodyView] = useState<'html' | 'text'>(
+    () => localStorage.getItem('preferredBodyView') === 'text' ? 'text' : 'html'
+  );
+  const [externalImages, setExternalImages] = useState(false);
+  const [thread, setThread] = useState<{ total: number; truncated: boolean; items: MessageSummary[] } | null>(null);
+  const [expandedThreadId, setExpandedThreadId] = useState<number | null>(null);
+  const expandedThreadIdRef = useRef<number | null>(null);
+  const [expandedMsg, setExpandedMsg] = useState<MessageDetailType | null>(null);
+  const [expandedLoading, setExpandedLoading] = useState(false);
+  const [moveTo, setMoveTo] = useState('');
+  const [snoozeOpen, setSnoozeOpen] = useState(false);
+  const [snoozeValue, setSnoozeValue] = useState('');
+  const [actionError, setActionError] = useState<string | null>(null);
+  const [actionInFlight, setActionInFlight] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    setError(null);
+    setMsg(null);
+    setThread(null);
+    setExpandedThreadId(null);
+    expandedThreadIdRef.current = null;
+    setExpandedMsg(null);
+    setExternalImages(false);
+    setActionError(null);
+    setActionInFlight(false);
+    setMoveTo('');
+    setSnoozeOpen(false);
+
+    api.messages.get(id).then(m => {
+      if (cancelled) return;
+      setMsg(m);
+      setLoading(false);
+      if (!m.read) {
+        void api.messages.patch(id, { read: true });
+      }
+    }).catch(e => {
+      if (cancelled) return;
+      setError(e instanceof Error ? e.message : 'Failed to load message');
+      setLoading(false);
+    });
+
+    api.messages.thread(id).then(t => {
+      if (!cancelled) setThread(t);
+    }).catch(() => { /* non-fatal */ });
+
+    return () => { cancelled = true; };
+  }, [id]);
+
+  const handleBodyViewChange = (view: 'html' | 'text') => {
+    setBodyView(view);
+    localStorage.setItem('preferredBodyView', view);
+  };
+
+  const handleExpandThread = async (entryId: number) => {
+    if (expandedThreadIdRef.current === entryId) {
+      expandedThreadIdRef.current = null;
+      setExpandedThreadId(null);
+      setExpandedMsg(null);
+      return;
+    }
+    expandedThreadIdRef.current = entryId;
+    setExpandedThreadId(entryId);
+    setExpandedMsg(null);
+    setExpandedLoading(true);
+    try {
+      const m = await api.messages.get(entryId);
+      // Only apply if the user hasn't clicked a different entry while waiting.
+      if (expandedThreadIdRef.current !== entryId) return;
+      if (!m.read) {
+        void api.messages.patch(entryId, { read: true });
+        setThread(t => t ? {
+          ...t,
+          items: t.items.map(i => i.id === entryId ? { ...i, read: true } : i),
+        } : null);
+      }
+      setExpandedMsg(m);
+      setExpandedLoading(false);
+    } catch (_) {
+      if (expandedThreadIdRef.current === entryId) setExpandedLoading(false);
+    }
+  };
+
+  const folderSlug = (fid: number) =>
+    folders.find(f => f.id === fid)?.slug ?? 'inbox';
+
+  const navigateToSourceFolder = (fid: number) =>
+    navigate(fid === INBOX_ID ? '#/inbox' : `#/folder/${folderSlug(fid)}`);
+
+  const handleDelete = async () => {
+    if (!msg || actionInFlight) return;
+    const isPermanent = msg.folder_id === JUNK_ID || msg.folder_id === TRASH_ID;
+    if (!confirm(isPermanent
+      ? 'Permanently delete this message? This cannot be undone.'
+      : 'Delete this message?')) return;
+    const sourceFolderId = msg.folder_id;
+    setActionInFlight(true);
+    try {
+      await api.messages.deleteSingle(msg.id);
+      navigateToSourceFolder(sourceFolderId);
+    } catch (e) {
+      setActionError(e instanceof Error ? e.message : 'Failed to delete message');
+      setActionInFlight(false);
+    }
+  };
+
+  const handleMove = async () => {
+    if (!msg || !moveTo || actionInFlight) return;
+    const destId = Number(moveTo);
+    const sourceFolderId = msg.folder_id;
+    setMoveTo('');
+    setActionInFlight(true);
+    try {
+      await api.messages.patch(msg.id, { folder_id: destId });
+      navigateToSourceFolder(sourceFolderId);
+    } catch (e) {
+      setActionError(e instanceof Error ? e.message : 'Failed to move message');
+      setActionInFlight(false);
+    }
+  };
+
+  const handleSnooze = async () => {
+    if (!msg || !snoozeValue || actionInFlight) return;
+    const until = new Date(snoozeValue).toISOString();
+    const sourceFolderId = msg.folder_id;
+    setActionInFlight(true);
+    try {
+      await api.messages.snooze(msg.id, until);
+      setSnoozeOpen(false);
+      navigateToSourceFolder(sourceFolderId);
+    } catch (e) {
+      setActionError(e instanceof Error ? e.message : 'Failed to snooze message');
+      setActionInFlight(false);
+    }
+  };
+
+  const handleMarkJunk = async () => {
+    if (!msg || actionInFlight) return;
+    setActionInFlight(true);
+    try {
+      await api.messages.markJunk(msg.id);
+      navigate('#/folder/junk');
+    } catch (e) {
+      setActionError(e instanceof Error ? e.message : 'Failed to mark as junk');
+      setActionInFlight(false);
+    }
+  };
+
+  const handleMarkNotJunk = async () => {
+    if (!msg || actionInFlight) return;
+    setActionInFlight(true);
+    try {
+      await api.messages.markNotJunk(msg.id);
+      navigate('#/inbox');
+    } catch (e) {
+      setActionError(e instanceof Error ? e.message : 'Failed to mark as not junk');
+      setActionInFlight(false);
+    }
+  };
+
+  const handleCancelSnooze = async () => {
+    if (!msg || actionInFlight) return;
+    setActionInFlight(true);
+    try {
+      const result = await api.messages.cancelSnooze(msg.id);
+      navigateToSourceFolder(result.folder_id);
+    } catch (e) {
+      setActionError(e instanceof Error ? e.message : 'Failed to cancel snooze');
+      setActionInFlight(false);
+    }
+  };
+
+  const handleCancelSchedule = async () => {
+    if (!msg || actionInFlight) return;
+    if (!confirm('Cancel this scheduled message and move it to Drafts?')) return;
+    setActionInFlight(true);
+    try {
+      await api.scheduled.cancel(msg.id);
+      navigate('#/folder/drafts');
+    } catch (e) {
+      setActionError(e instanceof Error ? e.message : 'Failed to cancel scheduled message');
+      setActionInFlight(false);
+    }
+  };
+
+  if (loading) return <div class="msg-detail-status">Loading…</div>;
+  if (error) return <div class="msg-detail-status msg-detail-error">{error}</div>;
+  if (!msg) return null;
+
+  const folderId = msg.folder_id;
+  const hasHtml = msg.body_html !== '';
+  const hasText = msg.body_text !== '';
+  const hasBoth = hasHtml && hasText;
+  const effectiveView = hasBoth ? bodyView : (hasHtml ? 'html' : 'text');
+
+  const moveFolders = folders.filter(f => f.id !== folderId && !NO_MOVE_DEST_IDS.has(f.id));
+  const canMove = !MANAGED_FOLDER_IDS.has(folderId);
+  const canDelete = !MANAGED_FOLDER_IDS.has(folderId);
+  const canSnooze = folderId === INBOX_ID || folderId === SNOOZED_ID || folderId >= 100;
+  const canCancelSnooze = folderId === SNOOZED_ID;
+  const canMarkJunk = folderId !== SNOOZED_ID && folderId !== SCHEDULED_ID && folderId !== DRAFTS_ID && folderId !== JUNK_ID;
+  const canMarkNotJunk = folderId === JUNK_ID;
+  const canCancelSchedule = folderId === SCHEDULED_ID;
+  const showSendFailed = msg.send_failed && folderId !== TRASH_ID;
+
+  const threadEntries = thread && thread.total > 1 ? thread.items : null;
+
+  return (
+    <div class="msg-detail">
+      <div class="msg-detail-actions">
+        <button class="btn btn-ghost btn-sm" onClick={() => navigate(`#/compose?reply=${id}`)}>
+          Reply
+        </button>
+        <button class="btn btn-ghost btn-sm" onClick={() => navigate(`#/compose?replyall=${id}`)}>
+          Reply All
+        </button>
+        <button class="btn btn-ghost btn-sm" onClick={() => navigate(`#/compose?forward=${id}`)}>
+          Forward
+        </button>
+        <span class="toolbar-sep" />
+        {canMove && (
+          <div class="move-inline">
+            <select
+              class="move-select"
+              value={moveTo}
+              disabled={actionInFlight}
+              onChange={e => setMoveTo((e.target as HTMLSelectElement).value)}
+            >
+              <option value="">Move to…</option>
+              {moveFolders.map(f => (
+                <option key={f.id} value={String(f.id)}>{f.name}</option>
+              ))}
+            </select>
+            {moveTo && (
+              <button class="btn btn-primary btn-sm" disabled={actionInFlight} onClick={() => void handleMove()}>
+                Move
+              </button>
+            )}
+          </div>
+        )}
+        {canDelete && (
+          <button class="btn btn-danger btn-sm" disabled={actionInFlight} onClick={() => void handleDelete()}>
+            Delete
+          </button>
+        )}
+        {canSnooze && (
+          <button
+            class={`btn btn-ghost btn-sm${snoozeOpen ? ' active' : ''}`}
+            disabled={actionInFlight}
+            onClick={() => setSnoozeOpen(o => !o)}
+          >
+            Snooze
+          </button>
+        )}
+        {canCancelSnooze && (
+          <button class="btn btn-ghost btn-sm" disabled={actionInFlight} onClick={() => void handleCancelSnooze()}>
+            Cancel snooze
+          </button>
+        )}
+        {canMarkJunk && (
+          <button class="btn btn-ghost btn-sm" disabled={actionInFlight} onClick={() => void handleMarkJunk()}>
+            Mark as junk
+          </button>
+        )}
+        {canMarkNotJunk && (
+          <button class="btn btn-ghost btn-sm" disabled={actionInFlight} onClick={() => void handleMarkNotJunk()}>
+            Not junk
+          </button>
+        )}
+        {canCancelSchedule && (
+          <button class="btn btn-ghost btn-sm" disabled={actionInFlight} onClick={() => void handleCancelSchedule()}>
+            Cancel schedule
+          </button>
+        )}
+      </div>
+
+      {snoozeOpen && (
+        <div class="snooze-panel">
+          <span class="snooze-label">Snooze until:</span>
+          <input
+            type="datetime-local"
+            class="snooze-input"
+            value={snoozeValue}
+            onInput={e => setSnoozeValue((e.target as HTMLInputElement).value)}
+          />
+          <button
+            class="btn btn-primary btn-sm"
+            disabled={!snoozeValue || actionInFlight}
+            onClick={() => void handleSnooze()}
+          >
+            Snooze
+          </button>
+          <button class="btn btn-ghost btn-sm" onClick={() => setSnoozeOpen(false)}>
+            Cancel
+          </button>
+        </div>
+      )}
+
+      {actionError && (
+        <div class="msg-detail-action-error">{actionError}</div>
+      )}
+
+      <div class="msg-detail-header">
+        <div class="msg-detail-field">
+          <span class="msg-detail-label">From</span>
+          <span class="msg-detail-value">
+            {msg.from_addr}
+            {showSendFailed && (
+              <span class="msg-badge-fail" title="Send failed">!</span>
+            )}
+          </span>
+        </div>
+        {msg.to_addr && (
+          <div class="msg-detail-field">
+            <span class="msg-detail-label">To</span>
+            <span class="msg-detail-value">{msg.to_addr}</span>
+          </div>
+        )}
+        {msg.cc_addr && (
+          <div class="msg-detail-field">
+            <span class="msg-detail-label">Cc</span>
+            <span class="msg-detail-value">{msg.cc_addr}</span>
+          </div>
+        )}
+        <div class="msg-detail-field">
+          <span class="msg-detail-label">Date</span>
+          <span class="msg-detail-value">{formatDateFull(msg.date)}</span>
+        </div>
+        <div class="msg-detail-field">
+          <span class="msg-detail-label">Subject</span>
+          <span class="msg-detail-value msg-detail-subject">{msg.subject || '(no subject)'}</span>
+        </div>
+
+        {msg.attachments.length > 0 && (
+          <div class="msg-detail-field msg-detail-attachments">
+            <span class="msg-detail-label">Attachments</span>
+            <ul class="attachment-list">
+              {msg.attachments.map(a => (
+                <li key={a.id}>
+                  <a
+                    href={`/api/v1/attachments/${a.id}`}
+                    download={a.filename}
+                    class="attachment-link"
+                  >
+                    📎 {a.filename}
+                    <span class="attachment-size">({formatBytes(a.size)})</span>
+                  </a>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+      </div>
+
+      {hasBoth && (
+        <div class="body-toggle">
+          <button
+            class={`btn btn-ghost btn-sm${effectiveView === 'html' ? ' active' : ''}`}
+            onClick={() => handleBodyViewChange('html')}
+          >
+            HTML
+          </button>
+          <button
+            class={`btn btn-ghost btn-sm${effectiveView === 'text' ? ' active' : ''}`}
+            onClick={() => handleBodyViewChange('text')}
+          >
+            Plain
+          </button>
+        </div>
+      )}
+
+      <div class="msg-detail-body">
+        {effectiveView === 'html' ? (
+          <>
+            {msg.has_external_images && !externalImages && (
+              <div class="external-images-bar">
+                <span>External images blocked.</span>
+                <button
+                  class="btn btn-ghost btn-sm"
+                  onClick={() => setExternalImages(true)}
+                >
+                  Load external images
+                </button>
+              </div>
+            )}
+            <BodyIframe html={msg.body_html} externalImages={externalImages} />
+          </>
+        ) : (
+          <pre class="body-text">{msg.body_text}</pre>
+        )}
+      </div>
+
+      {threadEntries && (
+        <div class="thread-strip">
+          <div class="thread-strip-header">
+            <span>Thread ({thread!.truncated ? `${thread!.total}+` : thread!.total} messages)</span>
+            {thread!.truncated && (
+              <span class="thread-truncated">— thread too long, showing oldest {thread!.total}</span>
+            )}
+          </div>
+          <ul class="thread-list">
+            {threadEntries.map(entry => (
+              <ThreadEntry
+                key={entry.id}
+                entry={entry}
+                isCurrent={entry.id === id}
+                expanded={expandedThreadId === entry.id}
+                expandedMsg={expandedThreadId === entry.id ? expandedMsg : null}
+                expandedLoading={expandedThreadId === entry.id && expandedLoading}
+                onToggle={entryId => void handleExpandThread(entryId)}
+              />
+            ))}
+          </ul>
+        </div>
+      )}
+    </div>
+  );
+}
