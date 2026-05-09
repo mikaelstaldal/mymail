@@ -38,6 +38,10 @@ func newServer(t *testing.T, db *sql.DB) http.Handler {
 		repository.NewFolderRepository(db),
 		repository.NewMessageRepository(db),
 		repository.NewAttachmentRepository(db),
+		repository.NewDraftRepository(db),
+		repository.NewContactRepository(db),
+		repository.NewIdentityRepository(db),
+		"",
 	)
 	srv, err := api.NewServer(h)
 	if err != nil {

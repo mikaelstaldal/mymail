@@ -4,6 +4,7 @@ import "errors"
 
 var (
 	ErrNotFound              = errors.New("not found")
+	ErrSourceNotFound        = errors.New("source message not found")
 	ErrConflict              = errors.New("conflict")
 	ErrUnknownIdentity       = errors.New("unknown identity")
 	ErrTooManyIDs            = errors.New("too many ids")

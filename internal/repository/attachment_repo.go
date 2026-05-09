@@ -76,6 +76,67 @@ func (r *AttachmentRepository) GetAttachment(ctx context.Context, id int64) (mod
 	return a, err
 }
 
+// DeleteAttachmentsByMessageID deletes all attachments for the given messageID.
+func (r *AttachmentRepository) DeleteAttachmentsByMessageID(ctx context.Context, messageID int64) error {
+	_, err := r.db.ExecContext(ctx, `DELETE FROM attachments WHERE message_id = ?`, messageID)
+	return err
+}
+
+// ReplaceAttachments atomically deletes all existing attachments for messageID and inserts atts.
+func (r *AttachmentRepository) ReplaceAttachments(ctx context.Context, messageID int64, atts []model.DBAttachment) error {
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	if _, err := tx.ExecContext(ctx, `DELETE FROM attachments WHERE message_id = ?`, messageID); err != nil {
+		return err
+	}
+	for _, att := range atts {
+		if _, err := tx.ExecContext(ctx,
+			`INSERT INTO attachments (message_id, filename, content_type, size, data) VALUES (?, ?, ?, ?, ?)`,
+			messageID, att.Filename, att.ContentType, att.Size, att.Data,
+		); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
+}
+
+// ListAttachmentsWithData returns all attachments for a message including their data BLOBs,
+// ordered by id.
+func (r *AttachmentRepository) ListAttachmentsWithData(ctx context.Context, messageID int64) ([]model.DBAttachment, error) {
+	rows, err := r.db.QueryContext(ctx,
+		`SELECT id, message_id, filename, content_type, size, data FROM attachments WHERE message_id = ? ORDER BY id`,
+		messageID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var atts []model.DBAttachment
+	for rows.Next() {
+		var a model.DBAttachment
+		if err := rows.Scan(&a.ID, &a.MessageID, &a.Filename, &a.ContentType, &a.Size, &a.Data); err != nil {
+			return nil, err
+		}
+		atts = append(atts, a)
+	}
+	return atts, rows.Err()
+}
+
+// CopyAttachments copies all attachments from sourceMessageID to destMessageID atomically.
+func (r *AttachmentRepository) CopyAttachments(ctx context.Context, sourceMessageID, destMessageID int64) error {
+	_, err := r.db.ExecContext(ctx,
+		`INSERT INTO attachments (message_id, filename, content_type, size, data)
+		 SELECT ?, filename, content_type, size, data FROM attachments WHERE message_id = ?`,
+		destMessageID, sourceMessageID,
+	)
+	return err
+}
+
 // DeleteAttachment deletes the attachment only if it belongs to messageID.
 // Returns ErrNotFound if the attachment does not exist or belongs to a different message.
 func (r *AttachmentRepository) DeleteAttachment(ctx context.Context, id int64, messageID int64) error {

@@ -46,8 +46,9 @@ type SendFields struct {
 
 // BuildMIMEMessage constructs a complete RFC 5322/MIME message.
 // It sanitizes body_html with the email policy, then builds the MIME structure.
-// Returns (rawMessage, hasExternalImages, error).
-func BuildMIMEMessage(fields SendFields, attachments []model.DBAttachment) ([]byte, bool, error) {
+// Returns (rawMessage, hasExternalImages, messageID, error). messageID is the generated
+// Message-ID value without surrounding angle brackets, suitable for DB storage.
+func BuildMIMEMessage(fields SendFields, attachments []model.DBAttachment) ([]byte, bool, string, error) {
 	// Sanitize outgoing HTML and detect external images
 	if fields.BodyHTML != "" {
 		fields.BodyHTML = sanitize.SanitizeHTML(fields.BodyHTML)
@@ -55,15 +56,15 @@ func BuildMIMEMessage(fields SendFields, attachments []model.DBAttachment) ([]by
 	hasExternalImages := sanitize.HasExternalImages(fields.BodyHTML)
 
 	// Strip header-injection characters (CR, LF, NUL) from all user-supplied values
-	fields.FromName = stripHeaderControls(fields.FromName)
-	fields.ToAddr = stripHeaderControls(fields.ToAddr)
-	fields.CcAddr = stripHeaderControls(fields.CcAddr)
-	fields.BccAddr = stripHeaderControls(fields.BccAddr)
-	fields.ReplyToAddr = stripHeaderControls(fields.ReplyToAddr)
-	fields.Subject = stripHeaderControls(fields.Subject)
-	fields.InReplyTo = stripHeaderControls(fields.InReplyTo)
+	fields.FromName = StripHeaderControls(fields.FromName)
+	fields.ToAddr = StripHeaderControls(fields.ToAddr)
+	fields.CcAddr = StripHeaderControls(fields.CcAddr)
+	fields.BccAddr = StripHeaderControls(fields.BccAddr)
+	fields.ReplyToAddr = StripHeaderControls(fields.ReplyToAddr)
+	fields.Subject = StripHeaderControls(fields.Subject)
+	fields.InReplyTo = StripHeaderControls(fields.InReplyTo)
 	for i, ref := range fields.References {
-		fields.References[i] = stripHeaderControls(ref)
+		fields.References[i] = StripHeaderControls(ref)
 	}
 
 	// Derive Message-ID domain from sender address
@@ -73,7 +74,8 @@ func BuildMIMEMessage(fields SendFields, attachments []model.DBAttachment) ([]by
 			domain = addr.Address[at+1:]
 		}
 	}
-	msgID := fmt.Sprintf("<%s@%s>", uuid.New().String(), domain)
+	msgIDValue := fmt.Sprintf("%s@%s", uuid.New().String(), domain)
+	msgID := "<" + msgIDValue + ">"
 
 	// RFC 5322 date
 	date := time.Now().Format(time.RFC1123Z)
@@ -90,7 +92,7 @@ func BuildMIMEMessage(fields SendFields, attachments []model.DBAttachment) ([]by
 	var bodyBuf bytes.Buffer
 	topCT, topCTE, err := buildBody(&bodyBuf, fields, attachments)
 	if err != nil {
-		return nil, false, err
+		return nil, false, "", err
 	}
 
 	// Assemble the RFC 5322 message
@@ -134,7 +136,7 @@ func BuildMIMEMessage(fields SendFields, attachments []model.DBAttachment) ([]by
 	out.WriteString("\r\n")
 	out.Write(bodyBuf.Bytes())
 
-	return out.Bytes(), hasExternalImages, nil
+	return out.Bytes(), hasExternalImages, msgIDValue, nil
 }
 
 // buildBody writes the message body to w.
@@ -271,8 +273,8 @@ func SendMail(sendmailPath string, message []byte) (string, error) {
 	return "", nil
 }
 
-// stripHeaderControls removes CR, LF, and NUL from a header value to prevent injection.
-func stripHeaderControls(s string) string {
+// StripHeaderControls removes CR, LF, and NUL from a header value to prevent injection.
+func StripHeaderControls(s string) string {
 	return strings.Map(func(r rune) rune {
 		if r == '\r' || r == '\n' || r == 0 {
 			return -1

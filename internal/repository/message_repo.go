@@ -265,6 +265,16 @@ func (r *MessageRepository) ListMessages(ctx context.Context, folderID int64, li
 	return items, total, nil
 }
 
+// MessageExists returns true if a message with the given ID exists (in any folder).
+func (r *MessageRepository) MessageExists(ctx context.Context, id int64) (bool, error) {
+	var n int
+	err := r.db.QueryRowContext(ctx, `SELECT 1 FROM messages WHERE id = ?`, id).Scan(&n)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	return err == nil, err
+}
+
 // GetMessage returns the full DBMessage row, or ErrNotFound.
 func (r *MessageRepository) GetMessage(ctx context.Context, id int64) (model.DBMessage, error) {
 	row := r.db.QueryRowContext(ctx,

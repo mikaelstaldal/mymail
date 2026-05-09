@@ -11,13 +11,33 @@ import (
 
 type Handler struct {
 	api.UnimplementedHandler
-	folders     *repository.FolderRepository
-	messages    *repository.MessageRepository
-	attachments *repository.AttachmentRepository
+	folders      *repository.FolderRepository
+	messages     *repository.MessageRepository
+	attachments  *repository.AttachmentRepository
+	drafts       *repository.DraftRepository
+	contacts     *repository.ContactRepository
+	identities   *repository.IdentityRepository
+	sendmailPath string
 }
 
-func New(folders *repository.FolderRepository, messages *repository.MessageRepository, attachments *repository.AttachmentRepository) *Handler {
-	return &Handler{folders: folders, messages: messages, attachments: attachments}
+func New(
+	folders *repository.FolderRepository,
+	messages *repository.MessageRepository,
+	attachments *repository.AttachmentRepository,
+	drafts *repository.DraftRepository,
+	contacts *repository.ContactRepository,
+	identities *repository.IdentityRepository,
+	sendmailPath string,
+) *Handler {
+	return &Handler{
+		folders:      folders,
+		messages:     messages,
+		attachments:  attachments,
+		drafts:       drafts,
+		contacts:     contacts,
+		identities:   identities,
+		sendmailPath: sendmailPath,
+	}
 }
 
 var _ api.Handler = (*Handler)(nil)

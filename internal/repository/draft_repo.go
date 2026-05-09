@@ -120,6 +120,100 @@ func (r *DraftRepository) CreateDraft(ctx context.Context, msg model.DBMessage) 
 	return res.LastInsertId()
 }
 
+// CreateDraftCopying creates a draft and atomically copies all attachments from
+// sourceMessageID (when non-nil) in a single transaction.
+// Returns ErrSourceNotFound (→ 400) if sourceMessageID does not exist.
+// Identity resolution follows the same rules as CreateDraft.
+func (r *DraftRepository) CreateDraftCopying(ctx context.Context, msg model.DBMessage, sourceMessageID *int64) (int64, error) {
+	// Resolve from_addr before the transaction (read-only, safe outside tx).
+	fromAddr, err := r.resolveFromAddr(ctx, msg.IdentityID)
+	if err != nil {
+		return 0, err
+	}
+
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return 0, err
+	}
+	defer tx.Rollback()
+
+	now := time.Now().UTC().Format(time.RFC3339)
+	dateStr := msg.Date.UTC().Format(time.RFC3339)
+
+	var identityIDVal any
+	if msg.IdentityID.Valid {
+		identityIDVal = msg.IdentityID.Int64
+	}
+	var messageIDVal any
+	if msg.MessageID.Valid {
+		messageIDVal = msg.MessageID.String
+	}
+	var inReplyToVal any
+	if msg.InReplyTo.Valid {
+		inReplyToVal = msg.InReplyTo.String
+	}
+	var refsVal any
+	if msg.References.Valid && msg.References.String != "" {
+		refsVal = msg.References.String
+	}
+	var sendAtVal any
+	if msg.SendAt.Valid {
+		sendAtVal = msg.SendAt.Time.UTC().Format(time.RFC3339)
+	}
+
+	res, err := tx.ExecContext(ctx, `
+		INSERT INTO messages (
+			folder_id, identity_id, message_id, in_reply_to, "references",
+			from_addr, to_addr, cc_addr, bcc_addr, reply_to_addr, subject,
+			date, body_text, body_html, raw,
+			read, flagged, has_attachments, has_external_images,
+			send_at, send_failure_count,
+			created_at, updated_at
+		) VALUES (
+			3, ?, ?, ?, ?,
+			?, ?, ?, ?, ?, ?,
+			?, ?, ?, NULL,
+			0, 0, 0, 0,
+			?, 0,
+			?, ?
+		)`,
+		identityIDVal, messageIDVal, inReplyToVal, refsVal,
+		fromAddr, msg.ToAddr, msg.CcAddr, msg.BccAddr, msg.ReplyToAddr, msg.Subject,
+		dateStr, msg.BodyText, msg.BodyHTML,
+		sendAtVal,
+		now, now,
+	)
+	if err != nil {
+		return 0, err
+	}
+
+	draftID, err := res.LastInsertId()
+	if err != nil {
+		return 0, err
+	}
+
+	if sourceMessageID != nil {
+		var exists int
+		err := tx.QueryRowContext(ctx, `SELECT 1 FROM messages WHERE id = ?`, *sourceMessageID).Scan(&exists)
+		if errors.Is(err, sql.ErrNoRows) {
+			return 0, ErrSourceNotFound
+		}
+		if err != nil {
+			return 0, err
+		}
+
+		if _, err := tx.ExecContext(ctx,
+			`INSERT INTO attachments (message_id, filename, content_type, size, data)
+			 SELECT ?, filename, content_type, size, data FROM attachments WHERE message_id = ?`,
+			draftID, *sourceMessageID,
+		); err != nil {
+			return 0, err
+		}
+	}
+
+	return draftID, tx.Commit()
+}
+
 // UpdateDraft replaces all draft fields on message id.
 // Returns ErrNotFound if the message does not exist or is not in Drafts (folder_id=3).
 // Identity resolution follows the same rules as CreateDraft.
