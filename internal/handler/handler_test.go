@@ -41,6 +41,8 @@ func newServer(t *testing.T, db *sql.DB) http.Handler {
 		repository.NewDraftRepository(db),
 		repository.NewContactRepository(db),
 		repository.NewIdentityRepository(db),
+		repository.NewFilterRepository(db),
+		repository.NewSpamFilterRepository(db),
 		"",
 	)
 	srv, err := api.NewServer(h)

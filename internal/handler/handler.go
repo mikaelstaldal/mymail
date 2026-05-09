@@ -17,6 +17,8 @@ type Handler struct {
 	drafts       *repository.DraftRepository
 	contacts     *repository.ContactRepository
 	identities   *repository.IdentityRepository
+	filters      *repository.FilterRepository
+	spamFilter   *repository.SpamFilterRepository
 	sendmailPath string
 }
 
@@ -27,6 +29,8 @@ func New(
 	drafts *repository.DraftRepository,
 	contacts *repository.ContactRepository,
 	identities *repository.IdentityRepository,
+	filters *repository.FilterRepository,
+	spamFilter *repository.SpamFilterRepository,
 	sendmailPath string,
 ) *Handler {
 	return &Handler{
@@ -36,6 +40,8 @@ func New(
 		drafts:       drafts,
 		contacts:     contacts,
 		identities:   identities,
+		filters:      filters,
+		spamFilter:   spamFilter,
 		sendmailPath: sendmailPath,
 	}
 }
