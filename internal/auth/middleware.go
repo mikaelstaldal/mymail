@@ -1,0 +1,101 @@
+package auth
+
+import (
+	"encoding/json"
+	"fmt"
+	"net/http"
+	"net/url"
+
+	serverauth "github.com/mikaelstaldal/go-server-common/auth"
+)
+
+// NewBasicAuth returns a middleware that enforces HTTP Basic Auth using the given
+// htpasswd file. If htpasswdPath is empty, all requests pass through.
+// GET /api/v1/health is always exempt.
+func NewBasicAuth(htpasswdPath, realm string) func(http.Handler) http.Handler {
+	if htpasswdPath == "" {
+		return func(next http.Handler) http.Handler { return next }
+	}
+
+	htpasswd, err := serverauth.LoadHtpasswd(htpasswdPath)
+	if err != nil {
+		panic(fmt.Sprintf("auth: %v", err))
+	}
+
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.Method == http.MethodGet && r.URL.Path == "/api/v1/health" {
+				next.ServeHTTP(w, r)
+				return
+			}
+			username, password, ok := r.BasicAuth()
+			if !ok || !htpasswd.Check(username, password) {
+				w.Header().Set("WWW-Authenticate", fmt.Sprintf(`Basic realm=%q`, realm))
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusUnauthorized)
+				_ = json.NewEncoder(w).Encode(map[string]string{"error": "Unauthorized"})
+				return
+			}
+			next.ServeHTTP(w, r)
+		})
+	}
+}
+
+// NewCSRF returns a middleware that rejects non-GET requests whose origin does
+// not match serverOrigin (e.g. "https://mail.example.com"). Requests with
+// neither Origin nor Referer are allowed (native clients).
+func NewCSRF(serverOrigin string) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.Method == http.MethodGet {
+				next.ServeHTTP(w, r)
+				return
+			}
+			if err := checkCSRFOrigin(r, serverOrigin); err != nil {
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusForbidden)
+				_ = json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+				return
+			}
+			next.ServeHTTP(w, r)
+		})
+	}
+}
+
+func checkCSRFOrigin(r *http.Request, serverOrigin string) error {
+	origin := r.Header.Get("Origin")
+
+	if origin == "" {
+		referer := r.Header.Get("Referer")
+		if referer == "" {
+			return nil // native client, allow
+		}
+		u, err := url.Parse(referer)
+		if err != nil || u.Host == "" {
+			return fmt.Errorf("CSRF: invalid Referer header")
+		}
+		origin = u.Scheme + "://" + u.Host
+	}
+
+	if origin == "null" {
+		return fmt.Errorf("CSRF: null origin rejected")
+	}
+
+	if origin != serverOrigin {
+		return fmt.Errorf("CSRF: origin %q does not match server origin", origin)
+	}
+	return nil
+}
+
+// SecurityHeaders adds standard security headers to every response.
+func SecurityHeaders(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		h := w.Header()
+		h.Set("X-Content-Type-Options", "nosniff")
+		h.Set("X-Frame-Options", "DENY")
+		h.Set("Referrer-Policy", "same-origin")
+		h.Set("Content-Security-Policy", "default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'")
+		h.Set("Strict-Transport-Security", "max-age=31536000")
+		next.ServeHTTP(w, r)
+	})
+}
