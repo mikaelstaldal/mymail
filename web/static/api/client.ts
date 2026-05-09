@@ -42,36 +42,36 @@ export const api = {
 
     delete: (id: number) =>
       request<void>('DELETE', `/folders/${id}`),
+
+    listMessages: (folderId: number, limit: number, offset: number) => {
+      const q = new URLSearchParams({ limit: String(limit), offset: String(offset) });
+      return request<{ total: number; items: MessageSummary[] }>(
+        'GET', `/folders/${folderId}/messages?${q}`
+      );
+    },
+
+    markAllRead: (folderId: number) =>
+      request<{ updated: number }>('POST', `/folders/${folderId}/mark-all-read`),
+
+    deleteAllMessages: (folderId: number) =>
+      request<{ moved_to_trash: number; permanently_deleted: number }>(
+        'DELETE', `/folders/${folderId}/messages`
+      ),
   },
 
   messages: {
-    list: (params: {
-      folder_id?: number;
-      search?: string;
-      page?: number;
-      per_page?: number;
-    }) => {
-      const q = new URLSearchParams();
-      if (params.folder_id !== undefined) q.set('folder_id', String(params.folder_id));
-      if (params.search) q.set('search', params.search);
-      if (params.page !== undefined) q.set('page', String(params.page));
-      if (params.per_page !== undefined) q.set('per_page', String(params.per_page));
-      return request<{ total: number; items: MessageSummary[] }>('GET', `/messages?${q}`);
-    },
-
     get: (id: number) =>
       request<components['schemas']['MessageDetail']>('GET', `/messages/${id}`),
 
-    markRead: (ids: number[], read: boolean) =>
-      request<void>('POST', '/messages/read', { ids, read }),
-
-    markFlagged: (ids: number[], flagged: boolean) =>
-      request<void>('POST', '/messages/flagged', { ids, flagged }),
+    bulkUpdate: (ids: number[], updates: { read?: boolean; flagged?: boolean }) =>
+      request<{ updated: number }>('PATCH', '/messages', { ids, ...updates }),
 
     move: (ids: number[], folder_id: number) =>
-      request<void>('POST', '/messages/move', { ids, folder_id }),
+      request<{ updated: number }>('POST', '/messages/move', { ids, folder_id }),
 
     delete: (ids: number[]) =>
-      request<void>('DELETE', '/messages', { ids }),
+      request<{ moved_to_trash: number; permanently_deleted: number }>(
+        'DELETE', '/messages', { ids }
+      ),
   },
 };

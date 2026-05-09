@@ -2,6 +2,7 @@ import { render } from 'preact';
 import { useState, useEffect } from 'preact/hooks';
 import { Sidebar } from './layout/Sidebar.js';
 import { Toolbar } from './layout/Toolbar.js';
+import { FolderView } from './views/FolderView.js';
 import { initRouter, onRouteChange, type Route } from './router.js';
 import { startPolling } from './poll.js';
 import type { components } from './api/types.js';
@@ -50,7 +51,7 @@ function App() {
     }
   }, [route]);
 
-  const slug =
+  const activeSlug =
     route.type === 'inbox' ? 'inbox' :
     route.type === 'folder' ? route.slug :
     route.type === 'message' ? lastFolderSlug :
@@ -58,16 +59,35 @@ function App() {
 
   const label = routeLabel(route, folders);
 
+  const folderSlug =
+    route.type === 'inbox' ? 'inbox' :
+    route.type === 'folder' ? route.slug :
+    null;
+  const currentFolder = folderSlug !== null
+    ? folders.find(f => f.slug === folderSlug)
+    : undefined;
+
+  function renderContent() {
+    if (route.type === 'inbox' || route.type === 'folder') {
+      if (folders.length === 0) {
+        return <div class="placeholder-view"><p>Loading…</p></div>;
+      }
+      if (!currentFolder) {
+        return <div class="placeholder-view"><p>Folder not found</p></div>;
+      }
+      return <FolderView folder={currentFolder} folders={folders} />;
+    }
+    return <div class="placeholder-view"><p>{label}</p></div>;
+  }
+
   return (
     <div class="app">
-      <Sidebar folders={folders} activeSlug={slug} />
+      <Sidebar folders={folders} activeSlug={activeSlug} />
       <header class="topbar">
         <span class="topbar-title">{label}</span>
       </header>
       <main class="content">
-        <div class="placeholder-view">
-          <p>{label}</p>
-        </div>
+        {renderContent()}
       </main>
       <Toolbar />
     </div>
