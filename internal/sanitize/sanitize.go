@@ -23,9 +23,9 @@ var (
 
 	cssForbiddenSubstrings = []string{"url(", "expression(", "-moz-binding", "/*"}
 
-	reNumeric     = regexp.MustCompile(`^[0-9]+$`)
-	reAlign       = regexp.MustCompile(`^(left|right|center|justify)$`)
-	reHref        = regexp.MustCompile(`(?i)^(https?://|mailto:)`)
+	reNumeric = regexp.MustCompile(`^[0-9]+$`)
+	reAlign   = regexp.MustCompile(`^(left|right|center|justify)$`)
+	reHref    = regexp.MustCompile(`(?i)^(https?://|mailto:)`)
 	// reSrc allows http/https URLs and base64-encoded non-SVG image data URIs.
 	// SVG is excluded by enumerating allowed subtypes (RE2 lacks lookaheads).
 	// Padding = is restricted to at most two trailing characters per the base64 spec.
@@ -115,7 +115,7 @@ func ResolveCID(h string, cidMap map[string][]byte, cidContentTypes map[string]s
 		walkNodes(doc, func(n *html.Node) {
 			if n.Type == html.ElementNode && n.Data == "img" {
 				n.Attr = filterAttrs(n.Attr, func(a html.Attribute) bool {
-					return !(a.Key == "src" && isCIDSrc(a.Val))
+					return a.Key != "src" || !isCIDSrc(a.Val)
 				})
 			}
 		})

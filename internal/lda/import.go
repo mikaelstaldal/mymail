@@ -65,9 +65,9 @@ func AcquireImportLock(dataDir string) (*os.File, error) {
 		}
 		return nil, fmt.Errorf("lock held by PID %s: %w", pid, err)
 	}
-	f.Truncate(0)
-	fmt.Fprintf(f, "%d", os.Getpid())
-	f.Sync()
+	_ = f.Truncate(0)
+	_, _ = fmt.Fprintf(f, "%d", os.Getpid())
+	_ = f.Sync()
 	return f, nil
 }
 

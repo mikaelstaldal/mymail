@@ -201,7 +201,7 @@ func indexFallbackHandler() http.HandlerFunc {
 		f, err := staticSub.Open(fsPath)
 		if err == nil {
 			stat, serr := f.Stat()
-			f.Close()
+			_ = f.Close()
 			if serr == nil && !stat.IsDir() {
 				fileServer.ServeHTTP(w, r)
 				return
