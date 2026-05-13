@@ -9,6 +9,22 @@ export interface MessageListProps {
   onToggleSelect: (id: number) => void;
   onToggleSelectAll: () => void;
   onRowClick: (id: number) => void;
+  snippets?: Record<number, string>;
+}
+
+function renderSnippet(text: string) {
+  const out: preact.JSX.Element[] = [];
+  let last = 0;
+  let key = 0;
+  const re = /\*\*(.+?)\*\*/g;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(text)) !== null) {
+    if (m.index > last) out.push(<span key={key++}>{text.slice(last, m.index)}</span>);
+    out.push(<mark key={key++} class="snippet-mark">{m[1]}</mark>);
+    last = m.index + m[0].length;
+  }
+  if (last < text.length) out.push(<span key={key++}>{text.slice(last)}</span>);
+  return out;
 }
 
 function IndeterminateCheckbox({ checked, indeterminate, onChange, ariaLabel }: {
@@ -80,18 +96,32 @@ function senderName(from: string): string {
   return m ? m[1].trim() : from;
 }
 
+function Badges({ msg }: { msg: MessageSummary }) {
+  return (
+    <>
+      {msg.has_attachments && (
+        <span class="msg-badge" title="Has attachments">📎</span>
+      )}
+      {msg.send_failed && msg.folder_id !== 4 && (
+        <span class="msg-badge msg-badge-fail" title="Send failed">!</span>
+      )}
+    </>
+  );
+}
+
 export function MessageList({
   items,
   selectedIds,
   onToggleSelect,
   onToggleSelectAll,
   onRowClick,
+  snippets,
 }: MessageListProps) {
   const allSelected = items.length > 0 && items.every(m => selectedIds.has(m.id));
   const someSelected = selectedIds.size > 0;
 
   return (
-    <table class="msg-table">
+    <table class={`msg-table${snippets ? ' has-snippets' : ''}`}>
       <thead>
         <tr>
           <th class="col-check">
@@ -127,12 +157,21 @@ export function MessageList({
               </td>
               <td class="col-from">{senderName(msg.from_addr)}</td>
               <td class="col-subject">
-                <span class="subject-text">{msg.subject || '(no subject)'}</span>
-                {msg.has_attachments && (
-                  <span class="msg-badge" title="Has attachments">📎</span>
-                )}
-                {msg.send_failed && msg.folder_id !== 4 && (
-                  <span class="msg-badge msg-badge-fail" title="Send failed">!</span>
+                {snippets ? (
+                  <>
+                    <div class="subject-line">
+                      <span class="subject-text">{msg.subject || '(no subject)'}</span>
+                      <Badges msg={msg} />
+                    </div>
+                    {snippets[msg.id] && (
+                      <div class="msg-snippet">{renderSnippet(snippets[msg.id])}</div>
+                    )}
+                  </>
+                ) : (
+                  <>
+                    <span class="subject-text">{msg.subject || '(no subject)'}</span>
+                    <Badges msg={msg} />
+                  </>
                 )}
               </td>
               <td class="col-date" title={title}>{display}</td>

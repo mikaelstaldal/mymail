@@ -5,6 +5,7 @@ import { Toolbar } from './layout/Toolbar.js';
 import { FolderView } from './views/FolderView.js';
 import { MessageDetail } from './views/MessageDetail.js';
 import { ComposeForm } from './views/ComposeForm.js';
+import { SearchView } from './views/SearchView.js';
 import { initRouter, onRouteChange, type Route } from './router.js';
 import { startPolling } from './poll.js';
 import type { components } from './api/types.js';
@@ -90,6 +91,9 @@ function App() {
           forwardId={route.forwardId}
         />
       );
+    }
+    if (route.type === 'search') {
+      return <SearchView query={route.query} folders={folders} />;
     }
     return <div class="placeholder-view"><p>{label}</p></div>;
   }
