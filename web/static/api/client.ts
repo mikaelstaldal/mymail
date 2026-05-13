@@ -2,8 +2,31 @@ import type { components } from './types.js';
 
 type Folder = components['schemas']['Folder'];
 type MessageSummary = components['schemas']['MessageSummary'];
+type Identity = components['schemas']['Identity'];
+type Contact = components['schemas']['Contact'];
+type DraftRequest = components['schemas']['DraftRequest'];
 
 const BASE = '/api/v1';
+
+async function requestStatus(method: string, path: string): Promise<{ status: number; data: unknown }> {
+  const res = await fetch(BASE + path, { method, headers: { 'Content-Type': 'application/json' } });
+  if (res.status === 401) { window.location.reload(); throw new Error('Unauthorized'); }
+  const data = await res.json() as unknown;
+  if (!res.ok) throw new Error((data as { error?: string }).error ?? res.statusText);
+  return { status: res.status, data };
+}
+
+async function requestMultipart<T>(method: string, path: string, body: unknown, files: File[]): Promise<T> {
+  const fd = new FormData();
+  fd.append('message', JSON.stringify(body));
+  for (const f of files) fd.append('attachments', f);
+  const res = await fetch(BASE + path, { method, body: fd });
+  if (res.status === 401) { window.location.reload(); throw new Error('Unauthorized'); }
+  if (res.status === 204) return undefined as T;
+  const data = await res.json() as unknown;
+  if (!res.ok) throw new Error((data as { error?: string }).error ?? res.statusText);
+  return data as T;
+}
 
 async function request<T>(method: string, path: string, body?: unknown): Promise<T> {
   const init: RequestInit = { method };
@@ -103,5 +126,40 @@ export const api = {
   scheduled: {
     cancel: (id: number) =>
       request<{ id: number; folder_id: number }>('DELETE', `/scheduled/${id}`),
+  },
+
+  identities: {
+    list: () =>
+      request<{ total: number; items: Identity[] }>('GET', '/identities'),
+  },
+
+  contacts: {
+    autocomplete: (q: string, limit = 10) => {
+      const p = new URLSearchParams({ q, limit: String(limit) });
+      return request<{ total: number; items: Contact[] }>('GET', `/contacts?${p}`);
+    },
+  },
+
+  drafts: {
+    create: (body: DraftRequest) =>
+      request<{ id: number; updated_at: string }>('POST', '/drafts', body),
+
+    createWithAttachments: (body: DraftRequest, files: File[]) =>
+      requestMultipart<{ id: number; updated_at: string }>('POST', '/drafts-with-attachments', body, files),
+
+    update: (id: number, body: DraftRequest) =>
+      request<{ id: number; updated_at: string }>('PUT', `/drafts/${id}`, body),
+
+    updateWithAttachments: (id: number, body: DraftRequest, files: File[]) =>
+      requestMultipart<{ id: number; updated_at: string }>('PUT', `/drafts-with-attachments/${id}`, body, files),
+
+    delete: (id: number) =>
+      request<void>('DELETE', `/drafts/${id}`),
+
+    deleteAttachment: (id: number, attachmentId: number) =>
+      request<void>('DELETE', `/drafts/${id}/attachments/${attachmentId}`),
+
+    send: (id: number) =>
+      requestStatus('POST', `/drafts/${id}/send`),
   },
 };

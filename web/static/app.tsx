@@ -4,6 +4,7 @@ import { Sidebar } from './layout/Sidebar.js';
 import { Toolbar } from './layout/Toolbar.js';
 import { FolderView } from './views/FolderView.js';
 import { MessageDetail } from './views/MessageDetail.js';
+import { ComposeForm } from './views/ComposeForm.js';
 import { initRouter, onRouteChange, type Route } from './router.js';
 import { startPolling } from './poll.js';
 import type { components } from './api/types.js';
@@ -80,6 +81,15 @@ function App() {
     }
     if (route.type === 'message') {
       return <MessageDetail id={route.id} folders={folders} />;
+    }
+    if (route.type === 'compose') {
+      return (
+        <ComposeForm
+          replyId={route.replyId}
+          replyAllId={route.replyAllId}
+          forwardId={route.forwardId}
+        />
+      );
     }
     return <div class="placeholder-view"><p>{label}</p></div>;
   }

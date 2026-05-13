@@ -763,3 +763,177 @@ html, body {
   color: var(--text-muted);
   font-size: 13px;
 }
+
+/* ── Compose Form ── */
+.compose-loading {
+  display: flex; align-items: center; justify-content: center;
+  flex: 1; height: 100%; color: var(--text-muted); font-size: 14px;
+}
+
+.compose-loading-overlay {
+  position: absolute; inset: 0; background: rgba(255,255,255,0.8);
+  display: flex; align-items: center; justify-content: center;
+  color: var(--text-muted); font-size: 14px; z-index: 10;
+}
+
+.compose-form {
+  display: flex; flex-direction: column; height: 100%; overflow: hidden;
+  background: #fff; position: relative;
+}
+
+.compose-fields {
+  flex-shrink: 0;
+  border-bottom: 1px solid var(--list-border);
+}
+
+.cf-field-row {
+  display: grid;
+  grid-template-columns: 64px 1fr auto;
+  align-items: flex-start;
+  border-bottom: 1px solid #f0f4f8;
+  min-height: 40px;
+}
+.cf-field-row:last-child { border-bottom: none; }
+
+.cf-field-label {
+  font-size: 11.5px; font-weight: 600; color: var(--text-muted);
+  text-transform: uppercase; letter-spacing: 0.04em;
+  padding: 11px 8px 0 16px; text-align: right; white-space: nowrap; flex-shrink: 0;
+}
+
+.cf-field-input {
+  padding: 8px 0; align-self: center;
+}
+.cf-field-input select {
+  border: none; background: transparent; font-size: 13.5px;
+  color: var(--text-primary); outline: none; cursor: pointer; width: 100%; padding: 0;
+}
+
+.cf-field-actions {
+  padding: 6px 10px; display: flex; gap: 4px; align-items: center; flex-shrink: 0;
+}
+
+.cf-toggle-btn {
+  font-size: 12px; color: var(--btn-primary); cursor: pointer;
+  padding: 3px 6px; border-radius: 3px; border: none; background: none;
+  transition: background 0.1s;
+}
+.cf-toggle-btn:hover { background: #eff6ff; }
+
+/* Address field / autocomplete */
+.cf-autocomplete-wrap { position: relative; flex: 1; }
+
+.cf-tags-input {
+  display: flex; flex-wrap: wrap; gap: 4px; align-items: center;
+  padding: 6px 0; min-height: 40px; cursor: text;
+}
+.cf-tags-input input {
+  border: none; outline: none; font-size: 13.5px; min-width: 120px;
+  flex: 1; background: transparent; padding: 2px 0;
+}
+
+.cf-addr-tag {
+  display: inline-flex; align-items: center; gap: 4px;
+  background: #eff6ff; border: 1px solid #bfdbfe; border-radius: 4px;
+  padding: 2px 6px 2px 8px; font-size: 12.5px; color: #1d4ed8;
+}
+.cf-addr-tag button {
+  background: none; border: none; cursor: pointer; color: #93c5fd;
+  font-size: 14px; line-height: 1; padding: 0;
+}
+.cf-addr-tag button:hover { color: #1d4ed8; }
+
+.cf-autocomplete-dropdown {
+  position: absolute; top: calc(100% + 2px); left: 0; right: 0;
+  background: #fff; border: 1px solid var(--list-border); border-radius: var(--border-radius);
+  box-shadow: 0 4px 16px rgba(0,0,0,0.12); z-index: 100; overflow: hidden;
+}
+
+.cf-ac-item {
+  display: flex; align-items: center; gap: 8px; padding: 8px 12px;
+  cursor: pointer; font-size: 13px; transition: background 0.1s;
+}
+.cf-ac-item:hover, .cf-ac-item.selected { background: var(--list-item-hover); }
+.cf-ac-name { font-weight: 500; color: var(--text-primary); }
+.cf-ac-addr { font-size: 12px; color: var(--text-muted); margin-left: 4px; }
+.cf-ac-hint { padding: 6px 12px; font-size: 12px; color: var(--text-muted); font-style: italic; }
+
+.cf-subject-input {
+  padding: 9px 0; font-size: 15px; font-weight: 600; color: var(--text-primary);
+  border: none; outline: none; width: 100%; background: transparent;
+}
+.cf-subject-input::placeholder { color: var(--text-muted); font-weight: 400; }
+
+/* Quill editor area */
+.compose-editor-wrap {
+  flex: 1; overflow: hidden; display: flex; flex-direction: column; min-height: 0;
+}
+.compose-editor-wrap .ql-container {
+  flex: 1; overflow-y: auto; font-family: inherit; font-size: 14px;
+  line-height: 1.7; border: none;
+}
+.compose-editor-wrap .ql-toolbar {
+  border-left: none; border-right: none; border-top: none;
+  background: #fafafa; flex-shrink: 0;
+}
+.compose-editor-wrap .ql-editor {
+  padding: 16px 20px; min-height: 180px;
+}
+
+/* Attachments */
+.compose-attachments {
+  display: flex; flex-wrap: wrap; gap: 6px;
+  padding: 8px 16px; border-top: 1px solid var(--list-border);
+  background: #fafafa; flex-shrink: 0;
+}
+.cf-attached-file {
+  display: inline-flex; align-items: center; gap: 5px;
+  background: #fff; border: 1px solid var(--list-border);
+  border-radius: var(--border-radius); padding: 4px 8px;
+  font-size: 12px; color: var(--text-secondary);
+}
+.cf-attached-file button {
+  background: none; border: none; color: var(--text-muted);
+  cursor: pointer; font-size: 14px; padding: 0; line-height: 1;
+}
+.cf-attached-file button:hover { color: var(--btn-danger); }
+.cf-new-attach { border-color: #bfdbfe; background: #eff6ff; color: #1d4ed8; }
+.cf-attach-size { color: var(--text-muted); font-size: 11px; }
+
+/* Send later panel */
+.compose-send-later {
+  display: flex; align-items: center; gap: 12px;
+  padding: 10px 16px; border-top: 1px solid var(--list-border);
+  background: #fffbeb; flex-shrink: 0; font-size: 13px;
+}
+.compose-send-later label { font-weight: 500; color: #92400e; }
+.compose-send-later input[type="datetime-local"] {
+  padding: 5px 8px; border: 1px solid #fcd34d; border-radius: var(--border-radius);
+  font-size: 13px; background: #fff; color: var(--text-primary); outline: none;
+}
+
+/* Send error */
+.compose-send-error {
+  padding: 8px 16px; background: #fef2f2; color: var(--btn-danger);
+  font-size: 13px; border-top: 1px solid #fecaca; flex-shrink: 0;
+}
+
+/* Bottom actions bar */
+.compose-actions {
+  display: flex; align-items: center; gap: 8px;
+  padding: 10px 16px; border-top: 1px solid var(--list-border);
+  background: #f8fafc; flex-shrink: 0;
+}
+.compose-save-status {
+  font-size: 12px; color: var(--text-muted); font-style: italic; margin-left: 4px;
+}
+.cf-attach-btn { cursor: pointer; }
+
+/* Toast */
+.compose-toast {
+  position: fixed; bottom: 60px; right: 16px;
+  background: #1e293b; color: #fff;
+  padding: 10px 16px; border-radius: var(--border-radius);
+  font-size: 13px; z-index: 500; box-shadow: 0 4px 16px rgba(0,0,0,0.2);
+  max-width: 320px;
+}
