@@ -11,3 +11,6 @@
 /DONE.md
 *_gen.go
 *.gen.go
+web/static/**/*.js
+!web/static/vendor/**
+web/static/api/types.ts

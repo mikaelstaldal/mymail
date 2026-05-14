@@ -19,13 +19,13 @@ bash build.sh
 go build -tags netgo
 
 # Compile TypeScript → .js files alongside .ts sources
-make -C web compile
+tsc --project web/static/tsconfig.json
 
 # Type-check TypeScript without emitting files
-make -C web typecheck
+tsc --project web/static/tsconfig.json --noEmit
 
 # Regenerate TypeScript API types from openapi.yaml
-make -C web gen-api
+openapi-typescript openapi.yaml -o web/static/api/types.ts
 
 # Regenerate Go API server stubs from openapi.yaml (run after editing openapi.yaml)
 go generate ./internal
@@ -38,8 +38,6 @@ go test ./internal/handler/... -run TestFolderCreate
 ```
 
 The `go generate` directive in `internal/generate.go` runs `ogen --target ./api --clean --package api ../openapi.yaml`. The `internal/api/` package is fully generated — do not edit it manually.
-
-The `make -C web` commands use `tsc` and `openapi-typescript` directly from PATH.
 
 ## Architecture
 
