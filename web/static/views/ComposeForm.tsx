@@ -153,7 +153,7 @@ function AddressField({ label, tags, onTagsChange, extra }: AddressFieldProps) {
 
     timerRef.current = setTimeout(async () => {
       try {
-        const res = await api.contacts.autocomplete(q, 10);
+        const res = await api.contacts.list({ q, limit: 10 });
         setSuggestions(res.items);
         setTotal(res.total);
         setShowDrop(res.items.length > 0);

@@ -1,0 +1,161 @@
+import { useState, useEffect } from 'preact/hooks';
+
+type Density = 'compact' | 'normal' | 'relaxed';
+type BodyView = 'html' | 'text';
+
+function applyDarkMode(dark: boolean) {
+  document.documentElement.classList.toggle('dark', dark);
+}
+
+function applyDensity(density: Density) {
+  const el = document.documentElement;
+  el.classList.remove('density-compact', 'density-normal', 'density-relaxed');
+  el.classList.add(`density-${density}`);
+}
+
+export function Preferences() {
+  const [darkMode, setDarkMode] = useState(() => localStorage.getItem('darkMode') === 'true');
+  const [density, setDensity] = useState<Density>(
+    () => (localStorage.getItem('density') as Density | null) ?? 'normal',
+  );
+  const [bodyView, setBodyView] = useState<BodyView>(
+    () => (localStorage.getItem('preferredBodyView') as BodyView | null) ?? 'html',
+  );
+  const [notifEnabled, setNotifEnabled] = useState(() => localStorage.getItem('notificationsEnabled') === 'true');
+  const [notifMessage, setNotifMessage] = useState<string | null>(null);
+
+  useEffect(() => {
+    // Auto-disable if notification permission was revoked since last visit
+    if (
+      localStorage.getItem('notificationsEnabled') === 'true' &&
+      'Notification' in window &&
+      Notification.permission !== 'granted'
+    ) {
+      setNotifEnabled(false);
+      localStorage.setItem('notificationsEnabled', 'false');
+    }
+  }, []);
+
+  function toggleDarkMode(value: boolean) {
+    setDarkMode(value);
+    localStorage.setItem('darkMode', String(value));
+    applyDarkMode(value);
+  }
+
+  function changeDensity(value: Density) {
+    setDensity(value);
+    localStorage.setItem('density', value);
+    applyDensity(value);
+  }
+
+  function changeBodyView(value: BodyView) {
+    setBodyView(value);
+    localStorage.setItem('preferredBodyView', value);
+  }
+
+  async function toggleNotifications(enable: boolean) {
+    setNotifMessage(null);
+    if (!enable) {
+      setNotifEnabled(false);
+      localStorage.setItem('notificationsEnabled', 'false');
+      return;
+    }
+    if (!('Notification' in window)) {
+      setNotifMessage('Browser notifications are not supported in this browser.');
+      return;
+    }
+    if (Notification.permission === 'denied') {
+      setNotifMessage('Notifications are blocked. Allow them in your browser settings first.');
+      return;
+    }
+    try {
+      const result = await Notification.requestPermission();
+      if (result === 'granted') {
+        setNotifEnabled(true);
+        localStorage.setItem('notificationsEnabled', 'true');
+      } else {
+        setNotifEnabled(false);
+        localStorage.setItem('notificationsEnabled', 'false');
+        setNotifMessage('Notification permission was not granted.');
+      }
+    } catch {
+      setNotifEnabled(false);
+      localStorage.setItem('notificationsEnabled', 'false');
+    }
+  }
+
+  return (
+    <div>
+      {notifMessage && <div class="settings-error">{notifMessage}</div>}
+
+      <div class="pref-row">
+        <div class="pref-row-info">
+          <div class="pref-label">Dark Mode</div>
+          <div class="pref-description">Switch to a dark color scheme.</div>
+        </div>
+        <label class="pref-toggle" aria-label="Toggle dark mode">
+          <input
+            type="checkbox"
+            checked={darkMode}
+            onChange={e => toggleDarkMode((e.target as HTMLInputElement).checked)}
+          />
+          <span class="pref-toggle-track" />
+        </label>
+      </div>
+
+      <div class="pref-row">
+        <div class="pref-row-info">
+          <div class="pref-label">Message List Density</div>
+          <div class="pref-description">Controls row spacing in the message list.</div>
+        </div>
+        <div class="pref-radio-group">
+          {(['compact', 'normal', 'relaxed'] as Density[]).map(d => (
+            <button
+              key={d}
+              class={`pref-radio-btn${density === d ? ' active' : ''}`}
+              onClick={() => changeDensity(d)}
+            >
+              {d.charAt(0).toUpperCase() + d.slice(1)}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <div class="pref-row">
+        <div class="pref-row-info">
+          <div class="pref-label">Default Body View</div>
+          <div class="pref-description">Initial rendering format for message bodies.</div>
+        </div>
+        <div class="pref-radio-group">
+          <button
+            class={`pref-radio-btn${bodyView === 'html' ? ' active' : ''}`}
+            onClick={() => changeBodyView('html')}
+          >
+            HTML
+          </button>
+          <button
+            class={`pref-radio-btn${bodyView === 'text' ? ' active' : ''}`}
+            onClick={() => changeBodyView('text')}
+          >
+            Plain Text
+          </button>
+        </div>
+      </div>
+
+      <div class="pref-row">
+        <div class="pref-row-info">
+          <div class="pref-label">Browser Notifications</div>
+          <div class="pref-description">Show a notification when new messages arrive.</div>
+        </div>
+        <label class="pref-toggle" aria-label="Toggle browser notifications">
+          <input
+            type="checkbox"
+            checked={notifEnabled}
+            onChange={e => void toggleNotifications((e.target as HTMLInputElement).checked)}
+          />
+          <span class="pref-toggle-track" />
+        </label>
+      </div>
+    </div>
+  );
+}

@@ -3,6 +3,10 @@ import type { components } from './types.js';
 type Folder = components['schemas']['Folder'];
 type MessageSummary = components['schemas']['MessageSummary'];
 type Identity = components['schemas']['Identity'];
+type IdentityRequest = components['schemas']['IdentityRequest'];
+type Filter = components['schemas']['Filter'];
+type FilterRequest = components['schemas']['FilterRequest'];
+type SpamFilterSettings = components['schemas']['SpamFilterSettings'];
 type Contact = components['schemas']['Contact'];
 type DraftRequest = components['schemas']['DraftRequest'];
 
@@ -63,8 +67,14 @@ export const api = {
     create: (name: string) =>
       request<Folder>('POST', '/folders', { name }),
 
+    patch: (id: number, body: { name?: string; position?: number }) =>
+      request<Folder>('PATCH', `/folders/${id}`, body),
+
     delete: (id: number) =>
       request<void>('DELETE', `/folders/${id}`),
+
+    reorder: (ids: number[]) =>
+      request<{ updated: number }>('PATCH', '/folders/reorder', { ids }),
 
     listMessages: (folderId: number, limit: number, offset: number) => {
       const q = new URLSearchParams({ limit: String(limit), offset: String(offset) });
@@ -141,13 +151,63 @@ export const api = {
   identities: {
     list: () =>
       request<{ total: number; items: Identity[] }>('GET', '/identities'),
+
+    create: (body: IdentityRequest) =>
+      request<Identity>('POST', '/identities', body),
+
+    update: (id: number, body: IdentityRequest) =>
+      request<Identity>('PUT', `/identities/${id}`, body),
+
+    delete: (id: number) =>
+      request<void>('DELETE', `/identities/${id}`),
+
+    reorder: (ids: number[]) =>
+      request<{ updated: number }>('PATCH', '/identities/reorder', { ids }),
+  },
+
+  filters: {
+    list: () =>
+      request<{ total: number; items: Filter[] }>('GET', '/filters'),
+
+    create: (body: FilterRequest) =>
+      request<Filter>('POST', '/filters', body),
+
+    update: (id: number, body: FilterRequest) =>
+      request<Filter>('PUT', `/filters/${id}`, body),
+
+    delete: (id: number) =>
+      request<void>('DELETE', `/filters/${id}`),
+
+    reorder: (ids: number[]) =>
+      request<{ updated: number }>('PATCH', '/filters/reorder', { ids }),
+  },
+
+  spamFilter: {
+    get: () =>
+      request<SpamFilterSettings>('GET', '/spam-filter'),
+
+    update: (body: SpamFilterSettings) =>
+      request<SpamFilterSettings>('PUT', '/spam-filter', body),
   },
 
   contacts: {
-    autocomplete: (q: string, limit = 10) => {
-      const p = new URLSearchParams({ q, limit: String(limit) });
-      return request<{ total: number; items: Contact[] }>('GET', `/contacts?${p}`);
+    list: (opts: { q?: string; limit?: number; offset?: number } = {}) => {
+      const p = new URLSearchParams();
+      if (opts.q != null && opts.q !== '') p.set('q', opts.q);
+      if (opts.limit != null) p.set('limit', String(opts.limit));
+      if (opts.offset != null) p.set('offset', String(opts.offset));
+      const qs = p.toString();
+      return request<{ total: number; items: Contact[] }>('GET', `/contacts${qs ? `?${qs}` : ''}`);
     },
+
+    create: (body: { address: string; name?: string }) =>
+      request<Contact>('POST', '/contacts', body),
+
+    update: (id: number, body: { address: string; name?: string }) =>
+      request<Contact>('PUT', `/contacts/${id}`, body),
+
+    delete: (id: number) =>
+      request<void>('DELETE', `/contacts/${id}`),
   },
 
   drafts: {

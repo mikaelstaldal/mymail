@@ -6,9 +6,22 @@ import { FolderView } from './views/FolderView.js';
 import { MessageDetail } from './views/MessageDetail.js';
 import { ComposeForm } from './views/ComposeForm.js';
 import { SearchView } from './views/SearchView.js';
+import { SettingsPage } from './views/SettingsPage.js';
 import { initRouter, onRouteChange, type Route } from './router.js';
 import { startPolling } from './poll.js';
 import type { components } from './api/types.js';
+
+// Apply persisted preferences on startup
+(function initPrefs() {
+  if (localStorage.getItem('darkMode') === 'true') {
+    document.documentElement.classList.add('dark');
+  }
+  const density = localStorage.getItem('density');
+  const VALID_DENSITIES = ['compact', 'normal', 'relaxed'];
+  if (density && VALID_DENSITIES.includes(density)) {
+    document.documentElement.classList.add(`density-${density}`);
+  }
+}());
 
 type Folder = components['schemas']['Folder'];
 
@@ -94,6 +107,9 @@ function App() {
     }
     if (route.type === 'search') {
       return <SearchView query={route.query} folders={folders} />;
+    }
+    if (route.type === 'settings') {
+      return <SettingsPage tab={route.tab} />;
     }
     return <div class="placeholder-view"><p>{label}</p></div>;
   }
