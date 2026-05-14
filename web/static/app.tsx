@@ -2,6 +2,7 @@ import { render } from 'preact';
 import { useState, useEffect } from 'preact/hooks';
 import { Sidebar } from './layout/Sidebar.js';
 import { Toolbar } from './layout/Toolbar.js';
+import { Toast } from './components/Toast.js';
 import { FolderView } from './views/FolderView.js';
 import { MessageDetail } from './views/MessageDetail.js';
 import { ComposeForm } from './views/ComposeForm.js';
@@ -124,6 +125,7 @@ function App() {
         {renderContent()}
       </main>
       <Toolbar />
+      <Toast />
     </div>
   );
 }

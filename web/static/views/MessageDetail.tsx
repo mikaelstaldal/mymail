@@ -1,6 +1,8 @@
 import { useState, useEffect, useRef } from 'preact/hooks';
-import { api } from '../api/client.js';
+import { api, NotFoundError } from '../api/client.js';
 import { navigate } from '../router.js';
+import { showToast } from '../util/toast.js';
+import { formatDateFull, formatDateAdaptive } from '../util/date.js';
 import type { components } from '../api/types.js';
 
 type MessageDetailType = components['schemas']['MessageDetail'];
@@ -16,27 +18,6 @@ const JUNK_ID = 7;
 
 const MANAGED_FOLDER_IDS = new Set([DRAFTS_ID, SCHEDULED_ID, SNOOZED_ID]);
 const NO_MOVE_DEST_IDS = new Set([DRAFTS_ID, SCHEDULED_ID, SNOOZED_ID]);
-
-function formatDateFull(dateStr: string): string {
-  return new Date(dateStr).toLocaleString(undefined, {
-    month: 'short',
-    day: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-    timeZoneName: 'short',
-    hour12: false,
-  });
-}
-
-function formatDateShort(dateStr: string): string {
-  return new Date(dateStr).toLocaleString(undefined, {
-    month: 'short',
-    day: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-    hour12: false,
-  });
-}
 
 function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
@@ -104,6 +85,7 @@ interface ThreadEntryProps {
 }
 
 function ThreadEntry({ entry, isCurrent, expanded, expandedMsg, expandedLoading, onToggle }: ThreadEntryProps) {
+  const { display: dateDisplay } = formatDateAdaptive(entry.date);
   return (
     <li class={`thread-entry${isCurrent ? ' thread-current' : ''}`}>
       <button
@@ -113,7 +95,7 @@ function ThreadEntry({ entry, isCurrent, expanded, expandedMsg, expandedLoading,
       >
         <span class="thread-from">{senderName(entry.from_addr)}</span>
         <span class="thread-subject">{entry.subject || '(no subject)'}</span>
-        <span class="thread-date">{formatDateShort(entry.date)}</span>
+        <span class="thread-date" title={formatDateFull(entry.date)}>{dateDisplay}</span>
         {!entry.read && <span class="thread-unread-dot" aria-label="Unread" />}
       </button>
       {expanded && (
@@ -152,6 +134,7 @@ export interface MessageDetailProps {
 export function MessageDetail({ id, folders }: MessageDetailProps) {
   const [msg, setMsg] = useState<MessageDetailType | null>(null);
   const [loading, setLoading] = useState(true);
+  const [notFound, setNotFound] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [bodyView, setBodyView] = useState<'html' | 'text'>(
     () => localStorage.getItem('preferredBodyView') === 'text' ? 'text' : 'html'
@@ -165,12 +148,12 @@ export function MessageDetail({ id, folders }: MessageDetailProps) {
   const [moveTo, setMoveTo] = useState('');
   const [snoozeOpen, setSnoozeOpen] = useState(false);
   const [snoozeValue, setSnoozeValue] = useState('');
-  const [actionError, setActionError] = useState<string | null>(null);
   const [actionInFlight, setActionInFlight] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
+    setNotFound(false);
     setError(null);
     setMsg(null);
     setThread(null);
@@ -178,7 +161,6 @@ export function MessageDetail({ id, folders }: MessageDetailProps) {
     expandedThreadIdRef.current = null;
     setExpandedMsg(null);
     setExternalImages(false);
-    setActionError(null);
     setActionInFlight(false);
     setMoveTo('');
     setSnoozeOpen(false);
@@ -192,7 +174,11 @@ export function MessageDetail({ id, folders }: MessageDetailProps) {
       }
     }).catch(e => {
       if (cancelled) return;
-      setError(e instanceof Error ? e.message : 'Failed to load message');
+      if (e instanceof NotFoundError) {
+        setNotFound(true);
+      } else {
+        setError(e instanceof Error ? e.message : 'Failed to load message');
+      }
       setLoading(false);
     });
 
@@ -255,7 +241,7 @@ export function MessageDetail({ id, folders }: MessageDetailProps) {
       await api.messages.deleteSingle(msg.id);
       navigateToSourceFolder(sourceFolderId);
     } catch (e) {
-      setActionError(e instanceof Error ? e.message : 'Failed to delete message');
+      showToast(e instanceof Error ? e.message : 'Failed to delete message');
       setActionInFlight(false);
     }
   };
@@ -270,7 +256,7 @@ export function MessageDetail({ id, folders }: MessageDetailProps) {
       await api.messages.patch(msg.id, { folder_id: destId });
       navigateToSourceFolder(sourceFolderId);
     } catch (e) {
-      setActionError(e instanceof Error ? e.message : 'Failed to move message');
+      showToast(e instanceof Error ? e.message : 'Failed to move message');
       setActionInFlight(false);
     }
   };
@@ -285,7 +271,7 @@ export function MessageDetail({ id, folders }: MessageDetailProps) {
       setSnoozeOpen(false);
       navigateToSourceFolder(sourceFolderId);
     } catch (e) {
-      setActionError(e instanceof Error ? e.message : 'Failed to snooze message');
+      showToast(e instanceof Error ? e.message : 'Failed to snooze message');
       setActionInFlight(false);
     }
   };
@@ -297,7 +283,7 @@ export function MessageDetail({ id, folders }: MessageDetailProps) {
       await api.messages.markJunk(msg.id);
       navigate('#/folder/junk');
     } catch (e) {
-      setActionError(e instanceof Error ? e.message : 'Failed to mark as junk');
+      showToast(e instanceof Error ? e.message : 'Failed to mark as junk');
       setActionInFlight(false);
     }
   };
@@ -309,7 +295,7 @@ export function MessageDetail({ id, folders }: MessageDetailProps) {
       await api.messages.markNotJunk(msg.id);
       navigate('#/inbox');
     } catch (e) {
-      setActionError(e instanceof Error ? e.message : 'Failed to mark as not junk');
+      showToast(e instanceof Error ? e.message : 'Failed to mark as not junk');
       setActionInFlight(false);
     }
   };
@@ -321,7 +307,7 @@ export function MessageDetail({ id, folders }: MessageDetailProps) {
       const result = await api.messages.cancelSnooze(msg.id);
       navigateToSourceFolder(result.folder_id);
     } catch (e) {
-      setActionError(e instanceof Error ? e.message : 'Failed to cancel snooze');
+      showToast(e instanceof Error ? e.message : 'Failed to cancel snooze');
       setActionInFlight(false);
     }
   };
@@ -334,12 +320,13 @@ export function MessageDetail({ id, folders }: MessageDetailProps) {
       await api.scheduled.cancel(msg.id);
       navigate('#/folder/drafts');
     } catch (e) {
-      setActionError(e instanceof Error ? e.message : 'Failed to cancel scheduled message');
+      showToast(e instanceof Error ? e.message : 'Failed to cancel scheduled message');
       setActionInFlight(false);
     }
   };
 
   if (loading) return <div class="msg-detail-status">Loading…</div>;
+  if (notFound) return <div class="msg-detail-status msg-detail-not-found">Not found</div>;
   if (error) return <div class="msg-detail-status msg-detail-error">{error}</div>;
   if (!msg) return null;
 
@@ -450,10 +437,6 @@ export function MessageDetail({ id, folders }: MessageDetailProps) {
             Cancel
           </button>
         </div>
-      )}
-
-      {actionError && (
-        <div class="msg-detail-action-error">{actionError}</div>
       )}
 
       <div class="msg-detail-header">

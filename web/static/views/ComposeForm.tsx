@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from 'preact/hooks';
-import { api } from '../api/client.js';
+import { api, NotFoundError } from '../api/client.js';
 import { navigate } from '../router.js';
+import { showToast } from '../util/toast.js';
 import type { components } from '../api/types.js';
 
 type Identity = components['schemas']['Identity'];
@@ -98,6 +99,76 @@ function buildInitialHtml(
 
 function esc(s: string): string {
   return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+// ── LocalStorage draft helpers ─────────────────────────────────────────────
+
+interface LocalDraft {
+  id: number | null;
+  savedAt: string;
+  identityId: number | undefined;
+  to: string[];
+  cc: string[];
+  bcc: string[];
+  subject: string;
+  bodyHtml: string;
+  sendAt: string;
+}
+
+function readLocalDraft(): LocalDraft | null {
+  try {
+    const raw = localStorage.getItem('composeDraft');
+    if (!raw) return null;
+    return JSON.parse(raw) as LocalDraft;
+  } catch {
+    return null;
+  }
+}
+
+function saveLocalDraft(draft: LocalDraft): void {
+  try {
+    localStorage.setItem('composeDraft', JSON.stringify(draft));
+  } catch { /* ignore quota errors */ }
+}
+
+function clearLocalDraft(): void {
+  localStorage.removeItem('composeDraft');
+}
+
+function isoToDatetimeLocal(iso: string): string {
+  const d = new Date(iso);
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
+interface RestoredFields {
+  identityId: number | undefined;
+  to: string[];
+  cc: string[];
+  bcc: string[];
+  subject: string;
+  bodyHtml: string;
+  bodyText: string;
+  sendAt: string;
+}
+
+function fieldsFromServerDraft(msg: MessageDetail, idents: Identity[]): RestoredFields {
+  const splitAddr = (s: string) => s.trim() ? s.split(',').map(a => a.trim()).filter(Boolean) : [];
+  const fromSpec = parseAddrSpecs(msg.from_addr)[0] ?? '';
+  const matchedIdent =
+    idents.find(i => i.address.toLowerCase() === fromSpec.toLowerCase()) ??
+    idents.find(i => i.is_default) ??
+    idents[0];
+  return {
+    identityId: matchedIdent?.id,
+    to: splitAddr(msg.to_addr),
+    cc: splitAddr(msg.cc_addr),
+    bcc: splitAddr(msg.bcc_addr),
+    subject: msg.subject,
+    bodyHtml: msg.body_html,
+    bodyText: msg.body_text,
+    sendAt: msg.send_at ? isoToDatetimeLocal(msg.send_at) : '',
+  };
 }
 
 // ── Address field with tag pills and autocomplete ──────────────────────────
@@ -250,7 +321,7 @@ export function ComposeForm({ replyId, replyAllId, forwardId }: ComposeFormProps
     replyAllId !== undefined ? 'replyall' :
     forwardId !== undefined ? 'forward' : 'new';
 
-  const [loading, setLoading] = useState(sourceId !== undefined);
+  const [loading, setLoading] = useState(true);
   const [identities, setIdentities] = useState<Identity[]>([]);
   const [identityId, setIdentityId] = useState<number | undefined>();
   const [to, setTo] = useState<string[]>([]);
@@ -266,7 +337,6 @@ export function ComposeForm({ replyId, replyAllId, forwardId }: ComposeFormProps
   const [saveStatus, setSaveStatus] = useState<'saving' | 'saved' | 'error' | null>(null);
   const [sendInFlight, setSendInFlight] = useState(false);
   const [sendError, setSendError] = useState<string | null>(null);
-  const [toast, setToast] = useState<string | null>(null);
 
   // Threading fields (set from pre-population)
   const inReplyToRef = useRef('');
@@ -305,6 +375,22 @@ export function ComposeForm({ replyId, replyAllId, forwardId }: ComposeFormProps
     };
   }, []);
 
+  // ── Persist draft to localStorage (new-compose only) ────────────────────
+  const persistLocalDraft = useCallback((serverUpdatedAt: string) => {
+    if (mode !== 'new') return;
+    saveLocalDraft({
+      id: draftIdRef.current,
+      savedAt: serverUpdatedAt,
+      identityId: stateRef.current.identityId,
+      to: stateRef.current.to,
+      cc: stateRef.current.cc,
+      bcc: stateRef.current.bcc,
+      subject: stateRef.current.subject,
+      bodyHtml: bodyHtmlRef.current,
+      sendAt: stateRef.current.sendAt,
+    });
+  }, [mode]);
+
   // ── Save draft ───────────────────────────────────────────────────────────
   const performSave = useCallback(async (pendingFiles: File[]): Promise<void> => {
     const body = buildDraftBody();
@@ -316,10 +402,23 @@ export function ComposeForm({ replyId, replyAllId, forwardId }: ComposeFormProps
           ? await api.drafts.createWithAttachments(body, pendingFiles)
           : await api.drafts.create(body);
         draftIdRef.current = res.id;
+        persistLocalDraft(res.updated_at);
       } else {
-        hasFiles
-          ? await api.drafts.updateWithAttachments(draftIdRef.current, body, pendingFiles)
-          : await api.drafts.update(draftIdRef.current, body);
+        let res: { id: number; updated_at: string };
+        try {
+          res = hasFiles
+            ? await api.drafts.updateWithAttachments(draftIdRef.current, body, pendingFiles)
+            : await api.drafts.update(draftIdRef.current, body);
+        } catch (e) {
+          if (!(e instanceof NotFoundError)) throw e;
+          // Draft was deleted externally; recreate it transparently.
+          draftIdRef.current = null;
+          res = hasFiles
+            ? await api.drafts.createWithAttachments(body, pendingFiles)
+            : await api.drafts.create(body);
+          draftIdRef.current = res.id;
+        }
+        persistLocalDraft(res.updated_at);
       }
       setFiles([]);
       setSaveStatus('saved');
@@ -328,12 +427,7 @@ export function ComposeForm({ replyId, replyAllId, forwardId }: ComposeFormProps
       showToast(e instanceof Error ? e.message : 'Auto-save failed');
       throw e;
     }
-  }, [buildDraftBody]);
-
-  function showToast(msg: string) {
-    setToast(msg);
-    setTimeout(() => setToast(null), 5000);
-  }
+  }, [buildDraftBody, persistLocalDraft]);
 
   // ── Initialization and pre-population ────────────────────────────────────
   useEffect(() => {
@@ -350,7 +444,74 @@ export function ComposeForm({ replyId, replyAllId, forwardId }: ComposeFormProps
       const defaultIdent = idents.find(i => i.is_default) ?? idents[0];
 
       if (!sourceId) {
-        // New compose
+        // New compose: check localStorage for a saved draft
+        const localDraft = readLocalDraft();
+
+        if (localDraft) {
+          let resolvedId = localDraft.id;
+          let fields: RestoredFields | null = null;
+
+          if (localDraft.id !== null) {
+            try {
+              const serverDraft = await api.messages.get(localDraft.id);
+              // spec: use server version when its updated_at >= localDraft.savedAt
+              if (serverDraft.updated_at >= localDraft.savedAt) {
+                fields = fieldsFromServerDraft(serverDraft, idents);
+              }
+              // else: local is newer (unsaved edits) — fields stays null → use localStorage below
+            } catch (e) {
+              if (e instanceof NotFoundError) {
+                // Draft deleted on server; clear id so next save creates a fresh one
+                resolvedId = null;
+              }
+              // Other errors: conservatively use localStorage (server state unknown)
+            }
+          }
+
+          if (cancelled) return;
+
+          draftIdRef.current = resolvedId;
+
+          // Apply restored fields (server-sourced or localStorage-sourced)
+          const f: RestoredFields = fields ?? {
+            identityId: localDraft.identityId,
+            to: localDraft.to,
+            cc: localDraft.cc,
+            bcc: localDraft.bcc,
+            subject: localDraft.subject,
+            bodyHtml: localDraft.bodyHtml,
+            bodyText: '',
+            sendAt: localDraft.sendAt,
+          };
+
+          const restoredIdent = f.identityId !== undefined
+            ? (idents.find(i => i.id === f.identityId) ?? defaultIdent)
+            : defaultIdent;
+          setIdentityId(restoredIdent?.id);
+          currentIdentityRef.current = restoredIdent ?? null;
+
+          setTo(f.to);
+          setCc(f.cc);
+          setBcc(f.bcc);
+          if (f.cc.length > 0) setShowCc(true);
+          if (f.bcc.length > 0) setShowBcc(true);
+          setSubject(f.subject);
+          if (f.sendAt) { setSendAt(f.sendAt); setSendLater(true); }
+
+          if (editorRef.current && quillRef.current && f.bodyHtml) {
+            quillRef.current.clipboard.dangerouslyPasteHTML(f.bodyHtml);
+            bodyHtmlRef.current = quillRef.current.root.innerHTML;
+            bodyTextRef.current = quillRef.current.getText();
+          } else {
+            bodyHtmlRef.current = f.bodyHtml;
+            bodyTextRef.current = f.bodyText;
+          }
+
+          setLoading(false);
+          return;
+        }
+
+        // Fresh new compose
         const sel = defaultIdent;
         setIdentityId(sel?.id);
         currentIdentityRef.current = sel ?? null;
@@ -588,6 +749,7 @@ export function ComposeForm({ replyId, replyAllId, forwardId }: ComposeFormProps
 
     try {
       const result = await api.drafts.send(draftIdRef.current);
+      clearLocalDraft();
       if (result.status === 202) {
         navigate('#/folder/scheduled');
       } else {
@@ -709,7 +871,7 @@ export function ComposeForm({ replyId, replyAllId, forwardId }: ComposeFormProps
         </div>
       )}
 
-      {/* Error */}
+      {/* Send error (400 form validation) */}
       {sendError && (
         <div class="compose-send-error">{sendError}</div>
       )}
@@ -746,9 +908,11 @@ export function ComposeForm({ replyId, replyAllId, forwardId }: ComposeFormProps
               if (confirm('Discard this draft?')) {
                 await api.drafts.delete(draftIdRef.current).catch(() => {/* ignore */});
                 draftIdRef.current = null;
+                clearLocalDraft();
                 navigate('#/inbox');
               }
             } else {
+              clearLocalDraft();
               navigate('#/inbox');
             }
           }}
@@ -756,11 +920,6 @@ export function ComposeForm({ replyId, replyAllId, forwardId }: ComposeFormProps
           Discard
         </button>
       </div>
-
-      {/* Toast */}
-      {toast && (
-        <div class="compose-toast">{toast}</div>
-      )}
     </div>
   );
 }

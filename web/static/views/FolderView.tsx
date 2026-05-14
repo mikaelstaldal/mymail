@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'preact/hooks';
 import { api } from '../api/client.js';
 import { navigate } from '../router.js';
+import { showToast } from '../util/toast.js';
 import { MessageList } from '../components/MessageList.js';
 import type { components } from '../api/types.js';
 
@@ -51,7 +52,7 @@ export function FolderView({ folder, folders }: FolderViewProps) {
       await api.folders.markAllRead(folder.id);
       setItems(prev => prev.map(m => ({ ...m, read: true })));
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Failed to mark all read');
+      showToast(e instanceof Error ? e.message : 'Failed to mark all read');
     }
   };
 
@@ -62,7 +63,7 @@ export function FolderView({ folder, folders }: FolderViewProps) {
       await api.folders.deleteAllMessages(folder.id);
       void load(0);
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Failed to empty folder');
+      showToast(e instanceof Error ? e.message : 'Failed to empty folder');
     }
   };
 
@@ -73,7 +74,7 @@ export function FolderView({ folder, folders }: FolderViewProps) {
       setItems(prev => prev.map(m => selectedIds.has(m.id) ? { ...m, read } : m));
       setSelectedIds(new Set());
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Failed to update messages');
+      showToast(e instanceof Error ? e.message : 'Failed to update messages');
     }
   };
 
@@ -83,7 +84,7 @@ export function FolderView({ folder, folders }: FolderViewProps) {
       await api.messages.delete(ids);
       void load(0);
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Failed to delete messages');
+      showToast(e instanceof Error ? e.message : 'Failed to delete messages');
     }
   };
 
@@ -96,7 +97,7 @@ export function FolderView({ folder, folders }: FolderViewProps) {
       await api.messages.move(ids, destId);
       void load(0);
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Failed to move messages');
+      showToast(e instanceof Error ? e.message : 'Failed to move messages');
     }
   };
 

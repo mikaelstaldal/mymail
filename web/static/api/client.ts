@@ -1,3 +1,4 @@
+import { showNetworkErrorToast } from '../util/toast.js';
 import type { components } from './types.js';
 
 type Folder = components['schemas']['Folder'];
@@ -12,8 +13,40 @@ type DraftRequest = components['schemas']['DraftRequest'];
 
 const BASE = '/api/v1';
 
+export class NotFoundError extends Error {
+  constructor() { super('Not found'); this.name = 'NotFoundError'; }
+}
+
+function delay(ms: number): Promise<void> {
+  return new Promise(r => setTimeout(r, ms));
+}
+
+async function fetchWithRetry(url: string, init: RequestInit): Promise<Response> {
+  const isSafe = ['GET', 'HEAD'].includes((init.method ?? 'GET').toUpperCase());
+  let pastAutoRetry = false;
+  while (true) {
+    try {
+      return await fetch(url, init);
+    } catch (e) {
+      if (!(e instanceof TypeError)) throw e;
+      if (isSafe && !pastAutoRetry) {
+        // Safe method: auto-retry once after 2 s before involving the user.
+        await delay(2000);
+        pastAutoRetry = true;
+        continue;
+      }
+      // Non-idempotent method (or past the auto-retry window): go straight to
+      // the persistent Retry toast so the user consciously decides whether to
+      // resubmit the state-changing request.
+      await new Promise<void>(resolve => {
+        showNetworkErrorToast('Network error. Please check your connection.', resolve);
+      });
+    }
+  }
+}
+
 async function requestStatus(method: string, path: string): Promise<{ status: number; data: unknown }> {
-  const res = await fetch(BASE + path, { method, headers: { 'Content-Type': 'application/json' } });
+  const res = await fetchWithRetry(BASE + path, { method, headers: { 'Content-Type': 'application/json' } });
   if (res.status === 401) { window.location.reload(); throw new Error('Unauthorized'); }
   const data = await res.json() as unknown;
   if (!res.ok) throw new Error((data as { error?: string }).error ?? res.statusText);
@@ -24,8 +57,9 @@ async function requestMultipart<T>(method: string, path: string, body: unknown, 
   const fd = new FormData();
   fd.append('message', JSON.stringify(body));
   for (const f of files) fd.append('attachments', f);
-  const res = await fetch(BASE + path, { method, body: fd });
+  const res = await fetchWithRetry(BASE + path, { method, body: fd });
   if (res.status === 401) { window.location.reload(); throw new Error('Unauthorized'); }
+  if (res.status === 404) throw new NotFoundError();
   if (res.status === 204) return undefined as T;
   const data = await res.json() as unknown;
   if (!res.ok) throw new Error((data as { error?: string }).error ?? res.statusText);
@@ -41,11 +75,15 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
     init.headers = { 'Content-Type': 'application/json' };
   }
 
-  const res = await fetch(BASE + path, init);
+  const res = await fetchWithRetry(BASE + path, init);
 
   if (res.status === 401) {
     window.location.reload();
     throw new Error('Unauthorized');
+  }
+
+  if (res.status === 404) {
+    throw new NotFoundError();
   }
 
   if (res.status === 204) return undefined as T;
