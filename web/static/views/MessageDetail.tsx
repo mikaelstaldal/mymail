@@ -477,7 +477,7 @@ export function MessageDetail({ id, folders }: MessageDetailProps) {
               {msg.attachments.map(a => (
                 <li key={a.id}>
                   <a
-                    href={`/api/v1/attachments/${a.id}`}
+                    href={`api/v1/attachments/${a.id}`}
                     download={a.filename}
                     class="attachment-link"
                   >

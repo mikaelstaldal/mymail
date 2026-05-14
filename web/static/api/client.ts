@@ -11,7 +11,7 @@ type SpamFilterSettings = components['schemas']['SpamFilterSettings'];
 type Contact = components['schemas']['Contact'];
 type DraftRequest = components['schemas']['DraftRequest'];
 
-const BASE = '/api/v1';
+const BASE = 'api/v1';
 
 export class NotFoundError extends Error {
   constructor() { super('Not found'); this.name = 'NotFoundError'; }

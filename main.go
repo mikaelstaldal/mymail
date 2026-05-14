@@ -8,6 +8,7 @@ import (
 	"io/fs"
 	"log"
 	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -32,6 +33,7 @@ func main() {
 	demoMode := flag.Bool("demo", false, "Populate database with demo data and exit")
 	port := flag.Int("port", 8080, "HTTP listen port")
 	addr := flag.String("addr", "127.0.0.1", "Bind address")
+	publicURL := flag.String("public-url", "", "Public-facing base URL for CSRF validation, e.g. https://example.com (defaults to http://<addr>:<port>)")
 	dataDir := flag.String("data", "data/", "Data directory")
 	basicAuthFile := flag.String("basic-auth-file", "", "Path to htpasswd file")
 	basicAuthRealm := flag.String("basic-auth-realm", "mymail", "Auth realm")
@@ -50,7 +52,7 @@ func main() {
 	case *demoMode:
 		runDemo(*dataDir)
 	default:
-		runServer(*dataDir, *addr, *port, *basicAuthFile, *basicAuthRealm, *sendmailBin)
+		runServer(*dataDir, *addr, *port, *publicURL, *basicAuthFile, *basicAuthRealm, *sendmailBin)
 	}
 }
 
@@ -101,7 +103,7 @@ func runImport(dataDir string, mappingArgs []string) {
 	os.Exit(code)
 }
 
-func runServer(dataDir, addr string, port int, basicAuthFile, basicAuthRealm, sendmailBin string) {
+func runServer(dataDir, addr string, port int, publicURL, basicAuthFile, basicAuthRealm, sendmailBin string) {
 	if port < 1 || port > 65535 {
 		log.Fatalf("invalid port: %d", port)
 	}
@@ -145,7 +147,7 @@ func runServer(dataDir, addr string, port int, basicAuthFile, basicAuthRealm, se
 		sendmailPath,
 	)
 
-	ogenServer, err := api.NewServer(h)
+	ogenServer, err := api.NewServer(h, api.WithPathPrefix("/api/v1"))
 	if err != nil {
 		log.Fatalf("error: create API server: %v", err)
 	}
@@ -155,6 +157,13 @@ func runServer(dataDir, addr string, port int, basicAuthFile, basicAuthRealm, se
 	mux.HandleFunc("/", indexFallbackHandler())
 
 	serverOrigin := fmt.Sprintf("http://%s:%d", addr, port)
+	if publicURL != "" {
+		u, err := url.Parse(publicURL)
+		if err != nil || u.Host == "" {
+			log.Fatalf("invalid -public-url %q: must be a full URL like https://example.com", publicURL)
+		}
+		serverOrigin = u.Scheme + "://" + u.Host
+	}
 	var httpHandler http.Handler = mux
 	httpHandler = auth.NewCSRF(serverOrigin)(httpHandler)
 	httpHandler = auth.NewBasicAuth(basicAuthFile, basicAuthRealm)(httpHandler)
@@ -215,9 +224,10 @@ func indexFallbackHandler() http.HandlerFunc {
 			}
 		}
 		// Serve index.html for all unmatched paths (hash routing).
-		// Rewrite the request URL so the file server handles ETag/Last-Modified.
+		// Use "/" so the file server finds index.html via directory lookup — passing
+		// "/index.html" directly would trigger Go's built-in redirect of that path to "./".
 		r2 := r.Clone(r.Context())
-		r2.URL.Path = "/index.html"
+		r2.URL.Path = "/"
 		fileServer.ServeHTTP(w, r2)
 	}
 }
