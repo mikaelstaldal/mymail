@@ -29,6 +29,7 @@ func main() {
 	initMode := flag.Bool("init", false, "Initialize database and exit")
 	ldaMode := flag.Bool("lda", false, "LDA mode: read RFC 5322 from stdin and store in DB")
 	importMode := flag.Bool("import", false, "Import messages from mbox/Maildir and exit")
+	demoMode := flag.Bool("demo", false, "Populate database with demo data and exit")
 	port := flag.Int("port", 8080, "HTTP listen port")
 	addr := flag.String("addr", "127.0.0.1", "Bind address")
 	dataDir := flag.String("data", "data/", "Data directory")
@@ -46,6 +47,8 @@ func main() {
 		runLDA(*dataDir)
 	case *importMode:
 		runImport(*dataDir, flag.Args())
+	case *demoMode:
+		runDemo(*dataDir)
 	default:
 		runServer(*dataDir, *addr, *port, *basicAuthFile, *basicAuthRealm, *sendmailBin)
 	}
