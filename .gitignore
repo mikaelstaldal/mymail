@@ -2,6 +2,7 @@
 /mymail
 /data
 /.claude/settings.local.json
+/.junie
 /.playwright
 /.playwright-mcp
 /.playwright-cli
