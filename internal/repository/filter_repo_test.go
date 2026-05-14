@@ -2,9 +2,11 @@ package repository
 
 import (
 	"context"
-	"errors"
 	"strings"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	oas "github.com/mikaelstaldal/mymail/internal/api"
 )
@@ -113,9 +115,7 @@ func TestCreateFilter_ValidationErrors(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			_, err := r.CreateFilter(ctx, tc.filter, noPos)
-			if !errors.Is(err, tc.want) {
-				t.Errorf("CreateFilter: got %v, want %v", err, tc.want)
-			}
+			assert.ErrorIs(t, err, tc.want)
 		})
 	}
 }
@@ -133,12 +133,11 @@ func TestCreateFilter_ValidMoveTargets(t *testing.T) {
 		f := makeFilter(oas.FilterActionMove, "from@example.com", "", "")
 		f.FolderID = oas.NewOptNilInt(target)
 		got, err := r.CreateFilter(ctx, f, noPos)
-		if err != nil {
-			t.Errorf("CreateFilter(folder_id=%d): unexpected error %v", target, err)
-			continue
-		}
-		if fid, ok := got.FolderID.Get(); !ok || fid != target {
-			t.Errorf("folder_id roundtrip: got %v, want %d", got.FolderID, target)
+		assert.NoError(t, err, "CreateFilter(folder_id=%d)", target)
+		if err == nil {
+			fid, ok := got.FolderID.Get()
+			assert.True(t, ok)
+			assert.Equal(t, target, fid)
 		}
 	}
 }
@@ -149,20 +148,12 @@ func TestCreateFilter_PositionAutoAssign(t *testing.T) {
 	noPos := oas.OptInt{}
 
 	f1, err := r.CreateFilter(ctx, makeFilter(oas.FilterActionDrop, "", "", "newsletter"), noPos)
-	if err != nil {
-		t.Fatalf("first CreateFilter: %v", err)
-	}
-	if f1.Position != 0 {
-		t.Errorf("first filter position = %d, want 0", f1.Position)
-	}
+	require.NoError(t, err)
+	assert.Equal(t, 0, f1.Position)
 
 	f2, err := r.CreateFilter(ctx, makeFilter(oas.FilterActionDrop, "", "", "spam"), noPos)
-	if err != nil {
-		t.Fatalf("second CreateFilter: %v", err)
-	}
-	if f2.Position != 1 {
-		t.Errorf("second filter position = %d, want 1", f2.Position)
-	}
+	require.NoError(t, err)
+	assert.Equal(t, 1, f2.Position)
 }
 
 func TestCreateFilter_ExplicitPositionZero(t *testing.T) {
@@ -172,20 +163,15 @@ func TestCreateFilter_ExplicitPositionZero(t *testing.T) {
 	// Create a filter at position 5 first so the table is non-empty.
 	pos5 := oas.OptInt{}
 	pos5.SetTo(5)
-	if _, err := r.CreateFilter(ctx, makeFilter(oas.FilterActionDrop, "", "", "first"), pos5); err != nil {
-		t.Fatalf("setup: %v", err)
-	}
+	_, err := r.CreateFilter(ctx, makeFilter(oas.FilterActionDrop, "", "", "first"), pos5)
+	require.NoError(t, err)
 
 	// Explicitly request position 0 — must NOT trigger auto-assign.
 	pos0 := oas.OptInt{}
 	pos0.SetTo(0)
 	got, err := r.CreateFilter(ctx, makeFilter(oas.FilterActionDrop, "", "", "second"), pos0)
-	if err != nil {
-		t.Fatalf("CreateFilter(pos=0): %v", err)
-	}
-	if got.Position != 0 {
-		t.Errorf("position = %d, want 0 (explicit)", got.Position)
-	}
+	require.NoError(t, err)
+	assert.Equal(t, 0, got.Position, "position should be 0 (explicit)")
 }
 
 func TestGetFilter_NotFound(t *testing.T) {
@@ -193,9 +179,7 @@ func TestGetFilter_NotFound(t *testing.T) {
 	r := NewFilterRepository(openTestDB(t))
 
 	_, err := r.GetFilter(ctx, 9999)
-	if !errors.Is(err, ErrNotFound) {
-		t.Errorf("GetFilter: got %v, want ErrNotFound", err)
-	}
+	assert.ErrorIs(t, err, ErrNotFound)
 }
 
 func TestListFilters_OrderedByPositionThenID(t *testing.T) {
@@ -209,16 +193,13 @@ func TestListFilters_OrderedByPositionThenID(t *testing.T) {
 	r.CreateFilter(ctx, makeFilter(oas.FilterActionDrop, "c@x", "", ""), pos(1))
 
 	filters, err := r.ListFilters(ctx)
-	if err != nil {
-		t.Fatalf("ListFilters: %v", err)
-	}
-	if len(filters) != 3 {
-		t.Fatalf("len = %d, want 3", len(filters))
-	}
+	require.NoError(t, err)
+	require.Len(t, filters, 3)
+
 	// position 1 (two entries) before position 2; within same position, lower id first.
-	if filters[0].MatchFrom != "a@x" || filters[1].MatchFrom != "c@x" || filters[2].MatchFrom != "b@x" {
-		t.Errorf("order wrong: %v %v %v", filters[0].MatchFrom, filters[1].MatchFrom, filters[2].MatchFrom)
-	}
+	assert.Equal(t, "a@x", filters[0].MatchFrom)
+	assert.Equal(t, "c@x", filters[1].MatchFrom)
+	assert.Equal(t, "b@x", filters[2].MatchFrom)
 }
 
 func TestUpdateFilter_ValidationErrors(t *testing.T) {
@@ -248,7 +229,7 @@ func TestUpdateFilter_ValidationErrors(t *testing.T) {
 			want:   ErrInvalidAction,
 		},
 		{
-			name: "move without folder_id",
+			name:   "move without folder_id",
 			filter: makeFilter(oas.FilterActionMove, "from@x", "", ""),
 			want:   ErrInvalidFolderTarget,
 		},
@@ -257,9 +238,7 @@ func TestUpdateFilter_ValidationErrors(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			_, err := r.UpdateFilter(ctx, int64(orig.ID), tc.filter)
-			if !errors.Is(err, tc.want) {
-				t.Errorf("UpdateFilter: got %v, want %v", err, tc.want)
-			}
+			assert.ErrorIs(t, err, tc.want)
 		})
 	}
 }
@@ -269,9 +248,7 @@ func TestUpdateFilter_NotFound(t *testing.T) {
 	r := NewFilterRepository(openTestDB(t))
 
 	_, err := r.UpdateFilter(ctx, 9999, makeFilter(oas.FilterActionDrop, "from@x", "", ""))
-	if !errors.Is(err, ErrNotFound) {
-		t.Errorf("UpdateFilter: got %v, want ErrNotFound", err)
-	}
+	assert.ErrorIs(t, err, ErrNotFound)
 }
 
 func TestUpdateFilter_Roundtrip(t *testing.T) {
@@ -280,20 +257,19 @@ func TestUpdateFilter_Roundtrip(t *testing.T) {
 
 	noPos := oas.OptInt{}
 	orig, err := r.CreateFilter(ctx, makeFilter(oas.FilterActionDrop, "old@x", "", ""), noPos)
-	if err != nil {
-		t.Fatalf("setup: %v", err)
-	}
+	require.NoError(t, err)
 
 	updated := makeFilter(oas.FilterActionMarkRead, "", "new@x", "")
 	updated.Position = 5
 	updated.Stop = false
 	got, err := r.UpdateFilter(ctx, int64(orig.ID), updated)
-	if err != nil {
-		t.Fatalf("UpdateFilter: %v", err)
-	}
-	if got.MatchFrom != "" || got.MatchTo != "new@x" || got.Action != oas.FilterActionMarkRead || got.Stop || got.Position != 5 {
-		t.Errorf("unexpected result: %+v", got)
-	}
+	require.NoError(t, err)
+
+	assert.Empty(t, got.MatchFrom)
+	assert.Equal(t, "new@x", got.MatchTo)
+	assert.Equal(t, oas.FilterActionMarkRead, got.Action)
+	assert.False(t, got.Stop)
+	assert.Equal(t, 5, got.Position)
 }
 
 func TestDeleteFilter(t *testing.T) {
@@ -302,16 +278,13 @@ func TestDeleteFilter(t *testing.T) {
 
 	noPos := oas.OptInt{}
 	f, err := r.CreateFilter(ctx, makeFilter(oas.FilterActionDrop, "from@x", "", ""), noPos)
-	if err != nil {
-		t.Fatalf("setup: %v", err)
-	}
+	require.NoError(t, err)
 
-	if err := r.DeleteFilter(ctx, int64(f.ID)); err != nil {
-		t.Fatalf("DeleteFilter: %v", err)
-	}
-	if err := r.DeleteFilter(ctx, int64(f.ID)); !errors.Is(err, ErrNotFound) {
-		t.Errorf("second delete: got %v, want ErrNotFound", err)
-	}
+	err = r.DeleteFilter(ctx, int64(f.ID))
+	assert.NoError(t, err)
+
+	err = r.DeleteFilter(ctx, int64(f.ID))
+	assert.ErrorIs(t, err, ErrNotFound)
 }
 
 func TestReorderFilters(t *testing.T) {
@@ -327,37 +300,29 @@ func TestReorderFilters(t *testing.T) {
 
 	t.Run("duplicate id", func(t *testing.T) {
 		_, err := r.ReorderFilters(ctx, []int64{id1, id1, id3})
-		if !errors.Is(err, ErrDuplicateID) {
-			t.Errorf("got %v, want ErrDuplicateID", err)
-		}
+		assert.ErrorIs(t, err, ErrDuplicateID)
 	})
 
 	t.Run("unknown id", func(t *testing.T) {
 		_, err := r.ReorderFilters(ctx, []int64{id1, id2, 9999})
-		if !errors.Is(err, ErrUnknownID) {
-			t.Errorf("got %v, want ErrUnknownID", err)
-		}
+		assert.ErrorIs(t, err, ErrUnknownID)
 	})
 
 	t.Run("incomplete — missing one", func(t *testing.T) {
 		_, err := r.ReorderFilters(ctx, []int64{id1, id2})
-		if !errors.Is(err, ErrIncompleteReorder) {
-			t.Errorf("got %v, want ErrIncompleteReorder", err)
-		}
+		assert.ErrorIs(t, err, ErrIncompleteReorder)
 	})
 
 	t.Run("valid reorder", func(t *testing.T) {
 		n, err := r.ReorderFilters(ctx, []int64{id3, id1, id2})
-		if err != nil {
-			t.Fatalf("ReorderFilters: %v", err)
-		}
-		if n != 3 {
-			t.Errorf("rows updated = %d, want 3", n)
-		}
-		filters, _ := r.ListFilters(ctx)
-		if filters[0].ID != f3.ID || filters[1].ID != f1.ID || filters[2].ID != f2.ID {
-			t.Errorf("wrong order after reorder: %v %v %v", filters[0].ID, filters[1].ID, filters[2].ID)
-		}
+		require.NoError(t, err)
+		assert.Equal(t, 3, n)
+
+		filters, err := r.ListFilters(ctx)
+		require.NoError(t, err)
+		assert.Equal(t, f3.ID, filters[0].ID)
+		assert.Equal(t, f1.ID, filters[1].ID)
+		assert.Equal(t, f2.ID, filters[2].ID)
 	})
 }
 
@@ -366,12 +331,8 @@ func TestReorderFilters_EmptyIsNoop(t *testing.T) {
 	r := NewFilterRepository(openTestDB(t))
 
 	n, err := r.ReorderFilters(ctx, []int64{})
-	if err != nil {
-		t.Fatalf("ReorderFilters on empty table: %v", err)
-	}
-	if n != 0 {
-		t.Errorf("n = %d, want 0", n)
-	}
+	assert.NoError(t, err)
+	assert.Equal(t, 0, n)
 }
 
 func TestReorderFilters_EmptyIDsOnNonEmptyTable(t *testing.T) {
@@ -382,9 +343,7 @@ func TestReorderFilters_EmptyIDsOnNonEmptyTable(t *testing.T) {
 	r.CreateFilter(ctx, makeFilter(oas.FilterActionDrop, "a@x", "", ""), noPos)
 
 	_, err := r.ReorderFilters(ctx, []int64{})
-	if !errors.Is(err, ErrIncompleteReorder) {
-		t.Errorf("got %v, want ErrIncompleteReorder", err)
-	}
+	assert.ErrorIs(t, err, ErrIncompleteReorder)
 }
 
 func TestScanFilter_FolderIDNullability(t *testing.T) {
@@ -394,13 +353,11 @@ func TestScanFilter_FolderIDNullability(t *testing.T) {
 
 	// Non-move filter: folder_id should be stored as NULL.
 	f, err := r.CreateFilter(ctx, makeFilter(oas.FilterActionMarkRead, "", "to@x", ""), noPos)
-	if err != nil {
-		t.Fatalf("CreateFilter: %v", err)
-	}
-	got, _ := r.GetFilter(ctx, int64(f.ID))
-	if !got.FolderID.Null {
-		t.Errorf("expected FolderID to be null for non-move filter, got %v", got.FolderID)
-	}
+	require.NoError(t, err)
+
+	got, err := r.GetFilter(ctx, int64(f.ID))
+	require.NoError(t, err)
+	assert.True(t, got.FolderID.Null)
 }
 
 func TestCreateFilter_StopField(t *testing.T) {
@@ -411,12 +368,8 @@ func TestCreateFilter_StopField(t *testing.T) {
 	f := makeFilter(oas.FilterActionDrop, "from@x", "", "")
 	f.Stop = false
 	got, err := r.CreateFilter(ctx, f, noPos)
-	if err != nil {
-		t.Fatalf("CreateFilter: %v", err)
-	}
-	if got.Stop {
-		t.Error("Stop should be false")
-	}
+	require.NoError(t, err)
+	assert.False(t, got.Stop)
 }
 
 func TestCreateFilter_AllMatchFieldCombinations(t *testing.T) {
@@ -431,9 +384,8 @@ func TestCreateFilter_AllMatchFieldCombinations(t *testing.T) {
 		makeFilter(oas.FilterActionDrop, "", "", "subject"),
 	}
 	for _, f := range cases {
-		if _, err := r.CreateFilter(ctx, f, noPos); err != nil {
-			t.Errorf("CreateFilter(%q,%q,%q): unexpected error %v", f.MatchFrom, f.MatchTo, f.MatchSubject, err)
-		}
+		_, err := r.CreateFilter(ctx, f, noPos)
+		assert.NoError(t, err, "CreateFilter(%q,%q,%q)", f.MatchFrom, f.MatchTo, f.MatchSubject)
 	}
 }
 
@@ -445,9 +397,8 @@ func TestFilterNonMoveActionDoesNotRequireFolderID(t *testing.T) {
 	for _, action := range []oas.FilterAction{oas.FilterActionTrash, oas.FilterActionMarkRead, oas.FilterActionDrop} {
 		f := makeFilter(action, "from@x", "", "")
 		// FolderID intentionally not set.
-		if _, err := r.CreateFilter(ctx, f, noPos); err != nil {
-			t.Errorf("action=%s: unexpected error %v", action, err)
-		}
+		_, err := r.CreateFilter(ctx, f, noPos)
+		assert.NoError(t, err, "action=%s", action)
 	}
 }
 
@@ -459,9 +410,7 @@ func TestReorderFilters_LargeIDsNotInTable(t *testing.T) {
 	f, _ := r.CreateFilter(ctx, makeFilter(oas.FilterActionDrop, "from@x", "", ""), noPos)
 	// Pass a valid ID plus an unknown large ID.
 	_, err := r.ReorderFilters(ctx, []int64{int64(f.ID), 99999})
-	if !errors.Is(err, ErrUnknownID) {
-		t.Errorf("got %v, want ErrUnknownID", err)
-	}
+	assert.ErrorIs(t, err, ErrUnknownID)
 }
 
 func TestCreateFilter_MatchSubjectTrimCheck(t *testing.T) {
@@ -472,7 +421,5 @@ func TestCreateFilter_MatchSubjectTrimCheck(t *testing.T) {
 	// A match_subject of just spaces must fail even if non-empty string.
 	f := makeFilter(oas.FilterActionDrop, "", "", strings.Repeat(" ", 10))
 	_, err := r.CreateFilter(ctx, f, noPos)
-	if !errors.Is(err, ErrInvalidFilter) {
-		t.Errorf("whitespace-only match_subject: got %v, want ErrInvalidFilter", err)
-	}
+	assert.ErrorIs(t, err, ErrInvalidFilter)
 }

@@ -11,28 +11,25 @@ import (
 	"time"
 
 	"github.com/mikaelstaldal/mymail/internal/repository"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 // openImportTestDB creates a temp SQLite DB with built-in folders seeded.
 func openImportTestDB(t *testing.T) *sql.DB {
 	t.Helper()
 	f, err := os.CreateTemp("", "mymail-import-test-*.sqlite")
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
 	f.Close()
 	path := f.Name()
 	t.Cleanup(func() { os.Remove(path) })
 
 	db, err := repository.OpenDB(path, 0)
-	if err != nil {
-		t.Fatalf("OpenDB: %v", err)
-	}
+	require.NoError(t, err, "OpenDB")
 	t.Cleanup(func() { db.Close() })
 
-	if err := repository.SeedBuiltinFolders(db); err != nil {
-		t.Fatalf("SeedBuiltinFolders: %v", err)
-	}
+	err = repository.SeedBuiltinFolders(db)
+	require.NoError(t, err, "SeedBuiltinFolders")
 	return db
 }
 
@@ -115,20 +112,11 @@ func TestParseMappings(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			got, err := parseMappings(tc.args)
 			if tc.wantErr != "" {
-				if err == nil {
-					t.Fatalf("expected error containing %q, got nil", tc.wantErr)
-				}
-				if !strings.Contains(err.Error(), tc.wantErr) {
-					t.Fatalf("error %q does not contain %q", err.Error(), tc.wantErr)
-				}
+				assert.ErrorContains(t, err, tc.wantErr)
 				return
 			}
-			if err != nil {
-				t.Fatalf("unexpected error: %v", err)
-			}
-			if len(got) != tc.wantLen {
-				t.Fatalf("len = %d, want %d", len(got), tc.wantLen)
-			}
+			require.NoError(t, err)
+			assert.Len(t, got, tc.wantLen)
 			if tc.check != nil {
 				tc.check(t, got)
 			}
@@ -195,25 +183,14 @@ func TestScanMboxSeparators(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			f, err := os.CreateTemp("", "mbox-test-*.mbox")
-			if err != nil {
-				t.Fatal(err)
-			}
+			require.NoError(t, err)
 			defer os.Remove(f.Name())
 			f.WriteString(tc.content)
 			f.Close()
 
 			got, err := scanMboxSeparators(f.Name())
-			if err != nil {
-				t.Fatalf("unexpected error: %v", err)
-			}
-			if len(got) != len(tc.want) {
-				t.Fatalf("got %v (len %d), want %v (len %d)", got, len(got), tc.want, len(tc.want))
-			}
-			for i := range got {
-				if got[i] != tc.want[i] {
-					t.Errorf("[%d] got %q, want %q", i, got[i], tc.want[i])
-				}
-			}
+			require.NoError(t, err)
+			assert.Equal(t, tc.want, got)
 		})
 	}
 }
@@ -226,13 +203,8 @@ func TestResolveFolder(t *testing.T) {
 		cache := make(map[string]int64)
 		for slug, wantID := range builtinSlugs {
 			id, err := resolveFolder(ctx, db, slug, cache)
-			if err != nil {
-				t.Errorf("resolveFolder(%q): %v", slug, err)
-				continue
-			}
-			if id != wantID {
-				t.Errorf("resolveFolder(%q) = %d, want %d", slug, id, wantID)
-			}
+			assert.NoError(t, err, "resolveFolder(%q)", slug)
+			assert.Equal(t, wantID, id, "resolveFolder(%q)", slug)
 		}
 	})
 
@@ -240,51 +212,36 @@ func TestResolveFolder(t *testing.T) {
 		db := openImportTestDB(t)
 		cache := make(map[string]int64)
 		_, err := resolveFolder(ctx, db, "scheduled", cache)
-		if err == nil {
-			t.Fatal("expected error for scheduled")
-		}
+		assert.Error(t, err)
 	})
 
 	t.Run("snoozed rejected", func(t *testing.T) {
 		db := openImportTestDB(t)
 		cache := make(map[string]int64)
 		_, err := resolveFolder(ctx, db, "snoozed", cache)
-		if err == nil {
-			t.Fatal("expected error for snoozed")
-		}
+		assert.Error(t, err)
 	})
 
 	t.Run("user folder created on first resolve", func(t *testing.T) {
 		db := openImportTestDB(t)
 		cache := make(map[string]int64)
 		id, err := resolveFolder(ctx, db, "Work", cache)
-		if err != nil {
-			t.Fatalf("resolveFolder: %v", err)
-		}
-		if id < 100 {
-			t.Errorf("user folder id = %d, want >= 100", id)
-		}
+		require.NoError(t, err)
+		assert.GreaterOrEqual(t, id, int64(100))
+
 		var name string
 		db.QueryRowContext(ctx, `SELECT name FROM folders WHERE id = ?`, id).Scan(&name)
-		if name != "Work" {
-			t.Errorf("folder name = %q, want Work", name)
-		}
+		assert.Equal(t, "Work", name)
 	})
 
 	t.Run("name cache hit avoids duplicate creation", func(t *testing.T) {
 		db := openImportTestDB(t)
 		cache := make(map[string]int64)
 		id1, err := resolveFolder(ctx, db, "Archive", cache)
-		if err != nil {
-			t.Fatalf("first resolveFolder: %v", err)
-		}
+		require.NoError(t, err)
 		id2, err := resolveFolder(ctx, db, "archive", cache) // lowercase → same cache key
-		if err != nil {
-			t.Fatalf("second resolveFolder: %v", err)
-		}
-		if id1 != id2 {
-			t.Errorf("ids differ: %d vs %d", id1, id2)
-		}
+		require.NoError(t, err)
+		assert.Equal(t, id1, id2)
 	})
 
 	t.Run("case-insensitive lookup finds existing folder", func(t *testing.T) {
@@ -292,18 +249,12 @@ func TestResolveFolder(t *testing.T) {
 		cache := make(map[string]int64)
 		// Create the folder once.
 		id1, err := resolveFolder(ctx, db, "Projects", cache)
-		if err != nil {
-			t.Fatalf("create: %v", err)
-		}
+		require.NoError(t, err)
 		// Resolve with different case via a fresh cache (simulates a second mapping).
 		cache2 := make(map[string]int64)
 		id2, err := resolveFolder(ctx, db, "PROJECTS", cache2)
-		if err != nil {
-			t.Fatalf("lookup: %v", err)
-		}
-		if id1 != id2 {
-			t.Errorf("ids differ: %d vs %d (case-insensitive lookup should find existing)", id1, id2)
-		}
+		require.NoError(t, err)
+		assert.Equal(t, id1, id2, "case-insensitive lookup should find existing")
 	})
 }
 
@@ -363,36 +314,35 @@ func TestImportMaildir_FlagMapping(t *testing.T) {
 			"Message-Id: <seenflagged1@host>\r\n\r\nBody\r\n")
 
 	imp, skip, err := importMaildir(dir, 1, db)
-	if err != nil {
-		t.Fatalf("importMaildir: %v", err)
-	}
-	if imp != 4 || skip != 0 {
-		t.Fatalf("imported=%d skipped=%d, want 4/0", imp, skip)
-	}
+	require.NoError(t, err)
+	assert.Equal(t, 4, imp)
+	assert.Equal(t, 0, skip)
 
 	ctx := context.Background()
 	type row struct{ read, flagged int }
 	queryMsg := func(msgID string) row {
 		t.Helper()
 		var r row
-		if err := db.QueryRowContext(ctx, `SELECT read, flagged FROM messages WHERE message_id = ?`, msgID).Scan(&r.read, &r.flagged); err != nil {
-			t.Fatalf("query %s: %v", msgID, err)
-		}
+		err := db.QueryRowContext(ctx, `SELECT read, flagged FROM messages WHERE message_id = ?`, msgID).Scan(&r.read, &r.flagged)
+		require.NoError(t, err, "query %s", msgID)
 		return r
 	}
 
-	if r := queryMsg("new1@host"); r.read != 0 || r.flagged != 0 {
-		t.Errorf("new/: read=%d flagged=%d, want 0/0", r.read, r.flagged)
-	}
-	if r := queryMsg("seen1@host"); r.read != 1 || r.flagged != 0 {
-		t.Errorf(":2,S: read=%d flagged=%d, want 1/0", r.read, r.flagged)
-	}
-	if r := queryMsg("flagged1@host"); r.read != 0 || r.flagged != 1 {
-		t.Errorf(":2,F: read=%d flagged=%d, want 0/1", r.read, r.flagged)
-	}
-	if r := queryMsg("seenflagged1@host"); r.read != 1 || r.flagged != 1 {
-		t.Errorf(":2,FS: read=%d flagged=%d, want 1/1", r.read, r.flagged)
-	}
+	r := queryMsg("new1@host")
+	assert.Equal(t, 0, r.read, "new/: read")
+	assert.Equal(t, 0, r.flagged, "new/: flagged")
+
+	r = queryMsg("seen1@host")
+	assert.Equal(t, 1, r.read, ":2,S: read")
+	assert.Equal(t, 0, r.flagged, ":2,S: flagged")
+
+	r = queryMsg("flagged1@host")
+	assert.Equal(t, 0, r.read, ":2,F: read")
+	assert.Equal(t, 1, r.flagged, ":2,F: flagged")
+
+	r = queryMsg("seenflagged1@host")
+	assert.Equal(t, 1, r.read, ":2,FS: read")
+	assert.Equal(t, 1, r.flagged, ":2,FS: flagged")
 }
 
 func TestImportMaildir_DuplicateSkip(t *testing.T) {
@@ -405,15 +355,15 @@ func TestImportMaildir_DuplicateSkip(t *testing.T) {
 
 	// First import.
 	imp, skip, err := importMaildir(dir, 1, db)
-	if err != nil || imp != 1 || skip != 0 {
-		t.Fatalf("first import: imp=%d skip=%d err=%v", imp, skip, err)
-	}
+	require.NoError(t, err)
+	assert.Equal(t, 1, imp)
+	assert.Equal(t, 0, skip)
 
 	// Second import of the same Maildir: same message-id → skipped.
 	imp, skip, err = importMaildir(dir, 1, db)
-	if err != nil || imp != 0 || skip != 1 {
-		t.Fatalf("second import: imp=%d skip=%d err=%v", imp, skip, err)
-	}
+	require.NoError(t, err)
+	assert.Equal(t, 0, imp)
+	assert.Equal(t, 1, skip)
 }
 
 func TestImportMaildir_ContactUpsert(t *testing.T) {
@@ -424,20 +374,15 @@ func TestImportMaildir_ContactUpsert(t *testing.T) {
 		"From: Carol <carol@example.com>\r\nTo: dave@example.com\r\nSubject: Hello\r\n"+
 			"Date: Mon, 01 Jan 2024 10:00:00 +0000\r\nMessage-Id: <contact1@host>\r\n\r\nBody\r\n")
 
-	if _, _, err := importMaildir(dir, 1, db); err != nil {
-		t.Fatalf("importMaildir: %v", err)
-	}
+	_, _, err := importMaildir(dir, 1, db)
+	require.NoError(t, err)
 
 	var name string
-	err := db.QueryRowContext(context.Background(),
+	err = db.QueryRowContext(context.Background(),
 		`SELECT name FROM contacts WHERE address = 'carol@example.com'`,
 	).Scan(&name)
-	if err != nil {
-		t.Fatalf("contact not found: %v", err)
-	}
-	if name != "Carol" {
-		t.Errorf("contact name = %q, want Carol", name)
-	}
+	require.NoError(t, err)
+	assert.Equal(t, "Carol", name)
 }
 
 func TestImportMaildir_NoDateNoMtime(t *testing.T) {
@@ -452,15 +397,12 @@ func TestImportMaildir_NoDateNoMtime(t *testing.T) {
 			"Date: Fri, 05 Jan 2024 08:00:00 +0000\r\nMessage-Id: <dated@host>\r\n\r\nBody\r\n")
 
 	imp, _, err := importMaildir(dir, 1, db)
-	if err != nil || imp != 1 {
-		t.Fatalf("importMaildir: imp=%d err=%v", imp, err)
-	}
+	require.NoError(t, err)
+	assert.Equal(t, 1, imp)
 
 	var dateStr string
 	db.QueryRowContext(context.Background(), `SELECT date FROM messages WHERE message_id = 'dated@host'`).Scan(&dateStr)
-	if !strings.HasPrefix(dateStr, "2024-01-05") {
-		t.Errorf("date = %q, want prefix 2024-01-05", dateStr)
-	}
+	assert.True(t, strings.HasPrefix(dateStr, "2024-01-05"))
 }
 
 // --- importMbox tests ---
@@ -489,15 +431,13 @@ func TestImportMbox_DateHeader(t *testing.T) {
 	})
 
 	imp, skip, err := importMbox(path, 1, db)
-	if err != nil || imp != 1 || skip != 0 {
-		t.Fatalf("importMbox: imp=%d skip=%d err=%v", imp, skip, err)
-	}
+	require.NoError(t, err)
+	assert.Equal(t, 1, imp)
+	assert.Equal(t, 0, skip)
 
 	var dateStr string
 	db.QueryRowContext(context.Background(), `SELECT date FROM messages WHERE message_id = 'dated@mbox'`).Scan(&dateStr)
-	if !strings.HasPrefix(dateStr, "2024-01-08") {
-		t.Errorf("date = %q, want 2024-01-08 prefix", dateStr)
-	}
+	assert.True(t, strings.HasPrefix(dateStr, "2024-01-08"))
 }
 
 func TestImportMbox_FromSeparatorFallback(t *testing.T) {
@@ -516,15 +456,13 @@ func TestImportMbox_FromSeparatorFallback(t *testing.T) {
 	f.Close()
 
 	imp, skip, err := importMbox(f.Name(), 1, db)
-	if err != nil || imp != 1 || skip != 0 {
-		t.Fatalf("importMbox: imp=%d skip=%d err=%v", imp, skip, err)
-	}
+	require.NoError(t, err)
+	assert.Equal(t, 1, imp)
+	assert.Equal(t, 0, skip)
 
 	var dateStr string
 	db.QueryRowContext(context.Background(), `SELECT date FROM messages WHERE message_id = 'nodatembox@host'`).Scan(&dateStr)
-	if !strings.HasPrefix(dateStr, "2024-01-15") {
-		t.Errorf("date = %q, want 2024-01-15 prefix (From-separator fallback)", dateStr)
-	}
+	assert.True(t, strings.HasPrefix(dateStr, "2024-01-15"), "From-separator fallback")
 }
 
 func TestImportMbox_FileMtimeFallback(t *testing.T) {
@@ -546,15 +484,13 @@ func TestImportMbox_FileMtimeFallback(t *testing.T) {
 	f.Close()
 
 	imp, skip, err := importMbox(f.Name(), 1, db)
-	if err != nil || imp != 1 || skip != 0 {
-		t.Fatalf("importMbox: imp=%d skip=%d err=%v", imp, skip, err)
-	}
+	require.NoError(t, err)
+	assert.Equal(t, 1, imp)
+	assert.Equal(t, 0, skip)
 
 	var dateStr string
 	db.QueryRowContext(context.Background(), `SELECT date FROM messages WHERE message_id = 'mtimembox@host'`).Scan(&dateStr)
-	if !strings.HasPrefix(dateStr, "2023-06-15") {
-		t.Errorf("date = %q, want 2023-06-15 prefix (fileMtime fallback)", dateStr)
-	}
+	assert.True(t, strings.HasPrefix(dateStr, "2023-06-15"), "fileMtime fallback")
 }
 
 func TestImportMbox_DuplicateSkip(t *testing.T) {
@@ -566,13 +502,14 @@ func TestImportMbox_DuplicateSkip(t *testing.T) {
 	})
 
 	imp, skip, err := importMbox(path, 1, db)
-	if err != nil || imp != 1 || skip != 0 {
-		t.Fatalf("first import: imp=%d skip=%d err=%v", imp, skip, err)
-	}
+	require.NoError(t, err)
+	assert.Equal(t, 1, imp)
+	assert.Equal(t, 0, skip)
+
 	imp, skip, err = importMbox(path, 1, db)
-	if err != nil || imp != 0 || skip != 1 {
-		t.Fatalf("second import: imp=%d skip=%d err=%v", imp, skip, err)
-	}
+	require.NoError(t, err)
+	assert.Equal(t, 0, imp)
+	assert.Equal(t, 1, skip)
 }
 
 func TestImportMbox_ContactUpsert(t *testing.T) {
@@ -583,20 +520,15 @@ func TestImportMbox_ContactUpsert(t *testing.T) {
 			"Date: Mon, 01 Jan 2024 10:00:00 +0000\r\nMessage-Id: <contact2@mbox>\r\n\r\nBody\r\n",
 	})
 
-	if _, _, err := importMbox(path, 1, db); err != nil {
-		t.Fatalf("importMbox: %v", err)
-	}
+	_, _, err := importMbox(path, 1, db)
+	require.NoError(t, err)
 
 	var name string
-	err := db.QueryRowContext(context.Background(),
+	err = db.QueryRowContext(context.Background(),
 		`SELECT name FROM contacts WHERE address = 'dave@example.com'`,
 	).Scan(&name)
-	if err != nil {
-		t.Fatalf("contact not found: %v", err)
-	}
-	if name != "Dave" {
-		t.Errorf("contact name = %q, want Dave", name)
-	}
+	require.NoError(t, err)
+	assert.Equal(t, "Dave", name)
 }
 
 func TestResolveFolder_ScheduledSnoozedCaseInsensitive(t *testing.T) {
@@ -605,8 +537,6 @@ func TestResolveFolder_ScheduledSnoozedCaseInsensitive(t *testing.T) {
 	cache := make(map[string]int64)
 	for _, name := range []string{"Scheduled", "SCHEDULED", "Snoozed", "SNOOZED"} {
 		_, err := resolveFolder(ctx, db, name, cache)
-		if err == nil {
-			t.Errorf("resolveFolder(%q): expected error, got nil", name)
-		}
+		assert.Error(t, err, "resolveFolder(%q)", name)
 	}
 }

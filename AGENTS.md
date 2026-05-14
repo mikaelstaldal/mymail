@@ -134,6 +134,7 @@ Each layer has its own test scope:
 - **Service:** unit-test business logic with a fake/stub repository interface. No SQLite required.
 - **Handler:** integration-test HTTP endpoints by wiring the full `handler → service → repository` stack against an in-memory DB. Use `net/http/httptest`.
 - **LDA:** test the parsing pipeline end-to-end by feeding raw RFC 5322 messages and asserting what lands in the DB.
+- **Assertions:** use `github.com/stretchr/testify/assert` and `github.com/stretchr/testify/require` for all test assertions.
 - **FTS search input sanitization:** `spec/IMPLEMENTATION.md` requires a unit test verifying that `"`, non-ASCII characters, and FTS5 operator keywords (`AND`, `OR`, `NOT`, `NEAR`) are all treated as literals.
 
 Place tests in `_test.go` files alongside the package under test. Use table-driven tests for endpoint/edge-case coverage.

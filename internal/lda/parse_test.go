@@ -1,8 +1,10 @@
 package lda
 
 import (
-	"strings"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestParseMessage_PlainText(t *testing.T) {
@@ -17,27 +19,15 @@ func TestParseMessage_PlainText(t *testing.T) {
 	)
 
 	pm, err := ParseMessage(raw)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if !strings.Contains(pm.BodyText, "Hello, world!") {
-		t.Errorf("BodyText = %q, want to contain 'Hello, world!'", pm.BodyText)
-	}
-	if pm.BodyHTML != "" {
-		t.Errorf("BodyHTML = %q, want empty", pm.BodyHTML)
-	}
-	if pm.Date == nil {
-		t.Error("Date is nil, want non-nil")
-	}
-	if pm.MessageID == nil || *pm.MessageID != "test123@example.com" {
-		t.Errorf("MessageID = %v, want 'test123@example.com'", pm.MessageID)
-	}
-	if len(pm.Attachments) != 0 {
-		t.Errorf("Attachments = %d, want 0", len(pm.Attachments))
-	}
-	if pm.FromAddr != "sender@example.com" {
-		t.Errorf("FromAddr = %q, want 'sender@example.com'", pm.FromAddr)
-	}
+	require.NoError(t, err)
+
+	assert.Contains(t, pm.BodyText, "Hello, world!")
+	assert.Empty(t, pm.BodyHTML)
+	assert.NotNil(t, pm.Date)
+	assert.NotNil(t, pm.MessageID)
+	assert.Equal(t, "test123@example.com", *pm.MessageID)
+	assert.Empty(t, pm.Attachments)
+	assert.Equal(t, "sender@example.com", pm.FromAddr)
 }
 
 func TestParseMessage_MultipartAlternative_HTMLPreferred(t *testing.T) {
@@ -61,18 +51,10 @@ func TestParseMessage_MultipartAlternative_HTMLPreferred(t *testing.T) {
 	)
 
 	pm, err := ParseMessage(raw)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if !strings.Contains(pm.BodyText, "Plain text body") {
-		t.Errorf("BodyText = %q, want to contain 'Plain text body'", pm.BodyText)
-	}
-	if !strings.Contains(pm.BodyHTML, "HTML body") {
-		t.Errorf("BodyHTML = %q, want to contain 'HTML body'", pm.BodyHTML)
-	}
-	if len(pm.Attachments) != 0 {
-		t.Errorf("Attachments = %d, want 0", len(pm.Attachments))
-	}
+	require.NoError(t, err)
+	assert.Contains(t, pm.BodyText, "Plain text body")
+	assert.Contains(t, pm.BodyHTML, "HTML body")
+	assert.Empty(t, pm.Attachments)
 }
 
 func TestParseMessage_CIDInlineImage(t *testing.T) {
@@ -96,18 +78,10 @@ func TestParseMessage_CIDInlineImage(t *testing.T) {
 	)
 
 	pm, err := ParseMessage(raw)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if len(pm.Attachments) != 0 {
-		t.Errorf("Attachments = %d, want 0 (inline image should not be an attachment)", len(pm.Attachments))
-	}
-	if !strings.Contains(pm.BodyHTML, "data:image/gif;base64,") {
-		t.Errorf("BodyHTML does not contain data URI, got: %q", pm.BodyHTML)
-	}
-	if strings.Contains(pm.BodyHTML, "cid:") {
-		t.Errorf("BodyHTML still contains cid: reference, got: %q", pm.BodyHTML)
-	}
+	require.NoError(t, err)
+	assert.Empty(t, pm.Attachments, "inline image should not be an attachment")
+	assert.Contains(t, pm.BodyHTML, "data:image/gif;base64,")
+	assert.NotContains(t, pm.BodyHTML, "cid:")
 }
 
 func TestParseMessage_CharsetISO8859(t *testing.T) {
@@ -119,12 +93,8 @@ func TestParseMessage_CharsetISO8859(t *testing.T) {
 	)
 
 	pm, err := ParseMessage(raw)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if !strings.Contains(pm.BodyText, "Café") {
-		t.Errorf("BodyText = %q, want to contain 'Café'", pm.BodyText)
-	}
+	require.NoError(t, err)
+	assert.Contains(t, pm.BodyText, "Café")
 }
 
 func TestParseMessage_HTMLOnly_DerivedBodyText(t *testing.T) {
@@ -136,18 +106,10 @@ func TestParseMessage_HTMLOnly_DerivedBodyText(t *testing.T) {
 	)
 
 	pm, err := ParseMessage(raw)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if pm.BodyText == "" {
-		t.Error("BodyText is empty, want non-empty derived text")
-	}
-	if !strings.Contains(pm.BodyText, "Hello, world!") {
-		t.Errorf("BodyText = %q, want to contain 'Hello, world!'", pm.BodyText)
-	}
-	if pm.BodyHTML == "" {
-		t.Error("BodyHTML is empty, want non-empty")
-	}
+	require.NoError(t, err)
+	assert.NotEmpty(t, pm.BodyText)
+	assert.Contains(t, pm.BodyText, "Hello, world!")
+	assert.NotEmpty(t, pm.BodyHTML)
 }
 
 func TestParseMessage_HTMLOnly_BrBecomesNewline(t *testing.T) {
@@ -159,21 +121,10 @@ func TestParseMessage_HTMLOnly_BrBecomesNewline(t *testing.T) {
 	)
 
 	pm, err := ParseMessage(raw)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	idx1 := strings.Index(pm.BodyText, "Line one")
-	idx2 := strings.Index(pm.BodyText, "Line two")
-	if idx1 < 0 || idx2 < 0 {
-		t.Fatalf("BodyText = %q, missing expected lines", pm.BodyText)
-	}
-	if idx2 <= idx1+len("Line one") {
-		t.Fatalf("BodyText = %q, 'Line two' not after 'Line one'", pm.BodyText)
-	}
-	between := pm.BodyText[idx1+len("Line one") : idx2]
-	if !strings.Contains(between, "\n") {
-		t.Errorf("<br> did not produce newline between lines, got %q", between)
-	}
+	require.NoError(t, err)
+	assert.Contains(t, pm.BodyText, "Line one")
+	assert.Contains(t, pm.BodyText, "Line two")
+	assert.Contains(t, pm.BodyText, "Line one\nLine two")
 }
 
 func TestParseMessage_PlainAndHTML_UsesNativePlain(t *testing.T) {
@@ -194,19 +145,10 @@ func TestParseMessage_PlainAndHTML_UsesNativePlain(t *testing.T) {
 	)
 
 	pm, err := ParseMessage(raw)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if !strings.Contains(pm.BodyText, "native plain text") {
-		t.Errorf("BodyText = %q, want native plain text", pm.BodyText)
-	}
-	// If the derived path were used, html2text would produce "HTML only content".
-	if strings.Contains(pm.BodyText, "HTML only content") {
-		t.Errorf("BodyText = %q, derived path was used instead of native plain part", pm.BodyText)
-	}
-	if !strings.Contains(pm.BodyHTML, "HTML only content") {
-		t.Errorf("BodyHTML = %q, want to contain 'HTML only content'", pm.BodyHTML)
-	}
+	require.NoError(t, err)
+	assert.Contains(t, pm.BodyText, "native plain text")
+	assert.NotContains(t, pm.BodyText, "HTML only content")
+	assert.Contains(t, pm.BodyHTML, "HTML only content")
 }
 
 func TestParseMessage_NoDate(t *testing.T) {
@@ -219,10 +161,6 @@ func TestParseMessage_NoDate(t *testing.T) {
 	)
 
 	pm, err := ParseMessage(raw)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if pm.Date != nil {
-		t.Errorf("Date = %v, want nil", pm.Date)
-	}
+	require.NoError(t, err)
+	assert.Nil(t, pm.Date)
 }

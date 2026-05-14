@@ -1,54 +1,41 @@
 package sanitize
 
 import (
-	"strings"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
 )
 
 func TestScriptStripped(t *testing.T) {
 	out := SanitizeHTML(`<p>hello</p><script>alert(1)</script>`)
-	if strings.Contains(out, "<script") {
-		t.Errorf("expected <script> to be stripped, got: %s", out)
-	}
-	if !strings.Contains(out, "hello") {
-		t.Errorf("expected paragraph text to survive, got: %s", out)
-	}
+	assert.NotContains(t, out, "<script")
+	assert.Contains(t, out, "hello")
 }
 
 func TestDataImagePreserved(t *testing.T) {
 	src := `data:image/png;base64,iVBORw0KGgo=`
 	out := SanitizeHTML(`<img src="` + src + `" alt="test">`)
-	if !strings.Contains(out, src) {
-		t.Errorf("expected data:image src to be preserved, got: %s", out)
-	}
+	assert.Contains(t, out, src)
 }
 
 func TestJavascriptSrcStripped(t *testing.T) {
 	out := SanitizeHTML(`<img src="javascript:alert(1)" alt="x">`)
-	if strings.Contains(out, "javascript:") {
-		t.Errorf("expected javascript: src to be stripped, got: %s", out)
-	}
+	assert.NotContains(t, out, "javascript:")
 }
 
 func TestColspanAllowedOnTD(t *testing.T) {
 	out := SanitizeHTML(`<table><tr><td colspan="2">cell</td></tr></table>`)
-	if !strings.Contains(out, `colspan="2"`) {
-		t.Errorf("expected colspan to be allowed on td, got: %s", out)
-	}
+	assert.Contains(t, out, `colspan="2"`)
 }
 
 func TestColspanStrippedOnP(t *testing.T) {
 	out := SanitizeHTML(`<p colspan="2">text</p>`)
-	if strings.Contains(out, "colspan") {
-		t.Errorf("expected colspan to be stripped on p, got: %s", out)
-	}
+	assert.NotContains(t, out, "colspan")
 }
 
 func TestStyleURLStripped(t *testing.T) {
 	out := SanitizeHTML(`<p style="background: url(http://evil.com/x.png)">text</p>`)
-	if strings.Contains(out, "url(") {
-		t.Errorf("expected style with url() to be stripped, got: %s", out)
-	}
+	assert.NotContains(t, out, "url(")
 }
 
 func TestReSrc(t *testing.T) {
@@ -95,31 +82,22 @@ func TestReSrc(t *testing.T) {
 	}
 
 	for _, s := range allowed {
-		if !reSrc.MatchString(s) {
-			t.Errorf("reSrc should allow %q", s)
-		}
+		assert.Regexp(t, reSrc, s)
 	}
 	for _, s := range rejected {
-		if reSrc.MatchString(s) {
-			t.Errorf("reSrc should reject %q", s)
-		}
+		assert.NotRegexp(t, reSrc, s)
 	}
 }
 
 func TestSVGDataURIStripped(t *testing.T) {
 	out := SanitizeHTML(`<img src="data:image/svg+xml;base64,PHN2Zy8+" alt="x">`)
-	if strings.Contains(out, "svg+xml") {
-		t.Errorf("expected SVG data URI to be stripped, got: %s", out)
-	}
+	assert.NotContains(t, out, "svg+xml")
 }
 
 func TestLinksGetTargetBlank(t *testing.T) {
 	out := SanitizeHTML(`<a href="https://example.com">link</a>`)
-	if !strings.Contains(out, `target="_blank"`) {
-		t.Errorf("expected target=_blank, got: %s", out)
-	}
+	assert.Contains(t, out, `target="_blank"`)
 	// bluemonday emits noreferrer before noopener
-	if !strings.Contains(out, "noreferrer") || !strings.Contains(out, "noopener") {
-		t.Errorf("expected rel containing noopener and noreferrer, got: %s", out)
-	}
+	assert.Contains(t, out, "noreferrer")
+	assert.Contains(t, out, "noopener")
 }

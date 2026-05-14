@@ -7,6 +7,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
 	"github.com/mikaelstaldal/mymail/internal/model"
 )
 
@@ -14,17 +17,13 @@ import (
 func openTestDB(t *testing.T) *sql.DB {
 	t.Helper()
 	f, err := os.CreateTemp("", "mymail-msg-test-*.sqlite")
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
 	f.Close()
 	path := f.Name()
 	t.Cleanup(func() { os.Remove(path) })
 
 	db, err := OpenDB(path, 0)
-	if err != nil {
-		t.Fatalf("OpenDB: %v", err)
-	}
+	require.NoError(t, err, "OpenDB")
 	t.Cleanup(func() { db.Close() })
 
 	// Seed built-in folders.
@@ -32,9 +31,7 @@ func openTestDB(t *testing.T) *sql.DB {
 		(1,'Inbox','inbox',0),(2,'Sent','sent',1),(3,'Drafts','drafts',2),
 		(4,'Trash','trash',3),(5,'Scheduled','scheduled',4),
 		(6,'Snoozed','snoozed',5),(7,'Junk','junk',6)`)
-	if err != nil {
-		t.Fatalf("seed folders: %v", err)
-	}
+	require.NoError(t, err, "seed folders")
 	return db
 }
 
@@ -62,26 +59,16 @@ func TestInsertAndGetMessage(t *testing.T) {
 	msg.References = sql.NullString{String: "ref1@x\nref2@x", Valid: true}
 
 	id, err := r.InsertMessage(ctx, msg)
-	if err != nil {
-		t.Fatalf("InsertMessage: %v", err)
-	}
-	if id == 0 {
-		t.Fatal("expected non-zero id")
-	}
+	require.NoError(t, err)
+	assert.NotZero(t, id)
 
 	got, err := r.GetMessage(ctx, id)
-	if err != nil {
-		t.Fatalf("GetMessage: %v", err)
-	}
-	if got.Subject != "Test subject" {
-		t.Errorf("subject = %q", got.Subject)
-	}
-	if !got.MessageID.Valid || got.MessageID.String != "abc@test" {
-		t.Errorf("message_id = %v", got.MessageID)
-	}
-	if !got.References.Valid || got.References.String != "ref1@x\nref2@x" {
-		t.Errorf("references = %v", got.References)
-	}
+	require.NoError(t, err)
+	assert.Equal(t, "Test subject", got.Subject)
+	assert.True(t, got.MessageID.Valid)
+	assert.Equal(t, "abc@test", got.MessageID.String)
+	assert.True(t, got.References.Valid)
+	assert.Equal(t, "ref1@x\nref2@x", got.References.String)
 }
 
 func TestGetMessageNotFound(t *testing.T) {
@@ -90,9 +77,7 @@ func TestGetMessageNotFound(t *testing.T) {
 	r := NewMessageRepository(db)
 
 	_, err := r.GetMessage(ctx, 9999)
-	if err != ErrNotFound {
-		t.Errorf("expected ErrNotFound, got %v", err)
-	}
+	assert.ErrorIs(t, err, ErrNotFound)
 }
 
 func TestListMessages(t *testing.T) {
@@ -103,25 +88,16 @@ func TestListMessages(t *testing.T) {
 	for i := range 3 {
 		msg := makeMsg(1, "msg")
 		msg.Date = time.Now().UTC().Add(time.Duration(i) * time.Minute)
-		if _, err := r.InsertMessage(ctx, msg); err != nil {
-			t.Fatal(err)
-		}
+		_, err := r.InsertMessage(ctx, msg)
+		require.NoError(t, err)
 	}
 
 	items, total, err := r.ListMessages(ctx, 1, 10, 0, nil, nil)
-	if err != nil {
-		t.Fatalf("ListMessages: %v", err)
-	}
-	if total != 3 {
-		t.Errorf("total = %d, want 3", total)
-	}
-	if len(items) != 3 {
-		t.Errorf("items len = %d, want 3", len(items))
-	}
+	require.NoError(t, err)
+	assert.Equal(t, 3, total)
+	assert.Len(t, items, 3)
 	// Should be ordered by date DESC — newest first.
-	if !items[0].Date.After(items[1].Date) {
-		t.Error("expected descending date order")
-	}
+	assert.True(t, items[0].Date.After(items[1].Date), "expected descending date order")
 }
 
 func TestUpdateMessage(t *testing.T) {
@@ -130,20 +106,12 @@ func TestUpdateMessage(t *testing.T) {
 	r := NewMessageRepository(db)
 
 	id, err := r.InsertMessage(ctx, makeMsg(1, "upd"))
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
 
 	got, err := r.UpdateMessage(ctx, id, map[string]any{"read": true, "flagged": true})
-	if err != nil {
-		t.Fatalf("UpdateMessage: %v", err)
-	}
-	if !got.Read {
-		t.Error("expected read=true")
-	}
-	if !got.Flagged {
-		t.Error("expected flagged=true")
-	}
+	require.NoError(t, err)
+	assert.True(t, got.Read)
+	assert.True(t, got.Flagged)
 }
 
 func TestUpdateMessageNotFound(t *testing.T) {
@@ -152,9 +120,7 @@ func TestUpdateMessageNotFound(t *testing.T) {
 	r := NewMessageRepository(db)
 
 	_, err := r.UpdateMessage(ctx, 9999, map[string]any{"read": true})
-	if err != ErrNotFound {
-		t.Errorf("expected ErrNotFound, got %v", err)
-	}
+	assert.ErrorIs(t, err, ErrNotFound)
 }
 
 func TestDeleteMessageToTrash(t *testing.T) {
@@ -163,13 +129,12 @@ func TestDeleteMessageToTrash(t *testing.T) {
 	r := NewMessageRepository(db)
 
 	id, _ := r.InsertMessage(ctx, makeMsg(1, "del"))
-	if err := r.DeleteMessage(ctx, id); err != nil {
-		t.Fatalf("DeleteMessage: %v", err)
-	}
-	got, _ := r.GetMessage(ctx, id)
-	if got.FolderID != 4 {
-		t.Errorf("folder_id = %d, want 4 (Trash)", got.FolderID)
-	}
+	err := r.DeleteMessage(ctx, id)
+	require.NoError(t, err)
+
+	got, err := r.GetMessage(ctx, id)
+	require.NoError(t, err)
+	assert.Equal(t, 4, got.FolderID, "folder_id should be 4 (Trash)")
 }
 
 func TestDeleteMessagePermanentFromTrash(t *testing.T) {
@@ -178,13 +143,11 @@ func TestDeleteMessagePermanentFromTrash(t *testing.T) {
 	r := NewMessageRepository(db)
 
 	id, _ := r.InsertMessage(ctx, makeMsg(4, "del-perm"))
-	if err := r.DeleteMessage(ctx, id); err != nil {
-		t.Fatalf("DeleteMessage from Trash: %v", err)
-	}
-	_, err := r.GetMessage(ctx, id)
-	if err != ErrNotFound {
-		t.Errorf("expected ErrNotFound after permanent delete, got %v", err)
-	}
+	err := r.DeleteMessage(ctx, id)
+	require.NoError(t, err)
+
+	_, err = r.GetMessage(ctx, id)
+	assert.ErrorIs(t, err, ErrNotFound, "expected ErrNotFound after permanent delete")
 }
 
 func TestBulkDeleteMessages(t *testing.T) {
@@ -195,18 +158,17 @@ func TestBulkDeleteMessages(t *testing.T) {
 	id1, _ := r.InsertMessage(ctx, makeMsg(1, "a"))
 	id2, _ := r.InsertMessage(ctx, makeMsg(4, "b")) // already in Trash → permanent
 
-	if _, _, err := r.BulkDeleteMessages(ctx, []int64{id1, id2}); err != nil {
-		t.Fatalf("BulkDeleteMessages: %v", err)
-	}
+	_, _, err := r.BulkDeleteMessages(ctx, []int64{id1, id2})
+	require.NoError(t, err)
+
 	// id1 should have moved to Trash.
-	got1, _ := r.GetMessage(ctx, id1)
-	if got1.FolderID != 4 {
-		t.Errorf("id1 folder_id = %d, want 4", got1.FolderID)
-	}
+	got1, err := r.GetMessage(ctx, id1)
+	require.NoError(t, err)
+	assert.Equal(t, 4, got1.FolderID)
+
 	// id2 should be permanently deleted.
-	if _, err := r.GetMessage(ctx, id2); err != ErrNotFound {
-		t.Errorf("expected id2 gone, got %v", err)
-	}
+	_, err = r.GetMessage(ctx, id2)
+	assert.ErrorIs(t, err, ErrNotFound)
 }
 
 func TestBulkDeleteMissingID(t *testing.T) {
@@ -216,9 +178,7 @@ func TestBulkDeleteMissingID(t *testing.T) {
 
 	id, _ := r.InsertMessage(ctx, makeMsg(1, "x"))
 	_, _, err := r.BulkDeleteMessages(ctx, []int64{id, 99999})
-	if err != ErrNotFound {
-		t.Errorf("expected ErrNotFound, got %v", err)
-	}
+	assert.ErrorIs(t, err, ErrNotFound)
 }
 
 func TestBulkUpdateMessages(t *testing.T) {
@@ -231,16 +191,12 @@ func TestBulkUpdateMessages(t *testing.T) {
 
 	readTrue := true
 	n, err := r.BulkUpdateMessages(ctx, []int64{id1, id2}, &readTrue, nil)
-	if err != nil {
-		t.Fatalf("BulkUpdateMessages: %v", err)
-	}
-	if n != 2 {
-		t.Errorf("changed = %d, want 2", n)
-	}
-	got, _ := r.GetMessage(ctx, id1)
-	if !got.Read {
-		t.Error("expected read=true after bulk update")
-	}
+	require.NoError(t, err)
+	assert.Equal(t, 2, n)
+
+	got, err := r.GetMessage(ctx, id1)
+	require.NoError(t, err)
+	assert.True(t, got.Read)
 }
 
 func TestMoveMessages(t *testing.T) {
@@ -250,16 +206,12 @@ func TestMoveMessages(t *testing.T) {
 
 	id, _ := r.InsertMessage(ctx, makeMsg(1, "move"))
 	n, err := r.MoveMessages(ctx, []int64{id}, 4)
-	if err != nil {
-		t.Fatalf("MoveMessages: %v", err)
-	}
-	if n != 1 {
-		t.Errorf("moved = %d, want 1", n)
-	}
-	got, _ := r.GetMessage(ctx, id)
-	if got.FolderID != 4 {
-		t.Errorf("folder_id = %d, want 4", got.FolderID)
-	}
+	require.NoError(t, err)
+	assert.Equal(t, 1, n)
+
+	got, err := r.GetMessage(ctx, id)
+	require.NoError(t, err)
+	assert.Equal(t, 4, got.FolderID)
 }
 
 func TestMoveMessagesMissingID(t *testing.T) {
@@ -268,9 +220,7 @@ func TestMoveMessagesMissingID(t *testing.T) {
 	r := NewMessageRepository(db)
 
 	_, err := r.MoveMessages(ctx, []int64{99999}, 4)
-	if err != ErrNotFound {
-		t.Errorf("expected ErrNotFound, got %v", err)
-	}
+	assert.ErrorIs(t, err, ErrNotFound)
 }
 
 func TestGetRawMessage(t *testing.T) {
@@ -283,12 +233,8 @@ func TestGetRawMessage(t *testing.T) {
 	id, _ := r.InsertMessage(ctx, msg)
 
 	raw, err := r.GetRawMessage(ctx, id)
-	if err != nil {
-		t.Fatalf("GetRawMessage: %v", err)
-	}
-	if string(raw) != "raw bytes" {
-		t.Errorf("raw = %q", raw)
-	}
+	require.NoError(t, err)
+	assert.Equal(t, "raw bytes", string(raw))
 }
 
 func TestGetRawMessageNilForDraft(t *testing.T) {
@@ -298,12 +244,8 @@ func TestGetRawMessageNilForDraft(t *testing.T) {
 
 	id, _ := r.InsertMessage(ctx, makeMsg(3, "draft"))
 	raw, err := r.GetRawMessage(ctx, id)
-	if err != nil {
-		t.Fatalf("GetRawMessage for draft: %v", err)
-	}
-	if raw != nil {
-		t.Errorf("expected nil raw for draft, got %q", raw)
-	}
+	require.NoError(t, err)
+	assert.Nil(t, raw)
 }
 
 func TestSnoozeAndCancelSnooze(t *testing.T) {
@@ -315,30 +257,17 @@ func TestSnoozeAndCancelSnooze(t *testing.T) {
 	until := time.Now().UTC().Add(5 * time.Minute)
 
 	got, err := r.SnoozeMessage(ctx, id, until)
-	if err != nil {
-		t.Fatalf("SnoozeMessage: %v", err)
-	}
-	if got.FolderID != 6 {
-		t.Errorf("folder_id after snooze = %d, want 6", got.FolderID)
-	}
-	if !got.SnoozedUntil.Valid {
-		t.Error("expected snoozed_until to be set")
-	}
-	if !got.SnoozeFolder.Valid || got.SnoozeFolder.Int64 != 1 {
-		t.Errorf("snooze_folder = %v, want 1", got.SnoozeFolder)
-	}
+	require.NoError(t, err)
+	assert.Equal(t, 6, got.FolderID)
+	assert.True(t, got.SnoozedUntil.Valid)
+	assert.True(t, got.SnoozeFolder.Valid)
+	assert.Equal(t, int64(1), got.SnoozeFolder.Int64)
 
 	// Cancel snooze.
 	got2, err := r.CancelSnooze(ctx, id)
-	if err != nil {
-		t.Fatalf("CancelSnooze: %v", err)
-	}
-	if got2.FolderID != 1 {
-		t.Errorf("folder_id after cancel = %d, want 1", got2.FolderID)
-	}
-	if got2.SnoozedUntil.Valid {
-		t.Error("expected snoozed_until cleared")
-	}
+	require.NoError(t, err)
+	assert.Equal(t, 1, got2.FolderID)
+	assert.False(t, got2.SnoozedUntil.Valid)
 }
 
 func TestSnoozeTooSoon(t *testing.T) {
@@ -348,9 +277,7 @@ func TestSnoozeTooSoon(t *testing.T) {
 
 	id, _ := r.InsertMessage(ctx, makeMsg(1, "soon"))
 	_, err := r.SnoozeMessage(ctx, id, time.Now().UTC().Add(30*time.Second))
-	if err == nil {
-		t.Error("expected error for snooze < 60s")
-	}
+	assert.Error(t, err)
 }
 
 func TestSnoozeForbiddenFolder(t *testing.T) {
@@ -360,9 +287,7 @@ func TestSnoozeForbiddenFolder(t *testing.T) {
 
 	id, _ := r.InsertMessage(ctx, makeMsg(3, "draft"))
 	_, err := r.SnoozeMessage(ctx, id, time.Now().UTC().Add(5*time.Minute))
-	if err == nil {
-		t.Error("expected error for snooze of draft")
-	}
+	assert.Error(t, err)
 }
 
 func TestCancelSnoozeNotSnoozed(t *testing.T) {
@@ -372,9 +297,7 @@ func TestCancelSnoozeNotSnoozed(t *testing.T) {
 
 	id, _ := r.InsertMessage(ctx, makeMsg(1, "not-snoozed"))
 	_, err := r.CancelSnooze(ctx, id)
-	if err == nil {
-		t.Error("expected error cancelling snooze on non-snoozed message")
-	}
+	assert.Error(t, err)
 }
 
 func TestMarkJunkAndNotJunk(t *testing.T) {
@@ -385,20 +308,14 @@ func TestMarkJunkAndNotJunk(t *testing.T) {
 	id, _ := r.InsertMessage(ctx, makeMsg(1, "junk test"))
 
 	got, err := r.MarkJunk(ctx, id)
-	if err != nil {
-		t.Fatalf("MarkJunk: %v", err)
-	}
-	if got.FolderID != 7 || !got.Read {
-		t.Errorf("after MarkJunk: folder=%d read=%v", got.FolderID, got.Read)
-	}
+	require.NoError(t, err)
+	assert.Equal(t, 7, got.FolderID)
+	assert.True(t, got.Read)
 
 	got2, err := r.MarkNotJunk(ctx, id)
-	if err != nil {
-		t.Fatalf("MarkNotJunk: %v", err)
-	}
-	if got2.FolderID != 1 || got2.Read {
-		t.Errorf("after MarkNotJunk: folder=%d read=%v", got2.FolderID, got2.Read)
-	}
+	require.NoError(t, err)
+	assert.Equal(t, 1, got2.FolderID)
+	assert.False(t, got2.Read)
 }
 
 func TestGetMessageThread_HeaderBased(t *testing.T) {
@@ -419,19 +336,15 @@ func TestGetMessageThread_HeaderBased(t *testing.T) {
 	cid, _ := r.InsertMessage(ctx, child)
 
 	summaries, truncated, err := r.GetMessageThread(ctx, pid)
-	if err != nil {
-		t.Fatalf("GetMessageThread: %v", err)
-	}
-	if truncated {
-		t.Error("unexpected truncated=true")
-	}
+	require.NoError(t, err)
+	assert.False(t, truncated)
+
 	ids := make(map[int64]bool)
 	for _, s := range summaries {
 		ids[int64(s.ID)] = true
 	}
-	if !ids[pid] || !ids[cid] {
-		t.Errorf("thread missing expected IDs: got %v", ids)
-	}
+	assert.True(t, ids[pid])
+	assert.True(t, ids[cid])
 }
 
 func TestGetMessageThread_SubjectFallback(t *testing.T) {
@@ -449,16 +362,14 @@ func TestGetMessageThread_SubjectFallback(t *testing.T) {
 	id2, _ := r.InsertMessage(ctx, m2)
 
 	summaries, _, err := r.GetMessageThread(ctx, id1)
-	if err != nil {
-		t.Fatalf("GetMessageThread (subject fallback): %v", err)
-	}
+	require.NoError(t, err)
+
 	ids := make(map[int64]bool)
 	for _, s := range summaries {
 		ids[int64(s.ID)] = true
 	}
-	if !ids[id1] || !ids[id2] {
-		t.Errorf("subject fallback missed IDs: got %v", ids)
-	}
+	assert.True(t, ids[id1])
+	assert.True(t, ids[id2])
 }
 
 func TestSearchMessages(t *testing.T) {
@@ -468,17 +379,13 @@ func TestSearchMessages(t *testing.T) {
 
 	msg := makeMsg(1, "FTS test")
 	msg.BodyText = "the quick brown fox"
-	if _, err := r.InsertMessage(ctx, msg); err != nil {
-		t.Fatal(err)
-	}
+	_, err := r.InsertMessage(ctx, msg)
+	require.NoError(t, err)
 
 	items, total, err := r.SearchMessages(ctx, "quick", nil, nil, nil, 10, 0)
-	if err != nil {
-		t.Fatalf("SearchMessages: %v", err)
-	}
-	if total == 0 || len(items) == 0 {
-		t.Error("expected at least one search result")
-	}
+	require.NoError(t, err)
+	assert.NotEmpty(t, items)
+	assert.NotZero(t, total)
 }
 
 func TestSanitizeFTSQuery(t *testing.T) {
@@ -496,9 +403,7 @@ func TestSanitizeFTSQuery(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			got := sanitizeFTSQuery(tc.input)
-			if got != tc.want {
-				t.Errorf("got %q, want %q", got, tc.want)
-			}
+			assert.Equal(t, tc.want, got)
 		})
 	}
 }
@@ -516,9 +421,7 @@ func TestSearchMessagesFTSSanitization(t *testing.T) {
 	}
 	for _, q := range cases {
 		_, _, err := r.SearchMessages(ctx, q, nil, nil, nil, 10, 0)
-		if err != nil {
-			t.Errorf("SearchMessages(%q): unexpected error: %v", q, err)
-		}
+		assert.NoError(t, err, "SearchMessages(%q)", q)
 	}
 }
 
@@ -532,13 +435,12 @@ func TestBulkLimitExceeded(t *testing.T) {
 		ids[i] = int64(i + 1)
 	}
 
-	if _, _, err := r.BulkDeleteMessages(ctx, ids); err == nil {
-		t.Error("expected error for BulkDeleteMessages with >1000 ids")
-	}
-	if _, err := r.BulkUpdateMessages(ctx, ids, nil, nil); err == nil {
-		t.Error("expected error for BulkUpdateMessages with >1000 ids")
-	}
-	if _, err := r.MoveMessages(ctx, ids, 1); err == nil {
-		t.Error("expected error for MoveMessages with >1000 ids")
-	}
+	_, _, err := r.BulkDeleteMessages(ctx, ids)
+	assert.Error(t, err, "expected error for BulkDeleteMessages with >1000 ids")
+
+	_, err = r.BulkUpdateMessages(ctx, ids, nil, nil)
+	assert.Error(t, err, "expected error for BulkUpdateMessages with >1000 ids")
+
+	_, err = r.MoveMessages(ctx, ids, 1)
+	assert.Error(t, err, "expected error for MoveMessages with >1000 ids")
 }

@@ -5,34 +5,30 @@ import (
 	"errors"
 	"net/mail"
 	"os"
-	"strings"
 	"testing"
 
 	oas "github.com/mikaelstaldal/mymail/internal/api"
 	"github.com/mikaelstaldal/mymail/internal/model"
 	"github.com/mikaelstaldal/mymail/internal/repository"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 // openLDATestDB creates a temp-file SQLite DB with the full schema and built-in folders.
 func openLDATestDB(t *testing.T) *sql.DB {
 	t.Helper()
 	f, err := os.CreateTemp("", "mymail-lda-test-*.sqlite")
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
 	f.Close()
 	path := f.Name()
 	t.Cleanup(func() { os.Remove(path) })
 
 	db, err := repository.OpenDB(path, 0)
-	if err != nil {
-		t.Fatalf("OpenDB: %v", err)
-	}
+	require.NoError(t, err, "OpenDB")
 	t.Cleanup(func() { db.Close() })
 
-	if err := repository.SeedBuiltinFolders(db); err != nil {
-		t.Fatalf("SeedBuiltinFolders: %v", err)
-	}
+	err = repository.SeedBuiltinFolders(db)
+	require.NoError(t, err, "SeedBuiltinFolders")
 	return db
 }
 
@@ -40,9 +36,8 @@ func openLDATestDB(t *testing.T) *sql.DB {
 func createFilter(t *testing.T, db *sql.DB, f oas.Filter) {
 	t.Helper()
 	repo := repository.NewFilterRepository(db)
-	if _, err := repo.CreateFilter(t.Context(), f, oas.OptInt{}); err != nil {
-		t.Fatalf("CreateFilter: %v", err)
-	}
+	_, err := repo.CreateFilter(t.Context(), f, oas.OptInt{})
+	require.NoError(t, err, "CreateFilter")
 }
 
 // queryMessage fetches folder_id and read flag for the given message_id.
@@ -52,9 +47,7 @@ func queryMessage(t *testing.T, db *sql.DB, messageID string) (folderID int, rea
 	err := db.QueryRow(
 		`SELECT folder_id, read FROM messages WHERE message_id = ?`, messageID,
 	).Scan(&folderID, &readInt)
-	if err != nil {
-		t.Fatalf("queryMessage %q: %v", messageID, err)
-	}
+	require.NoError(t, err, "queryMessage %q", messageID)
 	return folderID, readInt != 0
 }
 
@@ -70,20 +63,15 @@ func TestRunCore_SuccessfulDelivery(t *testing.T) {
 	db := openLDATestDB(t)
 
 	code := runCore(db, []byte(simpleMsg))
-	if code != 0 {
-		t.Fatalf("exit code = %d, want 0", code)
-	}
+	assert.Equal(t, 0, code)
 
 	folderID, _ := queryMessage(t, db, "hello001@example.com")
-	if folderID != 1 {
-		t.Errorf("folder_id = %d, want 1 (Inbox)", folderID)
-	}
+	assert.Equal(t, 1, folderID, "folder_id should be Inbox")
 
 	// Contact should be upserted.
 	var addr string
-	if err := db.QueryRow(`SELECT address FROM contacts WHERE address = 'alice@example.com'`).Scan(&addr); err != nil {
-		t.Errorf("sender not in contacts: %v", err)
-	}
+	err := db.QueryRow(`SELECT address FROM contacts WHERE address = 'alice@example.com'`).Scan(&addr)
+	assert.NoError(t, err, "sender not in contacts")
 }
 
 func TestRunCore_RawAndAttachments(t *testing.T) {
@@ -107,46 +95,36 @@ func TestRunCore_RawAndAttachments(t *testing.T) {
 		"--B--\r\n")
 
 	db := openLDATestDB(t)
-	if code := runCore(db, raw); code != 0 {
-		t.Fatalf("exit code = %d, want 0", code)
-	}
+	code := runCore(db, raw)
+	assert.Equal(t, 0, code)
 
 	var msgID int
-	if err := db.QueryRow(`SELECT id FROM messages WHERE message_id = 'att001@example.com'`).Scan(&msgID); err != nil {
-		t.Fatalf("message not found: %v", err)
-	}
+	err := db.QueryRow(`SELECT id FROM messages WHERE message_id = 'att001@example.com'`).Scan(&msgID)
+	assert.NoError(t, err, "message not found")
 
 	var attCount int
 	db.QueryRow(`SELECT COUNT(*) FROM attachments WHERE message_id = ?`, msgID).Scan(&attCount)
-	if attCount != 1 {
-		t.Errorf("attachments = %d, want 1", attCount)
-	}
+	assert.Equal(t, 1, attCount)
 }
 
 func TestRunCore_DuplicateSkip(t *testing.T) {
 	db := openLDATestDB(t)
 
-	if code := runCore(db, []byte(simpleMsg)); code != 0 {
-		t.Fatalf("first delivery: exit code = %d, want 0", code)
-	}
+	code := runCore(db, []byte(simpleMsg))
+	assert.Equal(t, 0, code, "first delivery")
 
-	if code := runCore(db, []byte(simpleMsg)); code != 0 {
-		t.Fatalf("duplicate delivery: exit code = %d, want 0", code)
-	}
+	code = runCore(db, []byte(simpleMsg))
+	assert.Equal(t, 0, code, "duplicate delivery")
 
 	var count int
 	db.QueryRow(`SELECT COUNT(*) FROM messages WHERE message_id = 'hello001@example.com'`).Scan(&count)
-	if count != 1 {
-		t.Errorf("message count = %d, want 1 (duplicate must not be stored)", count)
-	}
+	assert.Equal(t, 1, count, "duplicate must not be stored")
 }
 
 func TestRunCore_ParseFailure(t *testing.T) {
 	db := openLDATestDB(t)
 	code := runCore(db, []byte("not a valid email\x00\x00"))
-	if code != 1 {
-		t.Errorf("exit code = %d, want 1 (parse failure)", code)
-	}
+	assert.Equal(t, 1, code, "parse failure")
 }
 
 func TestRunCore_SpamXSpamFlag(t *testing.T) {
@@ -160,14 +138,11 @@ func TestRunCore_SpamXSpamFlag(t *testing.T) {
 		"Click here!\r\n")
 
 	db := openLDATestDB(t)
-	if code := runCore(db, raw); code != 0 {
-		t.Fatalf("exit code = %d, want 0", code)
-	}
+	code := runCore(db, raw)
+	assert.Equal(t, 0, code)
 
 	folderID, _ := queryMessage(t, db, "spam001@evil.com")
-	if folderID != 7 {
-		t.Errorf("folder_id = %d, want 7 (Junk)", folderID)
-	}
+	assert.Equal(t, 7, folderID, "folder_id should be Junk")
 }
 
 func TestRunCore_SpamXSpamStatus(t *testing.T) {
@@ -181,14 +156,11 @@ func TestRunCore_SpamXSpamStatus(t *testing.T) {
 		"Spam body\r\n")
 
 	db := openLDATestDB(t)
-	if code := runCore(db, raw); code != 0 {
-		t.Fatalf("exit code = %d, want 0", code)
-	}
+	code := runCore(db, raw)
+	assert.Equal(t, 0, code)
 
 	folderID, _ := queryMessage(t, db, "spam002@evil.com")
-	if folderID != 7 {
-		t.Errorf("folder_id = %d, want 7 (Junk)", folderID)
-	}
+	assert.Equal(t, 7, folderID, "folder_id should be Junk")
 }
 
 func TestRunCore_SpamScoreHeader(t *testing.T) {
@@ -202,14 +174,11 @@ func TestRunCore_SpamScoreHeader(t *testing.T) {
 		"Body\r\n")
 
 	db := openLDATestDB(t)
-	if code := runCore(db, raw); code != 0 {
-		t.Fatalf("exit code = %d, want 0", code)
-	}
+	code := runCore(db, raw)
+	assert.Equal(t, 0, code)
 
 	folderID, _ := queryMessage(t, db, "spam003@evil.com")
-	if folderID != 7 {
-		t.Errorf("folder_id = %d, want 7 (Junk), score 7.2 >= threshold 5.0", folderID)
-	}
+	assert.Equal(t, 7, folderID, "folder_id should be Junk")
 }
 
 func TestRunCore_SpamDisabled(t *testing.T) {
@@ -224,18 +193,14 @@ func TestRunCore_SpamDisabled(t *testing.T) {
 
 	db := openLDATestDB(t)
 	// Disable spam filter.
-	if _, err := db.Exec(`UPDATE spam_filter_settings SET enabled = 0 WHERE id = 1`); err != nil {
-		t.Fatalf("disable spam filter: %v", err)
-	}
+	_, err := db.Exec(`UPDATE spam_filter_settings SET enabled = 0 WHERE id = 1`)
+	require.NoError(t, err, "disable spam filter")
 
-	if code := runCore(db, raw); code != 0 {
-		t.Fatalf("exit code = %d, want 0", code)
-	}
+	code := runCore(db, raw)
+	assert.Equal(t, 0, code)
 
 	folderID, _ := queryMessage(t, db, "spam004@evil.com")
-	if folderID != 1 {
-		t.Errorf("folder_id = %d, want 1 (Inbox) when spam filter is disabled", folderID)
-	}
+	assert.Equal(t, 1, folderID, "folder_id should be Inbox")
 }
 
 func TestRunCore_FilterMove(t *testing.T) {
@@ -249,9 +214,9 @@ func TestRunCore_FilterMove(t *testing.T) {
 
 	db := openLDATestDB(t)
 	// Create a user folder (id >= 100) to move into.
-	if _, err := db.Exec(`INSERT INTO folders(id,name,slug,position) VALUES(100,'News','news',10)`); err != nil {
-		t.Fatalf("create folder: %v", err)
-	}
+	_, err := db.Exec(`INSERT INTO folders(id,name,slug,position) VALUES(100,'News','news',10)`)
+	require.NoError(t, err, "create folder")
+
 	createFilter(t, db, oas.Filter{
 		MatchFrom: "newsletter@acme.com",
 		Action:    oas.FilterActionMove,
@@ -259,14 +224,11 @@ func TestRunCore_FilterMove(t *testing.T) {
 		Stop:      true,
 	})
 
-	if code := runCore(db, raw); code != 0 {
-		t.Fatalf("exit code = %d, want 0", code)
-	}
+	code := runCore(db, raw)
+	assert.Equal(t, 0, code)
 
 	folderID, _ := queryMessage(t, db, "nl001@acme.com")
-	if folderID != 100 {
-		t.Errorf("folder_id = %d, want 100 (News)", folderID)
-	}
+	assert.Equal(t, 100, folderID, "folder_id should be News")
 }
 
 func TestRunCore_FilterTrash(t *testing.T) {
@@ -285,14 +247,11 @@ func TestRunCore_FilterTrash(t *testing.T) {
 		Stop:      true,
 	})
 
-	if code := runCore(db, raw); code != 0 {
-		t.Fatalf("exit code = %d, want 0", code)
-	}
+	code := runCore(db, raw)
+	assert.Equal(t, 0, code)
 
 	folderID, _ := queryMessage(t, db, "trash001@example.com")
-	if folderID != 4 {
-		t.Errorf("folder_id = %d, want 4 (Trash)", folderID)
-	}
+	assert.Equal(t, 4, folderID, "folder_id should be Trash")
 }
 
 func TestRunCore_FilterMarkRead(t *testing.T) {
@@ -311,17 +270,12 @@ func TestRunCore_FilterMarkRead(t *testing.T) {
 		Stop:      true,
 	})
 
-	if code := runCore(db, raw); code != 0 {
-		t.Fatalf("exit code = %d, want 0", code)
-	}
+	code := runCore(db, raw)
+	assert.Equal(t, 0, code)
 
 	folderID, read := queryMessage(t, db, "notif001@service.com")
-	if folderID != 1 {
-		t.Errorf("folder_id = %d, want 1 (Inbox)", folderID)
-	}
-	if !read {
-		t.Error("read = false, want true")
-	}
+	assert.Equal(t, 1, folderID, "folder_id should be Inbox")
+	assert.True(t, read, "read should be true")
 }
 
 func TestRunCore_FilterDrop(t *testing.T) {
@@ -340,15 +294,12 @@ func TestRunCore_FilterDrop(t *testing.T) {
 		Stop:      true,
 	})
 
-	if code := runCore(db, raw); code != 0 {
-		t.Fatalf("exit code = %d, want 0", code)
-	}
+	code := runCore(db, raw)
+	assert.Equal(t, 0, code)
 
 	var count int
 	db.QueryRow(`SELECT COUNT(*) FROM messages WHERE message_id = 'drop001@example.com'`).Scan(&count)
-	if count != 0 {
-		t.Error("dropped message must not be stored in DB")
-	}
+	assert.Zero(t, count, "dropped message must not be stored in DB")
 }
 
 func TestRunCore_FilterStop(t *testing.T) {
@@ -361,9 +312,9 @@ func TestRunCore_FilterStop(t *testing.T) {
 		"Body\r\n")
 
 	db := openLDATestDB(t)
-	if _, err := db.Exec(`INSERT INTO folders(id,name,slug,position) VALUES(101,'News','news101',10)`); err != nil {
-		t.Fatalf("create folder: %v", err)
-	}
+	_, err := db.Exec(`INSERT INTO folders(id,name,slug,position) VALUES(101,'News','news101',10)`)
+	require.NoError(t, err, "create folder")
+
 	// First filter: move to News, stop=true.
 	createFilter(t, db, oas.Filter{
 		MatchFrom: "news@example.com",
@@ -378,14 +329,11 @@ func TestRunCore_FilterStop(t *testing.T) {
 		Stop:      false,
 	})
 
-	if code := runCore(db, raw); code != 0 {
-		t.Fatalf("exit code = %d, want 0", code)
-	}
+	code := runCore(db, raw)
+	assert.Equal(t, 0, code)
 
 	folderID, _ := queryMessage(t, db, "stop001@example.com")
-	if folderID != 101 {
-		t.Errorf("folder_id = %d, want 101 (News): second filter should be stopped", folderID)
-	}
+	assert.Equal(t, 101, folderID, "folder_id should be 101 (News): second filter should be stopped")
 }
 
 func TestRunCore_FilterMoveToDeletedFolder(t *testing.T) {
@@ -398,9 +346,9 @@ func TestRunCore_FilterMoveToDeletedFolder(t *testing.T) {
 		"Body\r\n")
 
 	db := openLDATestDB(t)
-	if _, err := db.Exec(`INSERT INTO folders(id,name,slug,position) VALUES(100,'Temp','temp',10)`); err != nil {
-		t.Fatalf("create folder: %v", err)
-	}
+	_, err := db.Exec(`INSERT INTO folders(id,name,slug,position) VALUES(100,'Temp','temp',10)`)
+	require.NoError(t, err, "create folder")
+
 	createFilter(t, db, oas.Filter{
 		MatchFrom: "sender@example.com",
 		Action:    oas.FilterActionMove,
@@ -408,18 +356,14 @@ func TestRunCore_FilterMoveToDeletedFolder(t *testing.T) {
 		Stop:      true,
 	})
 	// Delete the folder; ON DELETE SET NULL cascades filter.folder_id to NULL.
-	if _, err := db.Exec(`DELETE FROM folders WHERE id = 100`); err != nil {
-		t.Fatalf("delete folder: %v", err)
-	}
+	_, err = db.Exec(`DELETE FROM folders WHERE id = 100`)
+	require.NoError(t, err, "delete folder")
 
-	if code := runCore(db, raw); code != 0 {
-		t.Fatalf("exit code = %d, want 0", code)
-	}
+	code := runCore(db, raw)
+	assert.Equal(t, 0, code)
 
 	folderID, _ := queryMessage(t, db, "delfolder001@example.com")
-	if folderID != 1 {
-		t.Errorf("folder_id = %d, want 1 (Inbox): move to deleted folder should fall back to spam-determined folder", folderID)
-	}
+	assert.Equal(t, 1, folderID, "folder_id should be 1 (Inbox): move to deleted folder should fall back to spam-determined folder")
 }
 
 func TestRunCore_ConcurrentDuplicateGuard(t *testing.T) {
@@ -430,27 +374,22 @@ func TestRunCore_ConcurrentDuplicateGuard(t *testing.T) {
 	// observable outcome (exit 0, one row) is identical to the INSERT OR IGNORE n=0 path.
 	db := openLDATestDB(t)
 	now := "2024-01-01T00:00:00Z"
-	if _, err := db.Exec(
+	_, err := db.Exec(
 		`INSERT INTO messages(folder_id, message_id, date, created_at, updated_at) VALUES(1,?,?,?,?)`,
 		"race001@example.com", now, now, now,
-	); err != nil {
-		t.Fatalf("pre-insert: %v", err)
-	}
+	)
+	require.NoError(t, err, "pre-insert")
 
 	raw := []byte("From: a@example.com\r\nTo: b@example.com\r\n" +
 		"Date: Mon, 01 Jan 2024 12:00:00 +0000\r\n" +
 		"Message-Id: <race001@example.com>\r\n\r\nBody\r\n")
 
 	code := runCore(db, raw)
-	if code != 0 {
-		t.Errorf("exit code = %d, want 0 (concurrent duplicate must not fail with 75)", code)
-	}
+	assert.Equal(t, 0, code, "concurrent duplicate must not fail with 75")
 
 	var count int
 	db.QueryRow(`SELECT COUNT(*) FROM messages WHERE message_id = 'race001@example.com'`).Scan(&count)
-	if count != 1 {
-		t.Errorf("row count = %d, want 1", count)
-	}
+	assert.Equal(t, 1, count)
 }
 
 func TestRunCore_NoMessageID_Generated(t *testing.T) {
@@ -462,24 +401,19 @@ func TestRunCore_NoMessageID_Generated(t *testing.T) {
 		"Body without Message-Id header\r\n")
 
 	db := openLDATestDB(t)
-	if code := runCore(db, raw); code != 0 {
-		t.Fatalf("exit code = %d, want 0", code)
-	}
+	code := runCore(db, raw)
+	assert.Equal(t, 0, code)
 
 	var msgID string
-	if err := db.QueryRow(`SELECT message_id FROM messages WHERE from_addr = 'sender@example.com'`).Scan(&msgID); err != nil {
-		t.Fatalf("message not found: %v", err)
-	}
+	err := db.QueryRow(`SELECT message_id FROM messages WHERE from_addr = 'sender@example.com'`).Scan(&msgID)
+	assert.NoError(t, err, "message not found")
 	// Generated ID must be stored without angle brackets, consistent with how
 	// ParseMessage strips them from real Message-Id headers via stripAngles.
 	// Storing with brackets would break threading: a reply's In-Reply-To header
 	// is also stripped to "uuid@domain", which would not match "<uuid@domain>".
-	if strings.HasPrefix(msgID, "<") || strings.HasSuffix(msgID, ">") {
-		t.Errorf("generated message_id %q must not have angle brackets in DB storage", msgID)
-	}
-	if !strings.Contains(msgID, "@domain.org") {
-		t.Errorf("generated message_id %q does not contain '@domain.org'", msgID)
-	}
+	assert.NotContains(t, msgID, "<")
+	assert.NotContains(t, msgID, ">")
+	assert.Contains(t, msgID, "@domain.org")
 }
 
 // --- detectSpam unit tests ---
@@ -566,9 +500,7 @@ func TestDetectSpam(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			got := detectSpam(mail.Header(tc.headers), settings)
-			if got != tc.want {
-				t.Errorf("detectSpam = %v, want %v", got, tc.want)
-			}
+			assert.Equal(t, tc.want, got)
 		})
 	}
 }
@@ -643,9 +575,7 @@ func TestFilterMatches(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			got := filterMatches(pm, tc.filter)
-			if got != tc.want {
-				t.Errorf("filterMatches = %v, want %v", got, tc.want)
-			}
+			assert.Equal(t, tc.want, got)
 		})
 	}
 }
@@ -658,12 +588,8 @@ func TestWithRetry_SuccessImmediate(t *testing.T) {
 		calls++
 		return nil
 	})
-	if err != nil {
-		t.Errorf("expected nil, got %v", err)
-	}
-	if calls != 1 {
-		t.Errorf("calls = %d, want 1", calls)
-	}
+	assert.NoError(t, err)
+	assert.Equal(t, 1, calls)
 }
 
 func TestWithRetry_NonBusyErrorNoRetry(t *testing.T) {
@@ -673,11 +599,6 @@ func TestWithRetry_NonBusyErrorNoRetry(t *testing.T) {
 		calls++
 		return sentinel
 	})
-	if !errors.Is(err, sentinel) {
-		t.Errorf("expected sentinel error, got %v", err)
-	}
-	if calls != 1 {
-		t.Errorf("calls = %d, want 1 (non-busy errors must not be retried)", calls)
-	}
+	assert.ErrorIs(t, err, sentinel)
+	assert.Equal(t, 1, calls, "non-busy errors must not be retried")
 }
-

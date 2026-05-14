@@ -7,6 +7,8 @@ import (
 	"testing/fstest"
 
 	"github.com/mikaelstaldal/mymail/web"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 const fixtureImportMapContent = "\n{\"imports\":{}}\n"
@@ -22,15 +24,11 @@ func TestImportMapCSPHash_HappyPath(t *testing.T) {
 	}
 
 	got, err := web.ImportMapCSPHash(fsys)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
+	require.NoError(t, err)
 
 	sum := sha256.Sum256([]byte(fixtureImportMapContent))
 	want := "'sha256-" + base64.StdEncoding.EncodeToString(sum[:]) + "'"
-	if got != want {
-		t.Errorf("hash mismatch\n got:  %s\n want: %s", got, want)
-	}
+	assert.Equal(t, want, got)
 }
 
 func TestImportMapCSPHash_MissingOpenTag(t *testing.T) {
@@ -39,9 +37,7 @@ func TestImportMapCSPHash_MissingOpenTag(t *testing.T) {
 	}
 
 	_, err := web.ImportMapCSPHash(fsys)
-	if err == nil {
-		t.Fatal("expected error for missing importmap tag, got nil")
-	}
+	assert.Error(t, err)
 }
 
 func TestImportMapCSPHash_MissingCloseTag(t *testing.T) {
@@ -50,14 +46,10 @@ func TestImportMapCSPHash_MissingCloseTag(t *testing.T) {
 	}
 
 	_, err := web.ImportMapCSPHash(fsys)
-	if err == nil {
-		t.Fatal("expected error for missing closing script tag, got nil")
-	}
+	assert.Error(t, err)
 }
 
 func TestImportMapCSPHash_MissingFile(t *testing.T) {
 	_, err := web.ImportMapCSPHash(fstest.MapFS{})
-	if err == nil {
-		t.Fatal("expected error for missing index.html, got nil")
-	}
+	assert.Error(t, err)
 }
