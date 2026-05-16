@@ -2,7 +2,7 @@ export type Route =
   | { type: 'inbox' }
   | { type: 'folder'; slug: string }
   | { type: 'message'; id: number }
-  | { type: 'compose'; replyId?: number; replyAllId?: number; forwardId?: number }
+  | { type: 'compose'; replyId?: number; replyAllId?: number; forwardId?: number; draftId?: number }
   | { type: 'search'; query: string }
   | { type: 'settings'; tab?: string };
 
@@ -27,7 +27,8 @@ function parseRoute(hash: string): Route {
     const replyId = params.get('reply') ? Number(params.get('reply')) : undefined;
     const replyAllId = params.get('replyall') ? Number(params.get('replyall')) : undefined;
     const forwardId = params.get('forward') ? Number(params.get('forward')) : undefined;
-    return { type: 'compose', replyId, replyAllId, forwardId };
+    const draftId = params.get('draft') ? Number(params.get('draft')) : undefined;
+    return { type: 'compose', replyId, replyAllId, forwardId, draftId };
   }
 
   if (seg === 'search') return { type: 'search', query: params.get('q') ?? '' };

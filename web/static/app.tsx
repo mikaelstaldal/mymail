@@ -103,6 +103,7 @@ function App() {
           replyId={route.replyId}
           replyAllId={route.replyAllId}
           forwardId={route.forwardId}
+          draftId={route.draftId}
         />
       );
     }

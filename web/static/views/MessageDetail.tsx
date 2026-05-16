@@ -257,6 +257,19 @@ export function MessageDetail({ id, folders }: MessageDetailProps) {
     }
   };
 
+  const handleDiscardDraft = async () => {
+    if (!msg || actionInFlight) return;
+    if (!confirm('Discard this draft?')) return;
+    setActionInFlight(true);
+    try {
+      await api.drafts.delete(msg.id);
+      navigate('#/folder/drafts');
+    } catch (e) {
+      showToast(e instanceof Error ? e.message : 'Failed to discard draft');
+      setActionInFlight(false);
+    }
+  };
+
   const handleMove = async () => {
     if (!msg || !moveTo || actionInFlight) return;
     const destId = Number(moveTo);
@@ -390,15 +403,28 @@ export function MessageDetail({ id, folders }: MessageDetailProps) {
   return (
     <div class="msg-detail" ref={msgDetailRef}>
       <div class="msg-detail-actions">
-        <button class="btn btn-ghost btn-sm" onClick={() => navigate(`#/compose?reply=${id}`)}>
-          Reply
-        </button>
-        <button class="btn btn-ghost btn-sm" onClick={() => navigate(`#/compose?replyall=${id}`)}>
-          Reply All
-        </button>
-        <button class="btn btn-ghost btn-sm" onClick={() => navigate(`#/compose?forward=${id}`)}>
-          Forward
-        </button>
+        {folderId === DRAFTS_ID ? (
+          <>
+            <button class="btn btn-primary btn-sm" onClick={() => navigate(`#/compose?draft=${id}`)}>
+              Edit
+            </button>
+            <button class="btn btn-danger btn-sm" disabled={actionInFlight} onClick={() => void handleDiscardDraft()}>
+              Discard
+            </button>
+          </>
+        ) : (
+          <>
+            <button class="btn btn-ghost btn-sm" onClick={() => navigate(`#/compose?reply=${id}`)}>
+              Reply
+            </button>
+            <button class="btn btn-ghost btn-sm" onClick={() => navigate(`#/compose?replyall=${id}`)}>
+              Reply All
+            </button>
+            <button class="btn btn-ghost btn-sm" onClick={() => navigate(`#/compose?forward=${id}`)}>
+              Forward
+            </button>
+          </>
+        )}
         <span class="toolbar-sep" />
         {canMove && (
           <div class="move-inline">

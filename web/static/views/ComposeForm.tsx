@@ -312,11 +312,13 @@ export interface ComposeFormProps {
   replyId?: number;
   replyAllId?: number;
   forwardId?: number;
+  draftId?: number;
 }
 
-export function ComposeForm({ replyId, replyAllId, forwardId }: ComposeFormProps) {
+export function ComposeForm({ replyId, replyAllId, forwardId, draftId }: ComposeFormProps) {
   const sourceId = replyId ?? replyAllId ?? forwardId;
-  const mode: 'new' | 'reply' | 'replyall' | 'forward' =
+  const mode: 'new' | 'reply' | 'replyall' | 'forward' | 'edit' =
+    draftId !== undefined ? 'edit' :
     replyId !== undefined ? 'reply' :
     replyAllId !== undefined ? 'replyall' :
     forwardId !== undefined ? 'forward' : 'new';
@@ -348,6 +350,7 @@ export function ComposeForm({ replyId, replyAllId, forwardId }: ComposeFormProps
 
   // Draft persistence
   const draftIdRef = useRef<number | null>(null);
+  const discardedRef = useRef(false);
   const autoSaveTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const currentIdentityRef = useRef<Identity | null>(null);
 
@@ -442,6 +445,56 @@ export function ComposeForm({ replyId, replyAllId, forwardId }: ComposeFormProps
       const idents = identResult.items;
       setIdentities(idents);
       const defaultIdent = idents.find(i => i.is_default) ?? idents[0];
+
+      if (draftId !== undefined) {
+        // Editing an existing draft
+        draftIdRef.current = draftId;
+        let serverDraft: MessageDetail | null = null;
+        try {
+          serverDraft = await api.messages.get(draftId);
+        } catch { /* use defaults on load failure */ }
+        if (cancelled) return;
+
+        let fields: RestoredFields = {
+          identityId: defaultIdent?.id,
+          to: [], cc: [], bcc: [],
+          subject: '', bodyHtml: '', bodyText: '', sendAt: '',
+        };
+        if (serverDraft) {
+          fields = fieldsFromServerDraft(serverDraft, idents);
+          inReplyToRef.current = serverDraft.in_reply_to ?? '';
+          refsRef.current = serverDraft.references ?? [];
+          if (serverDraft.attachments.length > 0) {
+            setExistingAttachments(serverDraft.attachments);
+          }
+        }
+
+        const restoredIdent = fields.identityId !== undefined
+          ? (idents.find(i => i.id === fields.identityId) ?? defaultIdent)
+          : defaultIdent;
+        setIdentityId(restoredIdent?.id);
+        currentIdentityRef.current = restoredIdent ?? null;
+
+        setTo(fields.to);
+        setCc(fields.cc);
+        setBcc(fields.bcc);
+        if (fields.cc.length > 0) setShowCc(true);
+        if (fields.bcc.length > 0) setShowBcc(true);
+        setSubject(fields.subject);
+        if (fields.sendAt) { setSendAt(fields.sendAt); setSendLater(true); }
+
+        if (editorRef.current && quillRef.current && fields.bodyHtml) {
+          quillRef.current.clipboard.dangerouslyPasteHTML(fields.bodyHtml);
+          bodyHtmlRef.current = quillRef.current.root.innerHTML;
+          bodyTextRef.current = quillRef.current.getText();
+        } else {
+          bodyHtmlRef.current = fields.bodyHtml;
+          bodyTextRef.current = fields.bodyText;
+        }
+
+        setLoading(false);
+        return;
+      }
 
       if (!sourceId) {
         // New compose: check localStorage for a saved draft
@@ -585,7 +638,7 @@ export function ComposeForm({ replyId, replyAllId, forwardId }: ComposeFormProps
 
       // Initialize Quill content
       if (editorRef.current && quillRef.current) {
-        const html = buildInitialHtml(mode, msg, selectedIdent ?? null);
+        const html = buildInitialHtml(mode as 'new' | 'reply' | 'replyall' | 'forward', msg, selectedIdent ?? null);
         quillRef.current.clipboard.dangerouslyPasteHTML(html);
         bodyHtmlRef.current = quillRef.current.root.innerHTML;
         bodyTextRef.current = quillRef.current.getText();
@@ -656,6 +709,7 @@ export function ComposeForm({ replyId, replyAllId, forwardId }: ComposeFormProps
   // ── Navigate-away save ────────────────────────────────────────────────────
   useEffect(() => {
     return () => {
+      if (discardedRef.current) return;
       const body = buildDraftBody();
       if (draftIdRef.current === null) {
         api.drafts.create(body).catch(e => {
@@ -749,6 +803,7 @@ export function ComposeForm({ replyId, replyAllId, forwardId }: ComposeFormProps
 
     try {
       const result = await api.drafts.send(draftIdRef.current);
+      discardedRef.current = true;
       clearLocalDraft();
       if (result.status === 202) {
         navigate('#/folder/scheduled');
@@ -908,10 +963,12 @@ export function ComposeForm({ replyId, replyAllId, forwardId }: ComposeFormProps
               if (confirm('Discard this draft?')) {
                 await api.drafts.delete(draftIdRef.current).catch(() => {/* ignore */});
                 draftIdRef.current = null;
+                discardedRef.current = true;
                 clearLocalDraft();
                 navigate('#/inbox');
               }
             } else {
+              discardedRef.current = true;
               clearLocalDraft();
               navigate('#/inbox');
             }
