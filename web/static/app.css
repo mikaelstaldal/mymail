@@ -708,10 +708,25 @@ html, body {
 }
 
 /* ── Thread strip ── */
+.thread-resize-handle {
+  height: 5px;
+  background: var(--list-border);
+  cursor: ns-resize;
+  flex-shrink: 0;
+  transition: background 0.15s;
+}
+.thread-resize-handle:hover,
+.thread-resize-handle:active {
+  background: var(--btn-primary);
+}
+
 .thread-strip {
-  border-top: 2px solid var(--list-border);
   background: var(--list-bg);
   flex-shrink: 0;
+  max-height: 40%;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
 }
 
 .thread-strip-header {
@@ -738,6 +753,8 @@ html, body {
   list-style: none;
   padding: 0;
   margin: 0;
+  overflow-y: auto;
+  flex: 1;
 }
 
 .thread-entry {

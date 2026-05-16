@@ -133,6 +133,9 @@ export function MessageDetail({ id, folders }: MessageDetailProps) {
   const [snoozeOpen, setSnoozeOpen] = useState(false);
   const [snoozeValue, setSnoozeValue] = useState('');
   const [actionInFlight, setActionInFlight] = useState(false);
+  const msgDetailRef = useRef<HTMLDivElement>(null);
+  const threadStripRef = useRef<HTMLDivElement>(null);
+  const [threadHeight, setThreadHeight] = useState<number | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -146,6 +149,7 @@ export function MessageDetail({ id, folders }: MessageDetailProps) {
     setExpandedMsg(null);
     setExternalImages(false);
     setActionInFlight(false);
+    setThreadHeight(null);
     setMoveTo('');
     setSnoozeOpen(false);
 
@@ -205,6 +209,27 @@ export function MessageDetail({ id, folders }: MessageDetailProps) {
     } catch (_) {
       if (expandedThreadIdRef.current === entryId) setExpandedLoading(false);
     }
+  };
+
+  const handleResizeStart = (e: MouseEvent) => {
+    e.preventDefault();
+    const startY = e.clientY;
+    const startHeight = threadStripRef.current?.offsetHeight ?? 200;
+    const containerHeight = msgDetailRef.current?.offsetHeight ?? 600;
+    document.body.style.cursor = 'ns-resize';
+    document.body.style.userSelect = 'none';
+    const onMove = (ev: MouseEvent) => {
+      const delta = startY - ev.clientY;
+      setThreadHeight(Math.max(60, Math.min(startHeight + delta, containerHeight * 0.8)));
+    };
+    const onUp = () => {
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
+      window.removeEventListener('mousemove', onMove);
+      window.removeEventListener('mouseup', onUp);
+    };
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
   };
 
   const folderSlug = (fid: number) =>
@@ -333,7 +358,7 @@ export function MessageDetail({ id, folders }: MessageDetailProps) {
   const threadEntries = thread && thread.total > 1 ? thread.items : null;
 
   return (
-    <div class="msg-detail">
+    <div class="msg-detail" ref={msgDetailRef}>
       <div class="msg-detail-actions">
         <button class="btn btn-ghost btn-sm" onClick={() => navigate(`#/compose?reply=${id}`)}>
           Reply
@@ -516,27 +541,34 @@ export function MessageDetail({ id, folders }: MessageDetailProps) {
       </div>
 
       {threadEntries && (
-        <div class="thread-strip">
-          <div class="thread-strip-header">
-            <span>Thread ({thread!.truncated ? `${thread!.total}+` : thread!.total} messages)</span>
-            {thread!.truncated && (
-              <span class="thread-truncated">— thread too long, showing oldest {thread!.total}</span>
-            )}
+        <>
+          <div class="thread-resize-handle" onMouseDown={handleResizeStart} />
+          <div
+            ref={threadStripRef}
+            class="thread-strip"
+            style={threadHeight !== null ? { height: `${threadHeight}px`, maxHeight: 'none' } : undefined}
+          >
+            <div class="thread-strip-header">
+              <span>Thread ({thread!.truncated ? `${thread!.total}+` : thread!.total} messages)</span>
+              {thread!.truncated && (
+                <span class="thread-truncated">— thread too long, showing oldest {thread!.total}</span>
+              )}
+            </div>
+            <ul class="thread-list">
+              {threadEntries.map(entry => (
+                <ThreadEntry
+                  key={entry.id}
+                  entry={entry}
+                  isCurrent={entry.id === id}
+                  expanded={expandedThreadId === entry.id}
+                  expandedMsg={expandedThreadId === entry.id ? expandedMsg : null}
+                  expandedLoading={expandedThreadId === entry.id && expandedLoading}
+                  onToggle={entryId => void handleExpandThread(entryId)}
+                />
+              ))}
+            </ul>
           </div>
-          <ul class="thread-list">
-            {threadEntries.map(entry => (
-              <ThreadEntry
-                key={entry.id}
-                entry={entry}
-                isCurrent={entry.id === id}
-                expanded={expandedThreadId === entry.id}
-                expandedMsg={expandedThreadId === entry.id ? expandedMsg : null}
-                expandedLoading={expandedThreadId === entry.id && expandedLoading}
-                onToggle={entryId => void handleExpandThread(entryId)}
-              />
-            ))}
-          </ul>
-        </div>
+        </>
       )}
     </div>
   );
