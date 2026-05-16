@@ -88,7 +88,7 @@ Each `<mapping>` argument is a colon-separated triplet `<folder>:<format>:<path>
 | Part       | Values                                                      | Description                                                          |
 |------------|-------------------------------------------------------------|----------------------------------------------------------------------|
 | `<folder>` | `inbox`, `sent`, `drafts`, `trash`, `junk`, or any user-folder name | Target folder in mymail. Created automatically if it does not exist. Lookup is by slug for built-in folders (`inbox`, `sent`, `drafts`, `trash`, `junk`) and by name (case-insensitive) for user-created folders. If the same `<folder>` value appears in multiple mapping triplets, all triplets share the same target folder. **`scheduled` and `snoozed` are rejected with an error** — they have semantic fields (`send_at`/`snoozed_until`) that won't be populated by import, making them invalid import targets. |
-| `<format>` | `mbox`, `maildir`                                           | Source format                                                        |
+| `<format>` | `mbox`, `maildir`, `mbx`                                    | Source format                                                        |
 | `<path>`   | file or directory path                                      | Source mbox file or Maildir root directory                           |
 
 Example — import from a Thunderbird profile:
@@ -326,9 +326,13 @@ A single file containing multiple RFC 5322 messages. Each message begins with a 
 
 Each message stored as a separate file. A Maildir root contains `new/`, `cur/`, and `tmp/` subdirectories. Files in `new/` have no flag suffix (Maildir convention: they are unread/unflagged); they are imported with `read=0` and `flagged=0`. Files in `cur/` carry an info section after the `:2,` separator: the `S` (Seen) flag maps to `read=1`, the `F` (Flagged) flag maps to `flagged=1`, and absence of either flag means `0`. Files in `tmp/` are skipped (transient delivery state).
 
-#### MBX (not supported)
+#### MBX (UW-IMAP)
 
-Users with MBX files should pre-convert them using `mb2md` or a similar tool.
+The binary mailbox format used by UW-IMAP and Pine. Files begin with a 2048-byte header whose first bytes are `*mbx*\r\n`. Each message is preceded by a variable-length per-message header line with the format `<IMAP-date>,<size>;<8hex-uflags><4hex-sysflags>-<8hex-uid>\r\n`, followed by exactly `<size>` bytes of RFC 822 message content.
+
+Flag mapping: the `\Seen` system flag (bit `0x1`) maps to `read=1`; the `\Flagged` system flag (bit `0x4`) maps to `flagged=1`. Messages with the internal `\Expunged` flag (bit `0x8000`) are logical holes left by IMAP EXPUNGE and are skipped during import.
+
+The IMAP internal date from the per-message header is used as the date fallback when the message has no `Date:` header, followed by the file mtime if the internal date cannot be parsed.
 
 ## HTML Sanitization
 

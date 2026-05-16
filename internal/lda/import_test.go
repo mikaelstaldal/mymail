@@ -102,6 +102,16 @@ func TestParseMappings(t *testing.T) {
 			wantErr: "invalid mapping",
 		},
 		{
+			name:    "mbx format",
+			args:    []string{"inbox:mbx:/var/mail/inbox.mbx"},
+			wantLen: 1,
+			check: func(t *testing.T, ms []importMapping) {
+				if ms[0].format != "mbx" {
+					t.Errorf("format = %q, want mbx", ms[0].format)
+				}
+			},
+		},
+		{
 			name:    "unknown format",
 			args:    []string{"inbox:imap:/host"},
 			wantErr: "invalid format",
@@ -529,6 +539,277 @@ func TestImportMbox_ContactUpsert(t *testing.T) {
 	).Scan(&name)
 	require.NoError(t, err)
 	assert.Equal(t, "Dave", name)
+}
+
+// --- importMbx tests ---
+
+// mbxTestMsg describes one message to write into a test mbx file.
+type mbxTestMsg struct {
+	raw   string // raw RFC 822 message bytes
+	flags uint16 // system flags: fSEEN=0x1, fFLAGGED=0x4, fEXPUNGED=0x8000
+	date  string // IMAP INTERNALDATE (e.g. " 1-Jan-2024 10:00:00 +0000"); "" = default
+}
+
+// writeMbxFile creates a temporary mbx file containing the given messages.
+func writeMbxFile(t *testing.T, msgs []mbxTestMsg) string {
+	t.Helper()
+	f, err := os.CreateTemp("", "test-*.mbx")
+	require.NoError(t, err)
+	t.Cleanup(func() { os.Remove(f.Name()) })
+
+	// 2048-byte file header: magic + uid_validity + uid_last + CRLF + zero padding.
+	hdr := make([]byte, 2048)
+	copy(hdr, "*mbx*\r\n0000000100000000\r\n")
+	_, err = f.Write(hdr)
+	require.NoError(t, err)
+
+	for i, m := range msgs {
+		if m.date == "" {
+			m.date = fmt.Sprintf(" 1-Jan-2024 %02d:00:00 +0000", i+1)
+		}
+		// Per-message header: <date>,<size>;<8hex-uflags><4hex-sysflags>-<8hex-uid>\r\n
+		msgHdr := fmt.Sprintf("%s,%d;%08x%04x-%08x\r\n", m.date, len(m.raw), 0, m.flags, i+1)
+		_, err = f.WriteString(msgHdr)
+		require.NoError(t, err)
+		_, err = f.WriteString(m.raw)
+		require.NoError(t, err)
+	}
+
+	require.NoError(t, f.Close())
+	return f.Name()
+}
+
+func TestParseMbxDate(t *testing.T) {
+	tests := []struct {
+		name      string
+		input     string
+		wantOK    bool
+		wantYear  int
+		wantMonth time.Month
+		wantDay   int
+	}{
+		{
+			name:      "space-padded single digit day",
+			input:     " 2-Jan-2024 12:34:56 +0000",
+			wantOK:    true,
+			wantYear:  2024,
+			wantMonth: time.January,
+			wantDay:   2,
+		},
+		{
+			name:      "double digit day with negative zone",
+			input:     "25-Dec-2023 08:00:00 -0500",
+			wantOK:    true,
+			wantYear:  2023,
+			wantMonth: time.December,
+			wantDay:   25,
+		},
+		{
+			name:   "invalid",
+			input:  "not a date",
+			wantOK: false,
+		},
+		{
+			name:   "empty",
+			input:  "",
+			wantOK: false,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := parseMbxDate(tc.input)
+			if !tc.wantOK {
+				assert.Nil(t, got)
+				return
+			}
+			require.NotNil(t, got)
+			assert.Equal(t, tc.wantYear, got.Year())
+			assert.Equal(t, tc.wantMonth, got.Month())
+			assert.Equal(t, tc.wantDay, got.Day())
+		})
+	}
+}
+
+func TestImportMbx_Basic(t *testing.T) {
+	db := openImportTestDB(t)
+
+	path := writeMbxFile(t, []mbxTestMsg{
+		{raw: "From: a@b.com\r\nTo: c@d.com\r\nSubject: Test\r\n" +
+			"Date: Mon, 01 Jan 2024 10:00:00 +0000\r\nMessage-Id: <mbxbasic@host>\r\n\r\nBody\r\n"},
+		{raw: "From: x@y.com\r\nTo: z@w.com\r\nSubject: Test2\r\n" +
+			"Date: Mon, 01 Jan 2024 11:00:00 +0000\r\nMessage-Id: <mbxbasic2@host>\r\n\r\nBody\r\n"},
+	})
+
+	imp, skip, err := importMbx(path, 1, db)
+	require.NoError(t, err)
+	assert.Equal(t, 2, imp)
+	assert.Equal(t, 0, skip)
+}
+
+func TestImportMbx_FlagMapping(t *testing.T) {
+	db := openImportTestDB(t)
+
+	path := writeMbxFile(t, []mbxTestMsg{
+		{
+			raw: "From: a@b.com\r\nTo: c@d.com\r\nSubject: Unseen\r\n" +
+				"Date: Mon, 01 Jan 2024 10:00:00 +0000\r\nMessage-Id: <mbx-unseen@host>\r\n\r\nBody\r\n",
+			flags: 0,
+		},
+		{
+			raw: "From: a@b.com\r\nTo: c@d.com\r\nSubject: Seen\r\n" +
+				"Date: Mon, 01 Jan 2024 11:00:00 +0000\r\nMessage-Id: <mbx-seen@host>\r\n\r\nBody\r\n",
+			flags: 0x0001, // fSEEN
+		},
+		{
+			raw: "From: a@b.com\r\nTo: c@d.com\r\nSubject: Flagged\r\n" +
+				"Date: Mon, 01 Jan 2024 12:00:00 +0000\r\nMessage-Id: <mbx-flagged@host>\r\n\r\nBody\r\n",
+			flags: 0x0004, // fFLAGGED
+		},
+		{
+			raw: "From: a@b.com\r\nTo: c@d.com\r\nSubject: SeenFlagged\r\n" +
+				"Date: Mon, 01 Jan 2024 13:00:00 +0000\r\nMessage-Id: <mbx-seenflagged@host>\r\n\r\nBody\r\n",
+			flags: 0x0005, // fSEEN | fFLAGGED
+		},
+	})
+
+	imp, skip, err := importMbx(path, 1, db)
+	require.NoError(t, err)
+	assert.Equal(t, 4, imp)
+	assert.Equal(t, 0, skip)
+
+	ctx := context.Background()
+	type row struct{ read, flagged int }
+	queryMsg := func(msgID string) row {
+		t.Helper()
+		var r row
+		err := db.QueryRowContext(ctx, `SELECT read, flagged FROM messages WHERE message_id = ?`, msgID).Scan(&r.read, &r.flagged)
+		require.NoError(t, err, "query %s", msgID)
+		return r
+	}
+
+	r := queryMsg("mbx-unseen@host")
+	assert.Equal(t, 0, r.read, "no flags: read")
+	assert.Equal(t, 0, r.flagged, "no flags: flagged")
+
+	r = queryMsg("mbx-seen@host")
+	assert.Equal(t, 1, r.read, "fSEEN: read")
+	assert.Equal(t, 0, r.flagged, "fSEEN: flagged")
+
+	r = queryMsg("mbx-flagged@host")
+	assert.Equal(t, 0, r.read, "fFLAGGED: read")
+	assert.Equal(t, 1, r.flagged, "fFLAGGED: flagged")
+
+	r = queryMsg("mbx-seenflagged@host")
+	assert.Equal(t, 1, r.read, "fSEEN|fFLAGGED: read")
+	assert.Equal(t, 1, r.flagged, "fSEEN|fFLAGGED: flagged")
+}
+
+func TestImportMbx_ExpungedSkip(t *testing.T) {
+	db := openImportTestDB(t)
+
+	path := writeMbxFile(t, []mbxTestMsg{
+		{
+			raw: "From: a@b.com\r\nTo: c@d.com\r\nSubject: Normal\r\n" +
+				"Date: Mon, 01 Jan 2024 10:00:00 +0000\r\nMessage-Id: <mbx-normal@host>\r\n\r\nBody\r\n",
+			flags: 0,
+		},
+		{
+			raw: "From: a@b.com\r\nTo: c@d.com\r\nSubject: Expunged\r\n" +
+				"Date: Mon, 01 Jan 2024 11:00:00 +0000\r\nMessage-Id: <mbx-expunged@host>\r\n\r\nBody\r\n",
+			flags: 0x8000, // fEXPUNGED
+		},
+		{
+			raw: "From: a@b.com\r\nTo: c@d.com\r\nSubject: Normal2\r\n" +
+				"Date: Mon, 01 Jan 2024 12:00:00 +0000\r\nMessage-Id: <mbx-normal2@host>\r\n\r\nBody\r\n",
+			flags: 0,
+		},
+	})
+
+	imp, skip, err := importMbx(path, 1, db)
+	require.NoError(t, err)
+	assert.Equal(t, 2, imp)
+	assert.Equal(t, 1, skip)
+
+	ctx := context.Background()
+	var exists bool
+	db.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM messages WHERE message_id = 'mbx-expunged@host')`).Scan(&exists)
+	assert.False(t, exists, "expunged message should not be imported")
+}
+
+func TestImportMbx_DuplicateSkip(t *testing.T) {
+	db := openImportTestDB(t)
+
+	path := writeMbxFile(t, []mbxTestMsg{
+		{raw: "From: a@b.com\r\nTo: c@d.com\r\nSubject: Dup\r\n" +
+			"Date: Mon, 01 Jan 2024 10:00:00 +0000\r\nMessage-Id: <dupmbx@host>\r\n\r\nBody\r\n"},
+	})
+
+	imp, skip, err := importMbx(path, 1, db)
+	require.NoError(t, err)
+	assert.Equal(t, 1, imp)
+	assert.Equal(t, 0, skip)
+
+	imp, skip, err = importMbx(path, 1, db)
+	require.NoError(t, err)
+	assert.Equal(t, 0, imp)
+	assert.Equal(t, 1, skip)
+}
+
+func TestImportMbx_InternalDateFallback(t *testing.T) {
+	db := openImportTestDB(t)
+
+	// Message without Date header — falls back to the mbx per-message internal date.
+	path := writeMbxFile(t, []mbxTestMsg{
+		{
+			raw:  "From: a@b.com\r\nTo: c@d.com\r\nSubject: NoDate\r\nMessage-Id: <nodatembx@host>\r\n\r\nBody\r\n",
+			date: "15-Mar-2023 08:30:00 +0000",
+		},
+	})
+
+	imp, skip, err := importMbx(path, 1, db)
+	require.NoError(t, err)
+	assert.Equal(t, 1, imp)
+	assert.Equal(t, 0, skip)
+
+	var dateStr string
+	db.QueryRowContext(context.Background(), `SELECT date FROM messages WHERE message_id = 'nodatembx@host'`).Scan(&dateStr)
+	assert.True(t, strings.HasPrefix(dateStr, "2023-03-15"), "mbx internal date fallback")
+}
+
+func TestImportMbx_ContactUpsert(t *testing.T) {
+	db := openImportTestDB(t)
+
+	path := writeMbxFile(t, []mbxTestMsg{
+		{raw: "From: Eve <eve@example.com>\r\nTo: frank@example.com\r\nSubject: Hi\r\n" +
+			"Date: Mon, 01 Jan 2024 10:00:00 +0000\r\nMessage-Id: <contactmbx@host>\r\n\r\nBody\r\n"},
+	})
+
+	_, _, err := importMbx(path, 1, db)
+	require.NoError(t, err)
+
+	var name string
+	err = db.QueryRowContext(context.Background(),
+		`SELECT name FROM contacts WHERE address = 'eve@example.com'`,
+	).Scan(&name)
+	require.NoError(t, err)
+	assert.Equal(t, "Eve", name)
+}
+
+func TestImportMbx_InvalidMagic(t *testing.T) {
+	db := openImportTestDB(t)
+
+	f, err := os.CreateTemp("", "test-*.mbx")
+	require.NoError(t, err)
+	t.Cleanup(func() { os.Remove(f.Name()) })
+	// Write 2048 bytes of wrong content
+	hdr := make([]byte, 2048)
+	copy(hdr, "not-an-mbx-file\r\n")
+	f.Write(hdr)
+	f.Close()
+
+	_, _, err = importMbx(f.Name(), 1, db)
+	assert.ErrorContains(t, err, "invalid magic")
 }
 
 func TestResolveFolder_ScheduledSnoozedCaseInsensitive(t *testing.T) {

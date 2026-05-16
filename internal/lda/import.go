@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -86,8 +87,8 @@ func parseMappings(args []string) ([]importMapping, error) {
 		if len(parts) != 3 || parts[0] == "" || parts[1] == "" || parts[2] == "" {
 			return nil, fmt.Errorf("invalid mapping %q: expected <folder>:<format>:<path>", arg)
 		}
-		if parts[1] != "mbox" && parts[1] != "maildir" {
-			return nil, fmt.Errorf("invalid format %q in %q: must be mbox or maildir", parts[1], arg)
+		if parts[1] != "mbox" && parts[1] != "maildir" && parts[1] != "mbx" {
+			return nil, fmt.Errorf("invalid format %q in %q: must be mbox, maildir, or mbx", parts[1], arg)
 		}
 		out = append(out, importMapping{folder: parts[0], format: parts[1], path: parts[2]})
 	}
@@ -166,6 +167,8 @@ func RunImport(db *sql.DB, mappingArgs []string) int {
 			imp, skip, e = importMbox(r.path, r.folderID, db)
 		case "maildir":
 			imp, skip, e = importMaildir(r.path, r.folderID, db)
+		case "mbx":
+			imp, skip, e = importMbx(r.path, r.folderID, db)
 		}
 		fmt.Printf("%s: %d imported, %d skipped\n", r.folderName, imp, skip)
 		totalImported += imp
@@ -306,7 +309,7 @@ func importMaildir(dir string, folderID int64, db *sql.DB) (imported, skipped in
 	ctx := context.Background()
 	contactRepo := repository.NewContactRepository(db)
 
-	const batchSize = 500
+	const batchSize = 50
 	var batch []batchEntry
 	var flushErr error
 
@@ -321,6 +324,9 @@ func importMaildir(dir string, folderID int64, db *sql.DB) (imported, skipped in
 		} else {
 			imported += n
 			skipped += len(batch) - n
+		}
+		for i := range batch {
+			batch[i] = batchEntry{}
 		}
 		batch = batch[:0]
 	}
@@ -414,7 +420,7 @@ func importMbox(path string, folderID int64, db *sql.DB) (imported, skipped int,
 	ctx := context.Background()
 	contactRepo := repository.NewContactRepository(db)
 
-	const batchSize = 500
+	const batchSize = 50
 	var batch []batchEntry
 	var flushErr error
 	// useMtime is set to true when the processing pass finds more messages than
@@ -432,6 +438,9 @@ func importMbox(path string, folderID int64, db *sql.DB) (imported, skipped int,
 		} else {
 			imported += n
 			skipped += len(batch) - n
+		}
+		for i := range batch {
+			batch[i] = batchEntry{}
 		}
 		batch = batch[:0]
 	}
@@ -560,4 +569,226 @@ func parseFromTimestamp(s string) *time.Time {
 		}
 	}
 	return nil
+}
+
+// importMbx imports messages from a UW-IMAP mbx file into folderID.
+//
+// mbx file structure:
+//   - 2048-byte file header starting with "*mbx*\r\n"
+//   - Sequence of: per-message header line + message body bytes
+//
+// Per-message header: "<IMAP-date>,<size>;<8hex-uflags><4hex-sysflags>-<8hex-uid>\r\n"
+// System flag bits: fSEEN=0x1, fFLAGGED=0x4, fEXPUNGED=0x8000.
+func importMbx(path string, folderID int64, db *sql.DB) (imported, skipped int, _ error) {
+	const (
+		mbxHdrSize = 2048
+		mbxMagic   = "*mbx*\r\n"
+		fSEEN      = 0x0001
+		fFLAGGED   = 0x0004
+		fEXPUNGED  = 0x8000
+	)
+
+	var fileMtime *time.Time
+	if fi, err := os.Stat(path); err == nil {
+		t := fi.ModTime().UTC()
+		fileMtime = &t
+	}
+
+	f, err := os.Open(path)
+	if err != nil {
+		return 0, 0, fmt.Errorf("open %s: %w", path, err)
+	}
+	defer f.Close()
+
+	hdr := make([]byte, mbxHdrSize)
+	if _, err := io.ReadFull(f, hdr); err != nil {
+		return 0, 0, fmt.Errorf("read mbx header %s: %w", path, err)
+	}
+	if string(hdr[:len(mbxMagic)]) != mbxMagic {
+		return 0, 0, fmt.Errorf("%s: not an mbx file (invalid magic)", path)
+	}
+
+	ctx := context.Background()
+	contactRepo := repository.NewContactRepository(db)
+
+	const batchSize = 50
+	var batch []batchEntry
+	var flushErr error
+
+	flush := func() {
+		n, err := commitBatch(ctx, db, batch, folderID, contactRepo)
+		if err != nil {
+			log.Printf("import mbx %s: commit batch: %v", path, err)
+			skipped += len(batch)
+			if flushErr == nil {
+				flushErr = err
+			}
+		} else {
+			imported += n
+			skipped += len(batch) - n
+		}
+		for i := range batch {
+			batch[i] = batchEntry{}
+		}
+		batch = batch[:0]
+	}
+
+	br := bufio.NewReader(f)
+	msgIdx := 0
+
+	for {
+		line, readErr := br.ReadString('\n')
+		if readErr == io.EOF && len(line) == 0 {
+			break
+		}
+		if readErr != nil && readErr != io.EOF {
+			log.Printf("import mbx %s[%d]: read header: %v", path, msgIdx, readErr)
+			if flushErr == nil {
+				flushErr = readErr
+			}
+			break
+		}
+		if readErr == io.EOF {
+			break // truncated header at end of file
+		}
+		line = strings.TrimRight(line, "\r\n")
+
+		// Parse: <date>,<size>;<8hex-uflags><4hex-sysflags>-<8hex-uid>
+		dateStr, rest, ok := strings.Cut(line, ",")
+		if !ok {
+			log.Printf("import mbx %s[%d]: malformed header (no comma): %q", path, msgIdx, line)
+			if flushErr == nil {
+				flushErr = fmt.Errorf("malformed mbx per-message header at message %d", msgIdx)
+			}
+			break
+		}
+		sizeStr, flagsStr, ok := strings.Cut(rest, ";")
+		if !ok {
+			log.Printf("import mbx %s[%d]: malformed header (no semicolon): %q", path, msgIdx, line)
+			if flushErr == nil {
+				flushErr = fmt.Errorf("malformed mbx per-message header at message %d", msgIdx)
+			}
+			break
+		}
+
+		msgSize, parseErr := strconv.ParseUint(sizeStr, 10, 64)
+		if parseErr != nil || msgSize == 0 {
+			log.Printf("import mbx %s[%d]: invalid message size %q", path, msgIdx, sizeStr)
+			if flushErr == nil {
+				flushErr = fmt.Errorf("invalid mbx message size at message %d", msgIdx)
+			}
+			break
+		}
+
+		// flagsStr layout: <8hex user flags><4hex sys flags>-<8hex uid>
+		if len(flagsStr) < 21 || flagsStr[12] != '-' {
+			log.Printf("import mbx %s[%d]: malformed flags field: %q", path, msgIdx, flagsStr)
+			if flushErr == nil {
+				flushErr = fmt.Errorf("malformed mbx flags field at message %d", msgIdx)
+			}
+			break
+		}
+		sysFlags, parseErr := strconv.ParseUint(flagsStr[8:12], 16, 64)
+		if parseErr != nil {
+			log.Printf("import mbx %s[%d]: parse sys flags %q: %v", path, msgIdx, flagsStr[8:12], parseErr)
+			if flushErr == nil {
+				flushErr = parseErr
+			}
+			break
+		}
+
+		// Skip messages marked as expunged without allocating a body buffer.
+		if sysFlags&fEXPUNGED != 0 {
+			if _, err := io.CopyN(io.Discard, br, int64(msgSize)); err != nil {
+				log.Printf("import mbx %s[%d]: discard expunged body: %v", path, msgIdx, err)
+				if flushErr == nil {
+					flushErr = err
+				}
+				break
+			}
+			skipped++
+			msgIdx++
+			continue
+		}
+
+		raw := make([]byte, msgSize)
+		if _, err := io.ReadFull(br, raw); err != nil {
+			log.Printf("import mbx %s[%d]: read body: %v", path, msgIdx, err)
+			if flushErr == nil {
+				flushErr = err
+			}
+			break
+		}
+
+		pm, pmErr := ParseMessage(raw)
+		if pmErr != nil {
+			log.Printf("import mbx %s[%d]: parse: %v", path, msgIdx, pmErr)
+			skipped++
+			msgIdx++
+			continue
+		}
+
+		// Date: header preferred, then mbx internal date, then file mtime.
+		var date time.Time
+		if pm.Date != nil {
+			date = pm.Date.UTC()
+		} else if t := parseMbxDate(dateStr); t != nil {
+			date = *t
+		} else if fileMtime != nil {
+			date = *fileMtime
+		} else {
+			log.Printf("import mbx %s[%d]: no date available, skipping", path, msgIdx)
+			skipped++
+			msgIdx++
+			continue
+		}
+
+		// Duplicate check.
+		if pm.MessageID != nil {
+			var exists bool
+			if err := db.QueryRowContext(ctx,
+				`SELECT EXISTS(SELECT 1 FROM messages WHERE message_id = ?)`, *pm.MessageID,
+			).Scan(&exists); err != nil {
+				log.Printf("import mbx %s[%d]: duplicate check: %v", path, msgIdx, err)
+			} else if exists {
+				skipped++
+				msgIdx++
+				continue
+			}
+		}
+
+		readFlag, flaggedFlag := 0, 0
+		if sysFlags&fSEEN != 0 {
+			readFlag = 1
+		}
+		if sysFlags&fFLAGGED != 0 {
+			flaggedFlag = 1
+		}
+
+		batch = append(batch, batchEntry{
+			pm:      pm,
+			raw:     raw,
+			date:    date.Format(time.RFC3339),
+			read:    readFlag,
+			flagged: flaggedFlag,
+		})
+		msgIdx++
+
+		if len(batch) >= batchSize {
+			flush()
+		}
+	}
+	flush()
+	return imported, skipped, flushErr
+}
+
+// parseMbxDate parses an IMAP INTERNALDATE string from an mbx per-message header.
+// Format: " 2-Jan-2006 15:04:05 -0700" (space-padded single-digit days).
+func parseMbxDate(s string) *time.Time {
+	t, err := time.Parse("_2-Jan-2006 15:04:05 -0700", s)
+	if err != nil {
+		return nil
+	}
+	u := t.UTC()
+	return &u
 }
