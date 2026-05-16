@@ -931,13 +931,18 @@ func (r *MessageRepository) GetMessageThread(ctx context.Context, id int64) ([]o
 	}
 
 	// Subject-based fallback when only the seed was found.
+	// Uses FTS5 on the subject column for indexed lookup instead of a full table scan.
 	if len(foundIDs) == 1 {
 		normSubject := normalizeSubject(seed.subject)
 
 		if normSubject != "" {
+			ftsTerm := `subject : ` + sanitizeFTSQuery(normSubject)
 			rows, err := r.db.QueryContext(ctx,
-				`SELECT id, message_id, in_reply_to, "references", subject FROM messages WHERE id != ? ORDER BY date ASC LIMIT 999`,
-				id,
+				`SELECT m.id, m.message_id, m.in_reply_to, m."references", m.subject
+				 FROM messages_fts JOIN messages m ON messages_fts.rowid = m.id
+				 WHERE messages_fts MATCH ? AND m.id != ?
+				 LIMIT 999`,
+				ftsTerm, id,
 			)
 			if err != nil {
 				return nil, false, err

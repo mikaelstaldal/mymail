@@ -299,9 +299,11 @@ Each `if v < N` block is checked independently (not `else if`), so a single star
 user_version 0  →  uninitialized: apply all CREATE TABLE / CREATE INDEX / CREATE TRIGGER statements, then set user_version to 1
 user_version 1  →  initial schema in place
 user_version 2  →  adds composite indexes idx_messages_folder_date and idx_messages_folder_read
+user_version 3  →  adds message_references join table and idx_msgref_ref for indexed thread forward lookups
+user_version 4  →  adds idx_messages_in_reply_to for O(log n) thread forward query instead of full table scan
 ```
 
-**Current schema version: 2** (v2 adds composite indexes for list-messages and list-folders performance).
+**Current schema version: 4** (v4 adds index on in_reply_to to eliminate full table scans during message threading).
 
 ### `folders`
 

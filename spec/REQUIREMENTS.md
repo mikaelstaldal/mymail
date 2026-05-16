@@ -612,6 +612,11 @@ mymail binds plain HTTP and delegates TLS termination, rate limiting, and access
 - **Bind address:** Use `-addr 127.0.0.1` when not behind a reverse proxy on the same host.
 
 
+## Performance and system requirements
+
+mymail should be able to handle a database of at least 10 GiB containing at least 200000 messages on a system with 
+512 MiB RAM with reasonable performance for a single user.
+
 ## Out of Scope
 
 - **Multiple mailboxes / multi-user support**
