@@ -1294,6 +1294,50 @@ paths:
         'default':
           $ref: '#/components/responses/Default'
 
+  /messages/{id}/body:
+    get:
+      summary: Get message HTML body
+      description: |
+        Returns the sanitised HTML body as a standalone HTML document. The response carries
+        its own `Content-Security-Policy` header independent of the parent page's CSP, making
+        it suitable for loading in a sandboxed `<iframe src="…">`. Without `?external=1` only
+        `data:` URIs (resolved inline attachments) are permitted; with `?external=1` HTTPS
+        images are also allowed.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+        - name: external
+          in: query
+          required: false
+          description: Set to `1` to allow loading of external HTTPS images.
+          schema:
+            type: string
+      responses:
+        '200':
+          description: HTML document
+          headers:
+            Content-Security-Policy:
+              schema:
+                type: string
+            X-Frame-Options:
+              schema:
+                type: string
+            Referrer-Policy:
+              schema:
+                type: string
+          content:
+            text/html:
+              schema:
+                type: string
+                format: binary
+        '404':
+          $ref: '#/components/responses/NotFound'
+        'default':
+          $ref: '#/components/responses/Default'
+
   /messages/{id}/thread:
     get:
       summary: Get thread

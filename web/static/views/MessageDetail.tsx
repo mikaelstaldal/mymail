@@ -39,35 +39,19 @@ function autoResizeIframe(iframe: HTMLIFrameElement | null): void {
 }
 
 interface BodyIframeProps {
-  html: string;
+  id: number;
   externalImages: boolean;
 }
 
-function BodyIframe({ html, externalImages }: BodyIframeProps) {
+function BodyIframe({ id, externalImages }: BodyIframeProps) {
   const ref = useRef<HTMLIFrameElement>(null);
   const handleLoad = () => autoResizeIframe(ref.current);
-
-  if (externalImages) {
-    // Keep sandbox="allow-same-origin" so the iframe can load external images,
-    // but still blocks scripts/forms/navigation. The CSP meta restricts to images
-    // + inline styles only (defence-in-depth).
-    const csp = `<meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src https:; style-src 'unsafe-inline'">`;
-    return (
-      <iframe
-        ref={ref}
-        class="body-iframe"
-        srcdoc={csp + '\n' + html}
-        sandbox="allow-same-origin"
-        onLoad={handleLoad}
-        title="Message body"
-      />
-    );
-  }
+  const src = `api/v1/messages/${id}/body${externalImages ? '?external=1' : ''}`;
   return (
     <iframe
       ref={ref}
       class="body-iframe"
-      srcdoc={html}
+      src={src}
       sandbox=""
       onLoad={handleLoad}
       title="Message body"
@@ -112,7 +96,7 @@ function ThreadEntry({ entry, isCurrent, expanded, expandedMsg, expandedLoading,
                 <span class="msg-detail-value">{formatDateFull(expandedMsg.date)}</span>
               </div>
               {expandedMsg.body_html ? (
-                <BodyIframe html={expandedMsg.body_html} externalImages={false} />
+                <BodyIframe id={expandedMsg.id} externalImages={false} />
               ) : (
                 <pre class="body-text">{expandedMsg.body_text}</pre>
               )}
@@ -524,7 +508,7 @@ export function MessageDetail({ id, folders }: MessageDetailProps) {
                 </button>
               </div>
             )}
-            <BodyIframe html={msg.body_html} externalImages={externalImages} />
+            <BodyIframe id={msg.id} externalImages={externalImages} />
           </>
         ) : (
           <pre class="body-text">{msg.body_text}</pre>
