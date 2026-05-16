@@ -25,7 +25,7 @@ func (h *Handler) MessagesIDBodyGet(ctx context.Context, params api.MessagesIDBo
 	}
 	csp := fmt.Sprintf("default-src 'none'; img-src %s; style-src 'unsafe-inline'; frame-ancestors 'self'", imgSrc)
 
-	body := fmt.Sprintf("<!DOCTYPE html>\n<html>\n<head><meta charset=\"utf-8\"></head>\n<body>%s</body>\n</html>", msg.BodyHTML)
+	body := fmt.Sprintf("<!DOCTYPE html>\n<html>\n<head><meta charset=\"utf-8\"><base target=\"_blank\"></head>\n<body>%s</body>\n</html>", msg.BodyHTML)
 	return &api.MessagesIDBodyGetOKHeaders{
 		ContentSecurityPolicy: api.NewOptString(csp),
 		XFrameOptions:         api.NewOptString("SAMEORIGIN"),
