@@ -1598,6 +1598,52 @@ paths:
   # ── Scheduled ──────────────────────────────────────────────────────────────
 
   /scheduled/{id}:
+    patch:
+      summary: Reschedule a scheduled message
+      description: |
+        Update the `send_at` timestamp of a message that is currently in the Scheduled folder.
+        The new `send_at` must be more than 60 seconds in the future (same threshold as initial
+        scheduling). Returns 404 when the message does not exist or is no longer in the Scheduled
+        folder (e.g. the scheduler already sent or moved it).
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                send_at:
+                  type: string
+                  format: date-time
+              required: [send_at]
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id:
+                    type: integer
+                  folder_id:
+                    type: integer
+                  send_at:
+                    type: string
+                    format: date-time
+                required: [id, folder_id, send_at]
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        'default':
+          $ref: '#/components/responses/Default'
     delete:
       summary: Cancel scheduled message
       description: |
@@ -1636,6 +1682,40 @@ paths:
                 required: [id, folder_id]
         '400':
           $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        'default':
+          $ref: '#/components/responses/Default'
+
+  /scheduled/{id}/send:
+    post:
+      summary: Send a scheduled message immediately
+      description: |
+        Send a scheduled message right now, bypassing the deferred send time.
+        The message must be in the Scheduled folder (folder_id=5) with a non-NULL `send_at`.
+        On success the message is moved to Sent (folder_id=2).
+        On sendmail failure the message is moved to Drafts (folder_id=3) so the user can
+        reschedule or send again; the response body contains the sendmail error.
+        Returns 404 when the message does not exist or is no longer in the Scheduled folder.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Sent successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id:
+                    type: integer
+                  folder_id:
+                    type: integer
+                required: [id, folder_id]
         '404':
           $ref: '#/components/responses/NotFound'
         'default':

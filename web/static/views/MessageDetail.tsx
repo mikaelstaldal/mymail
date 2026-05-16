@@ -132,6 +132,8 @@ export function MessageDetail({ id, folders }: MessageDetailProps) {
   const [moveTo, setMoveTo] = useState('');
   const [snoozeOpen, setSnoozeOpen] = useState(false);
   const [snoozeValue, setSnoozeValue] = useState('');
+  const [rescheduleOpen, setRescheduleOpen] = useState(false);
+  const [rescheduleValue, setRescheduleValue] = useState('');
   const [actionInFlight, setActionInFlight] = useState(false);
   const msgDetailRef = useRef<HTMLDivElement>(null);
   const threadStripRef = useRef<HTMLDivElement>(null);
@@ -334,6 +336,34 @@ export function MessageDetail({ id, folders }: MessageDetailProps) {
     }
   };
 
+  const handleSendNow = async () => {
+    if (!msg || actionInFlight) return;
+    setActionInFlight(true);
+    try {
+      await api.scheduled.sendNow(msg.id);
+      navigate('#/folder/sent');
+    } catch (e) {
+      showToast(e instanceof Error ? e.message : 'Failed to send message');
+      setActionInFlight(false);
+    }
+  };
+
+  const handleReschedule = async () => {
+    if (!msg || !rescheduleValue || actionInFlight) return;
+    const sendAt = new Date(rescheduleValue).toISOString();
+    setActionInFlight(true);
+    try {
+      await api.scheduled.reschedule(msg.id, sendAt);
+      setRescheduleOpen(false);
+      const updated = await api.messages.get(msg.id);
+      setMsg(updated);
+    } catch (e) {
+      showToast(e instanceof Error ? e.message : 'Failed to reschedule message');
+    } finally {
+      setActionInFlight(false);
+    }
+  };
+
   if (loading) return <div class="msg-detail-status">Loading…</div>;
   if (notFound) return <div class="msg-detail-status msg-detail-not-found">Not found</div>;
   if (error) return <div class="msg-detail-status msg-detail-error">{error}</div>;
@@ -432,9 +462,35 @@ export function MessageDetail({ id, folders }: MessageDetailProps) {
           </button>
         )}
         {canCancelSchedule && (
+          <button
+            class={`btn btn-ghost btn-sm${rescheduleOpen ? ' active' : ''}`}
+            disabled={actionInFlight}
+            onClick={() => {
+              if (!rescheduleOpen && msg.send_at) {
+                const d = new Date(msg.send_at);
+                const pad = (n: number) => String(n).padStart(2, '0');
+                setRescheduleValue(`${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`);
+              }
+              setRescheduleOpen(o => !o);
+            }}
+          >
+            Edit schedule
+          </button>
+        )}
+        {canCancelSchedule && (
+          <button class="btn btn-ghost btn-sm" disabled={actionInFlight} onClick={() => void handleSendNow()}>
+            Send now
+          </button>
+        )}
+        {canCancelSchedule && (
           <button class="btn btn-ghost btn-sm" disabled={actionInFlight} onClick={() => void handleCancelSchedule()}>
             Cancel schedule
           </button>
+        )}
+        {canCancelSchedule && msg.send_at && (
+          <span class="snooze-until-display" title={msg.send_at}>
+            scheduled {formatDateFull(msg.send_at)}
+          </span>
         )}
         <span class="ml-auto" />
         <span class="msg-folder-indicator">{folders.find(f => f.id === folderId)?.name ?? ''}</span>
@@ -457,6 +513,28 @@ export function MessageDetail({ id, folders }: MessageDetailProps) {
             Snooze
           </button>
           <button class="btn btn-ghost btn-sm" onClick={() => setSnoozeOpen(false)}>
+            Cancel
+          </button>
+        </div>
+      )}
+
+      {rescheduleOpen && (
+        <div class="snooze-panel">
+          <span class="snooze-label">Send at:</span>
+          <input
+            type="datetime-local"
+            class="snooze-input"
+            value={rescheduleValue}
+            onInput={e => setRescheduleValue((e.target as HTMLInputElement).value)}
+          />
+          <button
+            class="btn btn-primary btn-sm"
+            disabled={!rescheduleValue || actionInFlight}
+            onClick={() => void handleReschedule()}
+          >
+            Reschedule
+          </button>
+          <button class="btn btn-ghost btn-sm" onClick={() => setRescheduleOpen(false)}>
             Cancel
           </button>
         </div>

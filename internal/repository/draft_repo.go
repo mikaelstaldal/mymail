@@ -399,6 +399,48 @@ func (r *DraftRepository) ConditionalUpdateScheduled(ctx context.Context, id int
 	return n == 1, nil
 }
 
+// RescheduleMessage updates the send_at of a message that is currently in the Scheduled
+// folder (folder_id=5). Returns ErrNotFound if the message does not exist or is not in Scheduled.
+func (r *DraftRepository) RescheduleMessage(ctx context.Context, id int64, sendAt time.Time) (model.DBMessage, error) {
+	res, err := r.db.ExecContext(ctx, `
+		UPDATE messages SET send_at = ? WHERE id = ? AND folder_id = 5`,
+		sendAt.UTC().Format(time.RFC3339), id,
+	)
+	if err != nil {
+		return model.DBMessage{}, err
+	}
+	n, _ := res.RowsAffected()
+	if n == 0 {
+		return model.DBMessage{}, ErrNotFound
+	}
+	row := r.db.QueryRowContext(ctx, `SELECT `+dbMessageColumns+` FROM messages WHERE id = ?`, id)
+	m, err := scanDBMessage(row.Scan)
+	if errors.Is(err, sql.ErrNoRows) {
+		return model.DBMessage{}, ErrNotFound
+	}
+	return m, err
+}
+
+// MarkSent moves a claimed scheduled message to Sent (folder_id=2) and sets its Message-ID.
+// Call this only after ConditionalUpdateScheduled has cleared send_at (claim step).
+func (r *DraftRepository) MarkSent(ctx context.Context, id int64, msgID string) error {
+	_, err := r.db.ExecContext(ctx,
+		`UPDATE messages SET folder_id = 2, read = 1, message_id = ? WHERE id = ?`,
+		msgID, id,
+	)
+	return err
+}
+
+// MoveToDrafts unconditionally moves a message to Drafts (folder_id=3).
+// Call this to recover a claimed scheduled message when the send attempt fails.
+func (r *DraftRepository) MoveToDrafts(ctx context.Context, id int64) error {
+	_, err := r.db.ExecContext(ctx,
+		`UPDATE messages SET folder_id = 3, send_failure_count = 0, send_error = NULL WHERE id = ?`,
+		id,
+	)
+	return err
+}
+
 // CancelScheduled moves a scheduled message back to Drafts (folder_id=3),
 // clearing send_at, send_failure_count, and send_error in a single UPDATE.
 // Returns ErrNotFound if the message does not exist or is not in Scheduled (folder_id=5).

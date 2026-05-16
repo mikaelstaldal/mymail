@@ -62,8 +62,9 @@ func (s *Scheduler) tick(ctx context.Context) {
 }
 
 func (s *Scheduler) processDeferredSends(ctx context.Context) {
+	now := time.Now().UTC().Format(time.RFC3339)
 	rows, err := s.db.QueryContext(ctx,
-		`SELECT id FROM messages WHERE folder_id = 5 AND send_at <= CURRENT_TIMESTAMP ORDER BY send_at ASC`,
+		`SELECT id FROM messages WHERE folder_id = 5 AND send_at <= ? ORDER BY send_at ASC`, now,
 	)
 	if err != nil {
 		log.Printf("scheduler: query scheduled: %v", err)
@@ -241,15 +242,16 @@ func (s *Scheduler) upsertRecipients(ctx context.Context, addrList string) {
 }
 
 func (s *Scheduler) processSnoozeExpiry(ctx context.Context) {
+	now := time.Now().UTC().Format(time.RFC3339)
 	rows, err := s.db.QueryContext(ctx,
-		`SELECT id, snooze_folder FROM messages WHERE folder_id = 6 AND snoozed_until <= CURRENT_TIMESTAMP ORDER BY snoozed_until ASC`,
+		`SELECT id, snooze_folder FROM messages WHERE folder_id = 6 AND snoozed_until <= ? ORDER BY snoozed_until ASC`, now,
 	)
 	if err != nil {
 		log.Printf("scheduler: query snoozed: %v", err)
 		return
 	}
 	type snoozedRow struct {
-		id          int64
+		id           int64
 		snoozeFolder sql.NullInt64
 	}
 	var msgs []snoozedRow

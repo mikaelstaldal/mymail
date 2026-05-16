@@ -184,6 +184,12 @@ export const api = {
   scheduled: {
     cancel: (id: number) =>
       request<{ id: number; folder_id: number }>('DELETE', `/scheduled/${id}`),
+
+    reschedule: (id: number, sendAt: string) =>
+      request<{ id: number; folder_id: number; send_at: string }>('PATCH', `/scheduled/${id}`, { send_at: sendAt }),
+
+    sendNow: (id: number) =>
+      request<{ id: number; folder_id: number }>('POST', `/scheduled/${id}/send`),
   },
 
   identities: {

@@ -902,6 +902,99 @@ func (h *Handler) DraftsIDSendPost(ctx context.Context, params api.DraftsIDSendP
 // Scheduled endpoints
 // ──────────────────────────────────────────────────────────────────────────────
 
+func (h *Handler) ScheduledIDPatch(ctx context.Context, req *api.ScheduledIDPatchReq, params api.ScheduledIDPatchParams) (api.ScheduledIDPatchRes, error) {
+	id := int64(params.ID)
+	sendAt := req.SendAt.UTC()
+	if !sendAt.After(time.Now().UTC().Add(60 * time.Second)) {
+		return &api.ScheduledIDPatchBadRequest{Error: "send_at must be more than 60 seconds in the future"}, nil
+	}
+	msg, err := h.drafts.RescheduleMessage(ctx, id, sendAt)
+	if errors.Is(err, repository.ErrNotFound) {
+		return &api.ScheduledIDPatchNotFound{Error: "scheduled message not found or no longer in Scheduled folder"}, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &api.ScheduledIDPatchOK{ID: int(msg.ID), FolderID: int(msg.FolderID), SendAt: msg.SendAt.Time}, nil
+}
+
+func (h *Handler) ScheduledIDSendPost(ctx context.Context, params api.ScheduledIDSendPostParams) (api.ScheduledIDSendPostRes, error) {
+	id := int64(params.ID)
+
+	// Atomically claim the message by clearing send_at (folder_id=5, send_at IS NOT NULL).
+	// This prevents the background scheduler from racing us.
+	claimed, err := h.drafts.ConditionalUpdateScheduled(ctx, id, map[string]any{"send_at": nil})
+	if err != nil {
+		return nil, err
+	}
+	if !claimed {
+		return &api.Error{Error: "scheduled message not found or no longer in Scheduled folder"}, nil
+	}
+
+	msg, err := h.messages.GetMessage(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+
+	var fromName, fromAddr string
+	if msg.IdentityID.Valid {
+		identity, idErr := h.identities.GetIdentity(ctx, msg.IdentityID.Int64)
+		if idErr == nil {
+			fromName = identity.Name
+			fromAddr = identity.Address
+		} else {
+			fromAddr = msg.FromAddr
+		}
+	} else {
+		fromAddr = msg.FromAddr
+	}
+
+	attachments, err := h.attachments.ListAttachmentsWithData(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+
+	fields := service.SendFields{
+		FromName:    fromName,
+		FromAddr:    fromAddr,
+		ToAddr:      msg.ToAddr,
+		CcAddr:      msg.CcAddr,
+		BccAddr:     msg.BccAddr,
+		ReplyToAddr: msg.ReplyToAddr,
+		Subject:     msg.Subject,
+		BodyText:    msg.BodyText,
+		BodyHTML:    msg.BodyHTML,
+		InReplyTo:   msg.InReplyTo.String,
+		References:  splitNLToSlice(msg.References.String),
+	}
+
+	raw, _, msgIDValue, buildErr := service.BuildMIMEMessage(fields, attachments)
+	if buildErr != nil {
+		_ = h.drafts.MoveToDrafts(ctx, id)
+		return nil, buildErr
+	}
+
+	stderr, sendErr := service.SendMail(h.sendmailPath, raw)
+	if sendErr != nil {
+		errMsg := stderr
+		if errMsg == "" {
+			errMsg = sendErr.Error()
+		}
+		_ = h.drafts.MoveToDrafts(ctx, id)
+		return nil, &api.DefaultStatusCode{StatusCode: 500, Response: api.Error{Error: errMsg}}
+	}
+
+	if err := h.drafts.MarkSent(ctx, id, msgIDValue); err != nil {
+		return nil, err
+	}
+
+	h.upsertRecipients(ctx, msg.ToAddr)
+	h.upsertRecipients(ctx, msg.CcAddr)
+	h.upsertRecipients(ctx, msg.BccAddr)
+
+	return &api.ScheduledIDSendPostOK{ID: int(msg.ID), FolderID: 2}, nil
+}
+
 func (h *Handler) ScheduledIDDelete(ctx context.Context, params api.ScheduledIDDeleteParams) (api.ScheduledIDDeleteRes, error) {
 	id := int64(params.ID)
 
