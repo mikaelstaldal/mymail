@@ -806,7 +806,7 @@ func scanThreadSeedRow(scan func(...any) error) (threadSeedRow, error) {
 	return r, scan(&r.id, &r.messageID, &r.inReplyTo, &r.refs)
 }
 
-var subjectPrefixRe = regexp.MustCompile(`(?i)^[ \t]*(re|fwd|fw|aw|wg|res|enc|vs|sv):[ \t]+`)
+var subjectPrefixRe = regexp.MustCompile(`(?i)^[ \t]*(re|fwd|fw|aw|wg|res|enc|vs|sv):[ \t]*`)
 
 func normalizeSubject(s string) string {
 	for {
