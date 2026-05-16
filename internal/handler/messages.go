@@ -16,7 +16,7 @@ import (
 func (h *Handler) FoldersFolderIDMessagesGet(ctx context.Context, params api.FoldersFolderIDMessagesGetParams) (api.FoldersFolderIDMessagesGetRes, error) {
 	folderID := int64(params.FolderID)
 
-	if _, err := h.folders.GetFolderByID(ctx, folderID); err != nil {
+	if err := h.folders.FolderExists(ctx, folderID); err != nil {
 		if errors.Is(err, repository.ErrNotFound) {
 			return &api.Error{Error: "folder not found"}, nil
 		}
@@ -251,7 +251,7 @@ func (h *Handler) MessagesMovePost(ctx context.Context, req *api.MessagesMovePos
 		return &api.MessagesMovePostBadRequest{Error: "cannot move to this folder"}, nil
 	}
 
-	if _, err := h.folders.GetFolderByID(ctx, targetFolderID); err != nil {
+	if err := h.folders.FolderExists(ctx, targetFolderID); err != nil {
 		if errors.Is(err, repository.ErrNotFound) {
 			return &api.MessagesMovePostBadRequest{Error: "target folder not found"}, nil
 		}

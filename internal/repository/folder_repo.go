@@ -121,6 +121,16 @@ func (r *FolderRepository) GetFolderByID(ctx context.Context, id int64) (oas.Fol
 	return f, err
 }
 
+// FolderExists returns nil if the folder exists, ErrNotFound otherwise.
+func (r *FolderRepository) FolderExists(ctx context.Context, id int64) error {
+	var dummy int
+	err := r.db.QueryRowContext(ctx, `SELECT 1 FROM folders WHERE id = ?`, id).Scan(&dummy)
+	if errors.Is(err, sql.ErrNoRows) {
+		return ErrNotFound
+	}
+	return err
+}
+
 // CreateFolder inserts a new user-defined folder.
 // If position is nil, append semantics are used (COALESCE(MAX(position),-1)+1).
 // Returns ErrConflict if the name already exists.

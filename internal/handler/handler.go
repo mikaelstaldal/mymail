@@ -171,7 +171,7 @@ func (h *Handler) FoldersFolderIDMessagesDelete(ctx context.Context, params api.
 		return &api.FoldersFolderIDMessagesDeleteBadRequest{Error: "cannot delete all messages in this folder"}, nil
 	}
 
-	if _, err := h.folders.GetFolderByID(ctx, folderID); err != nil {
+	if err := h.folders.FolderExists(ctx, folderID); err != nil {
 		if errors.Is(err, repository.ErrNotFound) {
 			return &api.FoldersFolderIDMessagesDeleteNotFound{Error: "folder not found"}, nil
 		}
@@ -188,7 +188,7 @@ func (h *Handler) FoldersFolderIDMessagesDelete(ctx context.Context, params api.
 func (h *Handler) FoldersFolderIDMarkAllReadPost(ctx context.Context, params api.FoldersFolderIDMarkAllReadPostParams) (api.FoldersFolderIDMarkAllReadPostRes, error) {
 	folderID := int64(params.FolderID)
 
-	if _, err := h.folders.GetFolderByID(ctx, folderID); err != nil {
+	if err := h.folders.FolderExists(ctx, folderID); err != nil {
 		if errors.Is(err, repository.ErrNotFound) {
 			return &api.Error{Error: "folder not found"}, nil
 		}
