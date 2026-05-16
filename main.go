@@ -119,6 +119,17 @@ func runServer(dataDir, addr string, port int, publicURL, basicAuthFile, basicAu
 	}
 	defer db.Close()
 
+	for _, pragma := range []string{
+		"PRAGMA cache_size = -8192",
+		"PRAGMA mmap_size = 134217728",
+		"PRAGMA synchronous = NORMAL",
+		"PRAGMA optimize",
+	} {
+		if _, err := db.Exec(pragma); err != nil {
+			log.Fatalf("error: %s: %v", pragma, err)
+		}
+	}
+
 	sendmailPath, err := exec.LookPath(sendmailBin)
 	if err != nil {
 		log.Fatalf("error: resolve sendmail %q: %v", sendmailBin, err)
