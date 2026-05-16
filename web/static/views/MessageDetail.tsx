@@ -415,6 +415,8 @@ export function MessageDetail({ id, folders }: MessageDetailProps) {
             Cancel schedule
           </button>
         )}
+        <span class="ml-auto" />
+        <span class="msg-folder-indicator">{folders.find(f => f.id === folderId)?.name ?? ''}</span>
       </div>
 
       {snoozeOpen && (

@@ -3,6 +3,7 @@ import { formatDateAdaptive } from '../util/date.js';
 import type { components } from '../api/types.js';
 
 type MessageSummary = components['schemas']['MessageSummary'];
+type Folder = components['schemas']['Folder'];
 
 export interface MessageListProps {
   items: MessageSummary[];
@@ -11,6 +12,7 @@ export interface MessageListProps {
   onToggleSelectAll: () => void;
   onRowClick: (id: number) => void;
   snippets?: Record<number, string>;
+  folders?: Folder[];
 }
 
 function renderSnippet(text: string) {
@@ -75,9 +77,11 @@ export function MessageList({
   onToggleSelectAll,
   onRowClick,
   snippets,
+  folders,
 }: MessageListProps) {
   const allSelected = items.length > 0 && items.every(m => selectedIds.has(m.id));
   const someSelected = selectedIds.size > 0;
+  const folderMap = folders ? new Map(folders.map(f => [f.id, f.name])) : null;
 
   return (
     <table class={`msg-table${snippets ? ' has-snippets' : ''}`}>
@@ -93,6 +97,7 @@ export function MessageList({
           </th>
           <th class="col-from">From</th>
           <th class="col-subject">Subject</th>
+          {folderMap && <th class="col-folder">Folder</th>}
           <th class="col-date">Date</th>
         </tr>
       </thead>
@@ -133,6 +138,9 @@ export function MessageList({
                   </>
                 )}
               </td>
+              {folderMap && (
+                <td class="col-folder">{folderMap.get(msg.folder_id) ?? ''}</td>
+              )}
               <td class="col-date" title={title}>{display}</td>
             </tr>
           );

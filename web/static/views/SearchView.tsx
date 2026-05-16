@@ -205,6 +205,7 @@ export function SearchView({ query, folders }: SearchViewProps) {
               onToggleSelectAll={() => undefined}
               onRowClick={(id) => navigate(`#/message/${id}`)}
               snippets={snippets}
+              folders={activeFolderId == null ? folders : undefined}
             />
           </div>
         </>

@@ -414,6 +414,10 @@ html, body {
 }
 .col-from { width: 200px; }
 .col-subject { /* takes remaining space */ }
+.col-folder {
+  width: 120px;
+  white-space: nowrap;
+}
 .col-date {
   width: 120px;
   text-align: right;
@@ -536,6 +540,12 @@ html, body {
   border-bottom: 1px solid var(--list-border);
   flex-shrink: 0;
   flex-wrap: wrap;
+}
+
+.msg-folder-indicator {
+  font-size: 12px;
+  color: var(--text-muted);
+  white-space: nowrap;
 }
 
 .move-inline {
