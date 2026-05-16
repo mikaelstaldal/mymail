@@ -155,6 +155,15 @@ export function FolderView({ folder, folders }: FolderViewProps) {
         >
           ›
         </button>
+        <button
+          class="btn btn-ghost btn-sm btn-icon"
+          disabled={loading}
+          onClick={() => void load(offset)}
+          aria-label="Reload"
+          title="Reload"
+        >
+          ↻
+        </button>
       </div>
 
       {selectedIds.size > 0 && (
