@@ -139,16 +139,16 @@ func scanMessageSummary(scan func(...any) error) (oas.MessageSummary, error) {
 // snooze_folder, send_error, send_failure_count, created_at, updated_at.
 func scanDBMessage(scan func(...any) error) (model.DBMessage, error) {
 	var (
-		m              model.DBMessage
-		sendAtStr      sql.NullString
+		m               model.DBMessage
+		sendAtStr       sql.NullString
 		snoozedUntilStr sql.NullString
-		dateStr        string
-		createdAtStr   string
-		updatedAtStr   string
-		readInt        int
-		flaggedInt     int
-		hasAttInt      int
-		hasExtImgInt   int
+		dateStr         string
+		createdAtStr    string
+		updatedAtStr    string
+		readInt         int
+		flaggedInt      int
+		hasAttInt       int
+		hasExtImgInt    int
 	)
 	if err := scan(
 		&m.ID, &m.FolderID, &m.IdentityID, &m.MessageID, &m.InReplyTo, &m.References,
@@ -207,6 +207,81 @@ const dbMessageColumns = `id, folder_id, identity_id, message_id, in_reply_to, "
 	from_addr, to_addr, cc_addr, bcc_addr, reply_to_addr, subject,
 	date, body_text, body_html, raw, read, flagged, has_attachments, has_external_images,
 	send_at, snoozed_until, snooze_folder, send_error, send_failure_count, created_at, updated_at`
+
+// dbMessageColumnsNoRaw selects all message columns except the raw BLOB.
+// Used for API detail responses where raw is never needed.
+const dbMessageColumnsNoRaw = `id, folder_id, identity_id, message_id, in_reply_to, "references",
+	from_addr, to_addr, cc_addr, bcc_addr, reply_to_addr, subject,
+	date, body_text, body_html, read, flagged, has_attachments, has_external_images,
+	send_at, snoozed_until, snooze_folder, send_error, send_failure_count, created_at, updated_at`
+
+// scanDBMessageNoRaw scans a row selected with dbMessageColumnsNoRaw into model.DBMessage.
+// m.Raw is left nil; callers must not access it.
+func scanDBMessageNoRaw(scan func(...any) error) (model.DBMessage, error) {
+	var (
+		m               model.DBMessage
+		sendAtStr       sql.NullString
+		snoozedUntilStr sql.NullString
+		dateStr         string
+		createdAtStr    string
+		updatedAtStr    string
+		readInt         int
+		flaggedInt      int
+		hasAttInt       int
+		hasExtImgInt    int
+	)
+	if err := scan(
+		&m.ID, &m.FolderID, &m.IdentityID, &m.MessageID, &m.InReplyTo, &m.References,
+		&m.FromAddr, &m.ToAddr, &m.CcAddr, &m.BccAddr, &m.ReplyToAddr, &m.Subject,
+		&dateStr, &m.BodyText, &m.BodyHTML,
+		&readInt, &flaggedInt, &hasAttInt, &hasExtImgInt,
+		&sendAtStr, &snoozedUntilStr, &m.SnoozeFolder, &m.SendError,
+		&m.SendFailureCount, &createdAtStr, &updatedAtStr,
+	); err != nil {
+		return model.DBMessage{}, err
+	}
+
+	t, err := time.Parse(time.RFC3339, dateStr)
+	if err != nil {
+		return model.DBMessage{}, fmt.Errorf("parse date %q: %w", dateStr, err)
+	}
+	m.Date = t
+
+	if sendAtStr.Valid && sendAtStr.String != "" {
+		st, err := time.Parse(time.RFC3339, sendAtStr.String)
+		if err != nil {
+			return model.DBMessage{}, fmt.Errorf("parse send_at %q: %w", sendAtStr.String, err)
+		}
+		m.SendAt = sql.NullTime{Time: st, Valid: true}
+	}
+
+	if snoozedUntilStr.Valid && snoozedUntilStr.String != "" {
+		su, err := time.Parse(time.RFC3339, snoozedUntilStr.String)
+		if err != nil {
+			return model.DBMessage{}, fmt.Errorf("parse snoozed_until %q: %w", snoozedUntilStr.String, err)
+		}
+		m.SnoozedUntil = sql.NullTime{Time: su, Valid: true}
+	}
+
+	cat, err := time.Parse(time.RFC3339, createdAtStr)
+	if err != nil {
+		return model.DBMessage{}, fmt.Errorf("parse created_at %q: %w", createdAtStr, err)
+	}
+	m.CreatedAt = cat
+
+	uat, err := time.Parse(time.RFC3339, updatedAtStr)
+	if err != nil {
+		return model.DBMessage{}, fmt.Errorf("parse updated_at %q: %w", updatedAtStr, err)
+	}
+	m.UpdatedAt = uat
+
+	m.Read = readInt != 0
+	m.Flagged = flaggedInt != 0
+	m.HasAttachments = hasAttInt != 0
+	m.HasExternalImages = hasExtImgInt != 0
+
+	return m, nil
+}
 
 // ListMessages returns paginated messages in a folder ordered by date DESC, plus total count.
 // unread and flagged are optional filters; nil means no filter for that field.
@@ -281,6 +356,19 @@ func (r *MessageRepository) GetMessage(ctx context.Context, id int64) (model.DBM
 		`SELECT `+dbMessageColumns+` FROM messages WHERE id = ?`, id,
 	)
 	m, err := scanDBMessage(row.Scan)
+	if errors.Is(err, sql.ErrNoRows) {
+		return model.DBMessage{}, ErrNotFound
+	}
+	return m, err
+}
+
+// GetMessageDetail returns the full DBMessage row without the raw BLOB, or ErrNotFound.
+// Use this for API responses; use GetMessage only when raw is genuinely needed.
+func (r *MessageRepository) GetMessageDetail(ctx context.Context, id int64) (model.DBMessage, error) {
+	row := r.db.QueryRowContext(ctx,
+		`SELECT `+dbMessageColumnsNoRaw+` FROM messages WHERE id = ?`, id,
+	)
+	m, err := scanDBMessageNoRaw(row.Scan)
 	if errors.Is(err, sql.ErrNoRows) {
 		return model.DBMessage{}, ErrNotFound
 	}
@@ -402,7 +490,7 @@ func (r *MessageRepository) InsertMessage(ctx context.Context, msg model.DBMessa
 // When folder_id is set to 4 (Trash) or 7 (Junk), scheduling fields are cleared atomically.
 func (r *MessageRepository) UpdateMessage(ctx context.Context, id int64, fields map[string]any) (model.DBMessage, error) {
 	if len(fields) == 0 {
-		return r.GetMessage(ctx, id)
+		return r.GetMessageDetail(ctx, id)
 	}
 
 	var setClauses []string
@@ -425,7 +513,7 @@ func (r *MessageRepository) UpdateMessage(ctx context.Context, id int64, fields 
 		}
 	}
 	if len(setClauses) == 0 {
-		return r.GetMessage(ctx, id)
+		return r.GetMessageDetail(ctx, id)
 	}
 
 	if newFolderID, ok := fields["folder_id"].(int64); ok && (newFolderID == 4 || newFolderID == 7) {
@@ -445,7 +533,7 @@ func (r *MessageRepository) UpdateMessage(ctx context.Context, id int64, fields 
 	if n == 0 {
 		return model.DBMessage{}, ErrNotFound
 	}
-	return r.GetMessage(ctx, id)
+	return r.GetMessageDetail(ctx, id)
 }
 
 // BulkUpdateMessages sets read and/or flagged on a set of messages. Returns count changed.
@@ -986,7 +1074,7 @@ func (r *MessageRepository) SnoozeMessage(ctx context.Context, id int64, until t
 		return model.DBMessage{}, err
 	}
 
-	return r.GetMessage(ctx, id)
+	return r.GetMessageDetail(ctx, id)
 }
 
 // CancelSnooze cancels an active snooze, returning the message to its original folder.
@@ -1020,7 +1108,7 @@ func (r *MessageRepository) CancelSnooze(ctx context.Context, id int64) (model.D
 		return model.DBMessage{}, ErrForbiddenFolder
 	}
 
-	return r.GetMessage(ctx, id)
+	return r.GetMessageDetail(ctx, id)
 }
 
 // MarkJunk moves the message to Junk (folder_id=7) and marks it as read.
@@ -1044,7 +1132,7 @@ func (r *MessageRepository) MarkJunk(ctx context.Context, id int64) (model.DBMes
 	if err != nil {
 		return model.DBMessage{}, err
 	}
-	return r.GetMessage(ctx, id)
+	return r.GetMessageDetail(ctx, id)
 }
 
 // MarkNotJunk moves the message from Junk to Inbox and marks it unread.
@@ -1067,7 +1155,7 @@ func (r *MessageRepository) MarkNotJunk(ctx context.Context, id int64) (model.DB
 	if err != nil {
 		return model.DBMessage{}, err
 	}
-	return r.GetMessage(ctx, id)
+	return r.GetMessageDetail(ctx, id)
 }
 
 // sanitizeFTSQuery escapes double quotes and wraps the input in outer quotes

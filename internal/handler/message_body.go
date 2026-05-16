@@ -11,7 +11,7 @@ import (
 )
 
 func (h *Handler) MessagesIDBodyGet(ctx context.Context, params api.MessagesIDBodyGetParams) (api.MessagesIDBodyGetRes, error) {
-	msg, err := h.messages.GetMessage(ctx, int64(params.ID))
+	msg, err := h.messages.GetMessageDetail(ctx, int64(params.ID))
 	if errors.Is(err, repository.ErrNotFound) {
 		return &api.Error{Error: "message not found"}, nil
 	}

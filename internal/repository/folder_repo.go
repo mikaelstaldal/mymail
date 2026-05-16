@@ -10,8 +10,8 @@ import (
 	"time"
 
 	oas "github.com/mikaelstaldal/mymail/internal/api"
-	sqlite "modernc.org/sqlite"
 	"golang.org/x/text/unicode/norm"
+	sqlite "modernc.org/sqlite"
 )
 
 // FolderRepository provides folder CRUD operations backed by SQLite.
@@ -78,8 +78,13 @@ func scanFolder(scan func(dest ...any) error) (oas.Folder, error) {
 
 const folderSelectSQL = `
 SELECT f.id, f.name, f.slug, f.position, f.created_at,
-       (SELECT COUNT(*) FROM messages WHERE folder_id = f.id AND read = 0)
-FROM folders f`
+       COALESCE(u.unread_count, 0)
+FROM folders f
+LEFT JOIN (
+    SELECT folder_id, COUNT(*) AS unread_count
+    FROM messages WHERE read = 0
+    GROUP BY folder_id
+) u ON u.folder_id = f.id`
 
 // ListFolders returns all folders ordered by position ASC, id ASC, each with its unread count.
 func (r *FolderRepository) ListFolders(ctx context.Context) ([]oas.Folder, error) {

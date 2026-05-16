@@ -78,7 +78,7 @@ The database must be created by `-init` before any other mode will start.
 - Pure-Go SQLite (`modernc.org/sqlite`) — no CGO.
 - Single file at `<data>/mymail.sqlite`.
 - Schema versioned via `PRAGMA user_version`; migrations applied on server startup.
-- **Current schema version: 1** (see `spec/IMPLEMENTATION.md` for full DDL).
+- **Current schema version: 2** (see `spec/IMPLEMENTATION.md` for full DDL).
 - FTS5 content table (`messages_fts`) kept in sync with `messages` via triggers.
 - All timestamps stored as UTC RFC 3339 strings.
 - `messages.references` column name collides with SQL reserved word — always quote it as `"references"` in queries.

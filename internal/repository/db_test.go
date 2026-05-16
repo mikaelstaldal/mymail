@@ -19,10 +19,10 @@ func TestOpenDBAndInitSchema(t *testing.T) {
 	require.NoError(t, err, "OpenDB")
 	defer db.Close()
 
-	// Schema version must be 1.
+	// Schema version must be 2.
 	var v int
 	db.QueryRow("PRAGMA user_version").Scan(&v)
-	assert.Equal(t, 1, v, "user_version")
+	assert.Equal(t, 2, v, "user_version")
 
 	// All tables must exist.
 	tables := []string{
@@ -72,7 +72,7 @@ func TestOpenDBAndInitSchema(t *testing.T) {
 	err = InitSchema(db)
 	assert.NoError(t, err, "second InitSchema")
 	db.QueryRow("PRAGMA user_version").Scan(&v)
-	assert.Equal(t, 1, v, "user_version after second run")
+	assert.Equal(t, 2, v, "user_version after second run")
 
 	// Basic FK cascade: insert a message row then delete it; attachment should cascade.
 	_, err = db.Exec(`INSERT INTO folders(id,name,slug,position) VALUES(1,'Inbox','inbox',0)`)

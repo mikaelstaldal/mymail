@@ -297,10 +297,11 @@ Each `if v < N` block is checked independently (not `else if`), so a single star
 
 ```
 user_version 0  →  uninitialized: apply all CREATE TABLE / CREATE INDEX / CREATE TRIGGER statements, then set user_version to 1
-user_version 1  →  initial schema in place; the first future migration will bump this to 2
+user_version 1  →  initial schema in place
+user_version 2  →  adds composite indexes idx_messages_folder_date and idx_messages_folder_read
 ```
 
-**Current schema version: 1** (initial schema applied; no further migrations yet).
+**Current schema version: 2** (v2 adds composite indexes for list-messages and list-folders performance).
 
 ### `folders`
 

@@ -75,7 +75,7 @@ func (h *Handler) MessagesSearchGet(ctx context.Context, params api.MessagesSear
 func (h *Handler) MessagesIDGet(ctx context.Context, params api.MessagesIDGetParams) (api.MessagesIDGetRes, error) {
 	id := int64(params.ID)
 
-	msg, err := h.messages.GetMessage(ctx, id)
+	msg, err := h.messages.GetMessageDetail(ctx, id)
 	if errors.Is(err, repository.ErrNotFound) {
 		return &api.Error{Error: "message not found"}, nil
 	}
@@ -138,7 +138,7 @@ func (h *Handler) MessagesIDPatch(ctx context.Context, req *api.MessagesIDPatchR
 		if newFolderID == 3 || newFolderID == 5 || newFolderID == 6 {
 			return &api.MessagesIDPatchBadRequest{Error: "cannot move to this folder"}, nil
 		}
-		msg, err := h.messages.GetMessage(ctx, id)
+		msg, err := h.messages.GetMessageDetail(ctx, id)
 		if errors.Is(err, repository.ErrNotFound) {
 			return &api.MessagesIDPatchNotFound{Error: "message not found"}, nil
 		}
