@@ -399,15 +399,27 @@ export function MessageDetail({ id, folders }: MessageDetailProps) {
           <button
             class={`btn btn-ghost btn-sm${snoozeOpen ? ' active' : ''}`}
             disabled={actionInFlight}
-            onClick={() => setSnoozeOpen(o => !o)}
+            onClick={() => {
+              if (!snoozeOpen && canCancelSnooze && msg.snoozed_until) {
+                const d = new Date(msg.snoozed_until);
+                const pad = (n: number) => String(n).padStart(2, '0');
+                setSnoozeValue(`${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`);
+              }
+              setSnoozeOpen(o => !o);
+            }}
           >
-            Snooze
+            {canCancelSnooze ? 'Edit snooze' : 'Snooze'}
           </button>
         )}
         {canCancelSnooze && (
           <button class="btn btn-ghost btn-sm" disabled={actionInFlight} onClick={() => void handleCancelSnooze()}>
             Cancel snooze
           </button>
+        )}
+        {canCancelSnooze && msg.snoozed_until && (
+          <span class="snooze-until-display" title={msg.snoozed_until}>
+            until {formatDateFull(msg.snoozed_until)}
+          </span>
         )}
         {canMarkJunk && (
           <button class="btn btn-ghost btn-sm" disabled={actionInFlight} onClick={() => void handleMarkJunk()}>
