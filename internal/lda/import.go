@@ -231,6 +231,14 @@ func commitBatch(ctx context.Context, db *sql.DB, batch []batchEntry, folderID i
 			continue
 		}
 		msgID, _ := res.LastInsertId()
+		for _, ref := range pm.References {
+			if _, err := tx.ExecContext(ctx,
+				`INSERT OR IGNORE INTO message_references (message_id, ref_msg_id) VALUES (?, ?)`,
+				msgID, ref,
+			); err != nil {
+				return 0, err
+			}
+		}
 		for _, att := range pm.Attachments {
 			if _, err := tx.ExecContext(ctx,
 				`INSERT INTO attachments (message_id, filename, content_type, size, data) VALUES (?, ?, ?, ?, ?)`,

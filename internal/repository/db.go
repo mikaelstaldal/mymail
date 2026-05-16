@@ -112,6 +112,32 @@ func InitSchema(db *sql.DB) error {
 		}
 	}
 
+	if version < 3 {
+		tx, err := db.Begin()
+		if err != nil {
+			return fmt.Errorf("begin migration to v3: %w", err)
+		}
+		defer tx.Rollback()
+
+		for _, stmt := range schemaV3 {
+			if _, err := tx.Exec(stmt); err != nil {
+				preview := stmt
+				if len(preview) > 60 {
+					preview = preview[:60]
+				}
+				return fmt.Errorf("schema v3 %q: %w", preview, err)
+			}
+		}
+
+		if _, err := tx.Exec("PRAGMA user_version = 3"); err != nil {
+			return fmt.Errorf("set user_version = 3: %w", err)
+		}
+
+		if err := tx.Commit(); err != nil {
+			return fmt.Errorf("commit migration to v3: %w", err)
+		}
+	}
+
 	return nil
 }
 
@@ -304,4 +330,39 @@ var schemaV1 = []string{
 var schemaV2 = []string{
 	`CREATE INDEX IF NOT EXISTS idx_messages_folder_date ON messages(folder_id, date DESC)`,
 	`CREATE INDEX IF NOT EXISTS idx_messages_folder_read ON messages(folder_id, read)`,
+}
+
+// schemaV3 adds the message_references join table for indexed thread forward lookups,
+// replacing the full-table-scan LIKE '%…%' pattern on the references column.
+var schemaV3 = []string{
+	`CREATE TABLE IF NOT EXISTS message_references (
+		message_id INTEGER NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
+		ref_msg_id TEXT    NOT NULL,
+		UNIQUE (message_id, ref_msg_id)
+	)`,
+	`CREATE INDEX IF NOT EXISTS idx_msgref_ref ON message_references(ref_msg_id)`,
+	// Backfill from existing data. Recursive CTE splits the newline-separated
+	// references column one token at a time, avoiding JSON encoding issues.
+	`WITH RECURSIVE split(message_id, ref, rest) AS (
+		SELECT id,
+		       CASE WHEN instr("references", char(10)) > 0
+		            THEN substr("references", 1, instr("references", char(10)) - 1)
+		            ELSE "references" END,
+		       CASE WHEN instr("references", char(10)) > 0
+		            THEN substr("references", instr("references", char(10)) + 1)
+		            ELSE '' END
+		FROM messages
+		WHERE "references" IS NOT NULL AND "references" != ''
+		UNION ALL
+		SELECT message_id,
+		       CASE WHEN instr(rest, char(10)) > 0
+		            THEN substr(rest, 1, instr(rest, char(10)) - 1)
+		            ELSE rest END,
+		       CASE WHEN instr(rest, char(10)) > 0
+		            THEN substr(rest, instr(rest, char(10)) + 1)
+		            ELSE '' END
+		FROM split WHERE rest != ''
+	)
+	INSERT OR IGNORE INTO message_references (message_id, ref_msg_id)
+	SELECT message_id, ref FROM split WHERE ref != ''`,
 }

@@ -92,7 +92,13 @@ func (r *DraftRepository) CreateDraft(ctx context.Context, msg model.DBMessage) 
 		sendAtVal = msg.SendAt.Time.UTC().Format(time.RFC3339)
 	}
 
-	res, err := r.db.ExecContext(ctx, `
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return 0, err
+	}
+	defer tx.Rollback()
+
+	res, err := tx.ExecContext(ctx, `
 		INSERT INTO messages (
 			folder_id, identity_id, message_id, in_reply_to, "references",
 			from_addr, to_addr, cc_addr, bcc_addr, reply_to_addr, subject,
@@ -117,7 +123,19 @@ func (r *DraftRepository) CreateDraft(ctx context.Context, msg model.DBMessage) 
 	if err != nil {
 		return 0, err
 	}
-	return res.LastInsertId()
+
+	draftID, err := res.LastInsertId()
+	if err != nil {
+		return 0, err
+	}
+
+	if msg.References.Valid && msg.References.String != "" {
+		if err := insertMessageRefs(ctx, tx, draftID, msg.References.String); err != nil {
+			return 0, err
+		}
+	}
+
+	return draftID, tx.Commit()
 }
 
 // CreateDraftCopying creates a draft and atomically copies all attachments from
@@ -192,6 +210,12 @@ func (r *DraftRepository) CreateDraftCopying(ctx context.Context, msg model.DBMe
 		return 0, err
 	}
 
+	if msg.References.Valid && msg.References.String != "" {
+		if err := insertMessageRefs(ctx, tx, draftID, msg.References.String); err != nil {
+			return 0, err
+		}
+	}
+
 	if sourceMessageID != nil {
 		var exists int
 		err := tx.QueryRowContext(ctx, `SELECT 1 FROM messages WHERE id = ?`, *sourceMessageID).Scan(&exists)
@@ -246,7 +270,13 @@ func (r *DraftRepository) UpdateDraft(ctx context.Context, id int64, msg model.D
 		sendAtVal = msg.SendAt.Time.UTC().Format(time.RFC3339)
 	}
 
-	res, err := r.db.ExecContext(ctx, `
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	res, err := tx.ExecContext(ctx, `
 		UPDATE messages SET
 			identity_id = ?, message_id = ?, in_reply_to = ?, "references" = ?,
 			from_addr = ?, to_addr = ?, cc_addr = ?, bcc_addr = ?, reply_to_addr = ?,
@@ -266,7 +296,19 @@ func (r *DraftRepository) UpdateDraft(ctx context.Context, id int64, msg model.D
 	if n == 0 {
 		return ErrNotFound
 	}
-	return nil
+
+	if _, err := tx.ExecContext(ctx, `DELETE FROM message_references WHERE message_id = ?`, id); err != nil {
+		return err
+	}
+	refsStr := ""
+	if msg.References.Valid {
+		refsStr = msg.References.String
+	}
+	if err := insertMessageRefs(ctx, tx, id, refsStr); err != nil {
+		return err
+	}
+
+	return tx.Commit()
 }
 
 // DeleteDraft permanently deletes a draft (folder_id=3).

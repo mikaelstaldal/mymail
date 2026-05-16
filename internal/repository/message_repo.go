@@ -482,7 +482,29 @@ func (r *MessageRepository) InsertMessage(ctx context.Context, msg model.DBMessa
 		return 0, err
 	}
 
+	if msg.References.Valid && msg.References.String != "" {
+		if err := insertMessageRefs(ctx, tx, newID, msg.References.String); err != nil {
+			return 0, err
+		}
+	}
+
 	return newID, tx.Commit()
+}
+
+// insertMessageRefs inserts one row per newline-separated reference into message_references.
+func insertMessageRefs(ctx context.Context, tx *sql.Tx, messageID int64, refsStr string) error {
+	for ref := range strings.SplitSeq(refsStr, "\n") {
+		if ref == "" {
+			continue
+		}
+		if _, err := tx.ExecContext(ctx,
+			`INSERT OR IGNORE INTO message_references (message_id, ref_msg_id) VALUES (?, ?)`,
+			messageID, ref,
+		); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // UpdateMessage applies a PATCH update on the provided fields and returns the updated row.
@@ -974,11 +996,8 @@ func (r *MessageRepository) threadForwardQuery(
 	sb.WriteString(`(in_reply_to IN (` + placeholders(len(msgIDs)) + `)`)
 	args = append(args, stringArgs(msgIDs)...)
 
-	for _, mid := range msgIDs {
-		sb.WriteString(` OR (char(10) || COALESCE("references", '') || char(10)) LIKE ('%' || char(10) || ? || char(10) || '%')`)
-		args = append(args, mid)
-	}
-	sb.WriteString(`)`)
+	sb.WriteString(` OR id IN (SELECT message_id FROM message_references WHERE ref_msg_id IN (` + placeholders(len(msgIDs)) + `)))`)
+	args = append(args, stringArgs(msgIDs)...)
 
 	rows, err := r.db.QueryContext(ctx, sb.String(), args...)
 	if err != nil {
