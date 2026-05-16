@@ -797,6 +797,7 @@ type threadSeedRow struct {
 	inReplyTo sql.NullString
 	refs      sql.NullString
 	subject   string // only populated for the seed row and subject-fallback candidates
+	folderID  int64  // only populated for the seed row
 }
 
 // scanThreadSeedRow scans id, message_id, in_reply_to, "references".
@@ -862,11 +863,11 @@ func (r *MessageRepository) fetchSummariesByIDs(ctx context.Context, ids []int64
 // GetMessageThread returns all messages in the thread, using the iterative transitive-closure
 // algorithm with a 1000-message cap and subject-based fallback.
 func (r *MessageRepository) GetMessageThread(ctx context.Context, id int64) ([]oas.MessageSummary, bool, error) {
-	// Fetch seed row including subject for the subject-based fallback.
+	// Fetch seed row including subject and folder_id for the subject-based fallback.
 	var seed threadSeedRow
 	err := r.db.QueryRowContext(ctx,
-		`SELECT id, message_id, in_reply_to, "references", subject FROM messages WHERE id = ?`, id,
-	).Scan(&seed.id, &seed.messageID, &seed.inReplyTo, &seed.refs, &seed.subject)
+		`SELECT id, message_id, in_reply_to, "references", subject, folder_id FROM messages WHERE id = ?`, id,
+	).Scan(&seed.id, &seed.messageID, &seed.inReplyTo, &seed.refs, &seed.subject, &seed.folderID)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, false, ErrNotFound
 	}
@@ -940,9 +941,9 @@ func (r *MessageRepository) GetMessageThread(ctx context.Context, id int64) ([]o
 			rows, err := r.db.QueryContext(ctx,
 				`SELECT m.id, m.message_id, m.in_reply_to, m."references", m.subject
 				 FROM messages_fts JOIN messages m ON messages_fts.rowid = m.id
-				 WHERE messages_fts MATCH ? AND m.id != ?
+				 WHERE messages_fts MATCH ? AND m.id != ? AND m.folder_id = ?
 				 LIMIT 999`,
-				ftsTerm, id,
+				ftsTerm, id, seed.folderID,
 			)
 			if err != nil {
 				return nil, false, err
