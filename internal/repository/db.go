@@ -3,32 +3,38 @@ package repository
 import (
 	"database/sql"
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
+	"strings"
 
 	_ "modernc.org/sqlite"
 )
 
 // OpenDB opens the SQLite database at path, enables foreign keys, sets the
-// busy_timeout pragma (0 = skip), and runs any pending schema migrations.
-func OpenDB(path string, busyTimeout int) (*sql.DB, error) {
-	db, err := sql.Open("sqlite", path)
+// busy_timeout pragma (0 = skip), applies any extraPragmas, and runs pending
+// schema migrations. Pragmas are baked into the DSN so every connection in
+// the pool inherits them automatically.
+func OpenDB(path string, busyTimeout int, extraPragmas ...string) (*sql.DB, error) {
+	params := url.Values{}
+	params.Add("_pragma", "foreign_keys=on")
+	if busyTimeout > 0 {
+		params.Add("_pragma", fmt.Sprintf("busy_timeout=%d", busyTimeout))
+	}
+	for _, p := range extraPragmas {
+		params.Add("_pragma", p)
+	}
+	// If path already contains query params (e.g. in-memory URIs used in tests),
+	// append with "&" rather than "?" to avoid a double-separator.
+	sep := "?"
+	if strings.Contains(path, "?") {
+		sep = "&"
+	}
+	dsn := path + sep + params.Encode()
+
+	db, err := sql.Open("sqlite", dsn)
 	if err != nil {
 		return nil, fmt.Errorf("open database: %w", err)
-	}
-	// Single connection ensures pragmas set below remain in effect for all queries.
-	db.SetMaxOpenConns(1)
-
-	if _, err := db.Exec("PRAGMA foreign_keys = ON"); err != nil {
-		db.Close()
-		return nil, fmt.Errorf("enable foreign keys: %w", err)
-	}
-
-	if busyTimeout > 0 {
-		if _, err := db.Exec(fmt.Sprintf("PRAGMA busy_timeout = %d", busyTimeout)); err != nil {
-			db.Close()
-			return nil, fmt.Errorf("set busy_timeout: %w", err)
-		}
 	}
 
 	if err := InitSchema(db); err != nil {

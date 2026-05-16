@@ -13,6 +13,7 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"syscall"
 	"time"
@@ -113,21 +114,24 @@ func runServer(dataDir, addr string, port int, publicURL, basicAuthFile, basicAu
 		log.Fatalf("error: %v", err)
 	}
 
-	db, err := repository.OpenDB(dbPath, 5000)
+	db, err := repository.OpenDB(dbPath, 5000,
+		"cache_size=-8192",
+		"mmap_size=134217728",
+		"synchronous=NORMAL",
+	)
 	if err != nil {
 		log.Fatalf("error: open database: %v", err)
 	}
 	defer db.Close()
 
-	for _, pragma := range []string{
-		"PRAGMA cache_size = -8192",
-		"PRAGMA mmap_size = 134217728",
-		"PRAGMA synchronous = NORMAL",
-		"PRAGMA optimize",
-	} {
-		if _, err := db.Exec(pragma); err != nil {
-			log.Fatalf("error: %s: %v", pragma, err)
-		}
+	// Allow concurrent reads under WAL mode; writes still serialize at the SQLite level.
+	numConns := runtime.GOMAXPROCS(0)
+	db.SetMaxOpenConns(numConns)
+	db.SetMaxIdleConns(numConns)
+
+	// One-shot: update query planner statistics for all connections.
+	if _, err := db.Exec("PRAGMA optimize"); err != nil {
+		log.Fatalf("error: PRAGMA optimize: %v", err)
 	}
 
 	sendmailPath, err := exec.LookPath(sendmailBin)
