@@ -302,10 +302,11 @@ export function MessageDetail({ id, folders }: MessageDetailProps) {
 
   const handleMarkJunk = async () => {
     if (!msg || actionInFlight) return;
+    const sourceFolderId = msg.folder_id;
     setActionInFlight(true);
     try {
       await api.messages.markJunk(msg.id);
-      navigate('#/folder/junk');
+      navigateToSourceFolder(sourceFolderId);
     } catch (e) {
       showToast(e instanceof Error ? e.message : 'Failed to mark as junk');
       setActionInFlight(false);
