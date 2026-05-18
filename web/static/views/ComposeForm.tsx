@@ -91,7 +91,7 @@ function buildInitialHtml(
   const attribution = `<p>On ${esc(date)}, ${esc(sender)} wrote:</p>`;
   const body = msg.body_html
     ? `<blockquote style="margin:0 0 0 0.8ex;border-left:1px solid #ccc;padding-left:1ex">${msg.body_html}</blockquote>`
-    : `<p>${esc(msg.body_text.split('\n').map(l => '&gt; ' + esc(l)).join('<br>'))}</p>`;
+    : `<p>${msg.body_text.split('\n').map(l => '&gt; ' + esc(l)).join('<br>')}</p>`;
 
   const sigPart = sigHtml ? `<p>${sigHtml}</p><p><br></p>` : '';
   return `<p><br></p>${sigPart}${attribution}${body}`;
