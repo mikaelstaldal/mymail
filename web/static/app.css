@@ -876,7 +876,7 @@ html, body {
 
 .cf-field-row {
   display: grid;
-  grid-template-columns: 64px 1fr auto;
+  grid-template-columns: 80px 1fr auto;
   align-items: flex-start;
   border-bottom: 1px solid var(--field-row-border);
   min-height: 40px;
