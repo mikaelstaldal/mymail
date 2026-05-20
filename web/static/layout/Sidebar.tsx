@@ -52,6 +52,14 @@ export function Sidebar({ folders, activeSlug }: SidebarProps) {
       <div class="sidebar-header">
         <div class="logo-icon">✉</div>
         mymail
+        <button
+          class="sidebar-reload-btn"
+          onClick={() => window.dispatchEvent(new CustomEvent('folder-reload'))}
+          aria-label="Reload"
+          title="Reload"
+        >
+          ↻
+        </button>
       </div>
 
       <div class="sidebar-section-label">Mailboxes</div>

@@ -1,5 +1,5 @@
 import { render } from 'preact';
-import { useState, useEffect } from 'preact/hooks';
+import { useState, useEffect, useRef } from 'preact/hooks';
 import { Sidebar } from './layout/Sidebar.js';
 import { Toolbar } from './layout/Toolbar.js';
 import { Toast } from './components/Toast.js';
@@ -53,8 +53,18 @@ function App() {
     return onRouteChange(setRoute);
   }, []);
 
+  const pollRefreshRef = useRef<() => void>(() => {});
+
   useEffect(() => {
-    return startPolling(setFolders);
+    const { stop, refresh } = startPolling(setFolders);
+    pollRefreshRef.current = refresh;
+    return stop;
+  }, []);
+
+  useEffect(() => {
+    const handler = () => pollRefreshRef.current();
+    window.addEventListener('folder-reload', handler);
+    return () => window.removeEventListener('folder-reload', handler);
   }, []);
 
   // Persist selected folder across sessions and keep lastFolderSlug current.

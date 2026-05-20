@@ -5,7 +5,7 @@ type Folder = components['schemas']['Folder'];
 
 const POLL_INTERVAL = 30_000;
 
-export function startPolling(cb: (folders: Folder[]) => void): () => void {
+export function startPolling(cb: (folders: Folder[]) => void): { stop: () => void; refresh: () => void } {
   let timerId: ReturnType<typeof setTimeout> | null = null;
   let lastInboxUnread = -1; // -1 = unknown; skip notification on first poll
   let stopped = false;
@@ -64,9 +64,16 @@ export function startPolling(cb: (folders: Folder[]) => void): () => void {
   void poll().then(scheduleNext);
   document.addEventListener('visibilitychange', visibilityHandler);
 
-  return function stop() {
+  function stop(): void {
     stopped = true;
     stopTimer();
     document.removeEventListener('visibilitychange', visibilityHandler);
-  };
+  }
+
+  function refresh(): void {
+    stopTimer();
+    void poll().then(scheduleNext);
+  }
+
+  return { stop, refresh };
 }

@@ -196,6 +196,25 @@ html, body {
   padding: 0 5px;
 }
 
+.sidebar-reload-btn {
+  margin-left: auto;
+  background: transparent;
+  border: none;
+  color: var(--sidebar-muted);
+  cursor: pointer;
+  font-size: 22px;
+  line-height: 1;
+  padding: 4px 6px;
+  border-radius: 5px;
+  transition: background 0.12s, color 0.12s;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+.sidebar-reload-btn:hover { background: var(--sidebar-hover); color: #fff; }
+.sidebar-reload-btn:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+
 .sidebar-divider { height: 1px; background: rgba(255,255,255,0.07); margin: 6px 8px; flex-shrink: 0; }
 
 .sidebar-spacer { flex: 1; }

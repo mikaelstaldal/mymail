@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'preact/hooks';
+import { useState, useEffect, useCallback, useRef } from 'preact/hooks';
 import { api } from '../api/client.js';
 import { navigate } from '../router.js';
 import { showToast } from '../util/toast.js';
@@ -46,6 +46,14 @@ export function FolderView({ folder, folders }: FolderViewProps) {
   }, [folder.id]);
 
   useEffect(() => { void load(0); }, [load]);
+
+  const reloadRef = useRef<() => void>();
+  reloadRef.current = () => { if (!loading) void load(offset); };
+  useEffect(() => {
+    const handler = () => reloadRef.current?.();
+    window.addEventListener('folder-reload', handler);
+    return () => window.removeEventListener('folder-reload', handler);
+  }, []);
 
   const handleMarkAllRead = async () => {
     try {
@@ -154,15 +162,6 @@ export function FolderView({ folder, folders }: FolderViewProps) {
           aria-label="Next page"
         >
           ›
-        </button>
-        <button
-          class="btn btn-ghost btn-sm btn-icon"
-          disabled={loading}
-          onClick={() => void load(offset)}
-          aria-label="Reload"
-          title="Reload"
-        >
-          ↻
         </button>
       </div>
 
