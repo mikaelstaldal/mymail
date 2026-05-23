@@ -120,6 +120,7 @@ The full REST API contract is in `openapi.yaml`. Use ogen to generate Go server 
 - `GET /api/v1/messages/search` — full-text search across all folders (supports optional `date_from`/`date_to` filters)
 - `GET /api/v1/messages/{id}` — get full message details
 - `GET /api/v1/messages/{id}/raw` — download original RFC 5322 message
+- `GET /api/v1/messages/{id}/body` — get sanitized HTML body as a standalone HTML document with CSP header
 - `GET /api/v1/messages/{id}/thread` — get all messages in the same thread
 - `PATCH /api/v1/messages/{id}` — update message metadata (folder, read, flagged)
 - `PATCH /api/v1/messages` — bulk update read/flagged state for multiple messages
@@ -137,6 +138,8 @@ The full REST API contract is in `openapi.yaml`. Use ogen to generate Go server 
 - `GET /api/v1/attachments/{id}` — download attachment data
 
 #### Scheduled Messages
+- `PATCH /api/v1/scheduled/{id}` — reschedule a scheduled message (update `send_at`; must be > 60 seconds in the future; 404 if not in Scheduled folder)
+- `POST /api/v1/scheduled/{id}/send` — send a scheduled message immediately; atomically claims it then calls sendmail; on success moves to Sent; on sendmail failure moves to Drafts; 404 if not in Scheduled folder
 - `DELETE /api/v1/scheduled/{id}` — cancel a scheduled message (moves to Drafts)
 
 #### Drafts
@@ -180,7 +183,7 @@ The full REST API contract is in `openapi.yaml`. Use ogen to generate Go server 
 `GET /api/v1/messages/{id}/thread` determines membership using (in order):
 
 1. **Header-based (primary):** Build the connected component of the message graph using an iterative Go query loop (see below). Message A has an edge to message B when B's `Message-ID` appears in A's `In-Reply-To` or A's `References` field.
-2. **Subject-based fallback:** If header-based grouping yields only the single requested message, group by normalized subject and compare case-insensitively. Normalisation strips leading reply/forward prefixes using the regex defined in REQUIREMENTS.md → Compose → Subject prefix stripping (`^[ \t]*(?i:re|fwd|fw|aw|wg|res|enc|vs|sv):[ \t]+`), applied repeatedly to the start of the subject until no further match is found, then trims surrounding whitespace.
+2. **Subject-based fallback:** If header-based grouping yields only the single requested message, group by normalized subject and compare case-insensitively. Normalisation strips leading reply/forward prefixes using the regex defined in REQUIREMENTS.md → Compose → Subject prefix stripping (`^[ \t]*(?i:re|fwd|fw|aw|wg|res|enc|vs|sv):[ \t]*`), applied repeatedly to the start of the subject until no further match is found, then trims surrounding whitespace. The fallback is restricted to messages in the **same folder** as the seed message (matching `folder_id`) and uses an FTS5 query on `messages_fts` for the subject lookup instead of a full table scan.
 
 Thread results include messages from all folders, ordered by `date ASC`. **Cap:** Thread results are limited to 1000 messages. If the transitive closure (or subject-based fallback) yields more than 1000 messages, only the 1000 with the earliest `date` are returned and the response includes `truncated: true`. The UI shows a "thread too long" indicator when `truncated` is true. **`truncated` flag semantics:** set `truncated: true` whenever the iterative loop terminated because `len(foundIDs) == 1000` (i.e. the cap was reached), regardless of whether the full transitive closure is known to exceed 1000. Once the loop exits early, it is impossible to determine the true thread size, so reaching the cap is sufficient evidence to set the flag.
 
@@ -202,13 +205,13 @@ A recursive SQL CTE cannot efficiently match against the newline-separated `refe
    WHERE id NOT IN (/* foundIDs */)
      AND (
        in_reply_to IN (/* knownMsgIDs */)
-       OR (
-         -- Newline-framing prevents partial-ID substring matches.
-         -- Repeat the LIKE clause once per element of knownMsgIDs, OR-joined.
-         ('\n' || COALESCE("references", '') || '\n') LIKE ('%' || char(10) || ? || char(10) || '%')
+       OR id IN (
+         SELECT message_id FROM message_references
+         WHERE ref_msg_id IN (/* knownMsgIDs */)
        )
      )
    ```
+   The `message_references` join table is populated at insert/update time (one row per `\n`-separated entry in the `references` column) and indexed on `ref_msg_id`, giving O(log n) forward lookups instead of the previous LIKE full-table-scan approach.
 
    **Backward query** — messages whose `message_id` is referenced by any row in `foundIDs`:
    collect all unique `in_reply_to` values and all individual `\n`-split entries from `"references"` for every row in `foundIDs`, then:
@@ -222,8 +225,6 @@ A recursive SQL CTE cannot efficiently match against the newline-separated `refe
    For each newly returned row, add its `id` to `foundIDs`, its `message_id` (if non-null) to `knownMsgIDs`, and its split `"references"` entries to `referencedMsgIDs`.
 
 5. After reaching a fixed point (or the 1000-row cap), fetch the full `MessageSummary` rows for all IDs in `foundIDs`, ordered by `date ASC`.
-
-The newline-framing trick (`'\n' || col || '\n'`) in the forward LIKE query ensures that a message_id value `<short@x>` does not falsely match a references entry `<short@x.longer>`, since the pattern always requires a full newline-terminated match.
 
 ### FTS Search Input Sanitization
 
@@ -273,7 +274,7 @@ Date filtering uses lexicographic string comparison on the stored `date` column 
 
 **SQLite configuration:**
 - Init: sets `PRAGMA journal_mode=WAL` before initializing schema.
-- Server: 5-second busy timeout (`PRAGMA busy_timeout=5000`).
+- Server: 5-second busy timeout; additionally sets `cache_size=-8192` (8 MiB page cache), `mmap_size=134217728` (128 MiB mmap), `synchronous=NORMAL`. These pragmas are baked into the DSN so every connection in the pool inherits them. After opening, runs `PRAGMA optimize` once to update query-planner statistics. Connection pool is sized to `GOMAXPROCS` open/idle connections (allowing concurrent reads under WAL).
 - LDA: 30-second busy timeout (`PRAGMA busy_timeout=30000`).
 - Import: 5-second busy timeout (`PRAGMA busy_timeout=5000`).
 
@@ -378,6 +379,9 @@ CREATE INDEX IF NOT EXISTS idx_messages_message_id   ON messages(message_id);
 CREATE INDEX IF NOT EXISTS idx_messages_read         ON messages(read);
 CREATE INDEX IF NOT EXISTS idx_messages_send_at      ON messages(send_at) WHERE send_at IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_messages_snoozed_until ON messages(snoozed_until) WHERE snoozed_until IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_messages_folder_date  ON messages(folder_id, date DESC);
+CREATE INDEX IF NOT EXISTS idx_messages_folder_read  ON messages(folder_id, read);
+CREATE INDEX IF NOT EXISTS idx_messages_in_reply_to  ON messages(in_reply_to) WHERE in_reply_to IS NOT NULL;
 
 CREATE TRIGGER IF NOT EXISTS messages_updated_at AFTER UPDATE ON messages WHEN new.updated_at = old.updated_at BEGIN
     UPDATE messages SET updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now') WHERE id = new.id;
@@ -430,6 +434,20 @@ CREATE TRIGGER IF NOT EXISTS messages_fts_update AFTER UPDATE OF from_addr, to_a
     INSERT INTO messages_fts(rowid, from_addr, to_addr, cc_addr, subject, body_text)
     VALUES (new.id, new.from_addr, new.to_addr, new.cc_addr, new.subject, new.body_text);
 END;
+```
+
+### `message_references`
+
+Join table that denormalises the newline-separated `messages.references` column into one row per reference. Populated at insert/update time by `insertMessageRefs`; also backfilled from existing data as part of the v3 migration. The `idx_msgref_ref` index enables O(log n) forward thread lookups without scanning the `messages` table.
+
+```sql
+CREATE TABLE IF NOT EXISTS message_references (
+    message_id INTEGER NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
+    ref_msg_id TEXT    NOT NULL,
+    UNIQUE (message_id, ref_msg_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_msgref_ref ON message_references(ref_msg_id);
 ```
 
 ### `attachments`
@@ -621,9 +639,10 @@ Single background goroutine started on server startup, stopped cleanly via conte
 ```sql
 SELECT id FROM messages
 WHERE folder_id = 5
-  AND send_at <= CURRENT_TIMESTAMP
+  AND send_at <= ?
 ORDER BY send_at ASC;
 ```
+Bind an explicit Go UTC timestamp (`time.Now().UTC().Format(time.RFC3339)`) rather than `CURRENT_TIMESTAMP` to ensure consistent comparison against the RFC 3339 UTC strings stored in the column.
 
 **Conditional UPDATE before send** (prevents race with HTTP cancel handler):
 ```sql
@@ -668,9 +687,10 @@ Determine which case applies by inspecting the current `folder_id` before issuin
 ```sql
 SELECT id, snooze_folder FROM messages
 WHERE folder_id = 6
-  AND snoozed_until <= CURRENT_TIMESTAMP
+  AND snoozed_until <= ?
 ORDER BY snoozed_until ASC;
 ```
+Bind an explicit Go UTC timestamp (same pattern as the deferred send query).
 
 For each expired snooze, the scheduler moves the message to `COALESCE(snooze_folder, 1)` (falling back to Inbox if the return folder was deleted or was never set), clears `snoozed_until` and `snooze_folder`, and marks the message as unread — all in a single UPDATE:
 ```sql
@@ -912,7 +932,12 @@ Call `POST /api/v1/folders/{id}/mark-all-read`.
 
 ### HTML Body Display
 
-Render in `<iframe srcdoc="...">` with `sandbox` attribute and no additional tokens (maximum restriction). Per-message opt-in for external images: rerender by re-injecting `body_html` wrapped in a tiny HTML document whose `<head>` contains `<meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src https:; style-src 'unsafe-inline'">`. Because the parent CSP does not flow into a sandboxed `srcdoc` document and the iframe has no `allow-same-origin` token, the per-document `<meta>` CSP is the only policy in effect for that frame, so it can permit `https:` images without weakening the parent page's restrictions. The frame is freshly constructed each time the user toggles "Load external images" so the previous restricted document is discarded.
+Render in a sandboxed `<iframe src="/api/v1/messages/{id}/body">` (no additional sandbox tokens — maximum restriction). The `GET /messages/{id}/body` endpoint returns a standalone HTML document (`<!DOCTYPE html>…`) with its own `Content-Security-Policy` response header:
+
+- **Default (no external images):** `default-src 'none'; img-src data:; style-src 'unsafe-inline'; frame-ancestors 'self'`
+- **External images (`?external=1`):** `default-src 'none'; img-src https: data:; style-src 'unsafe-inline'; frame-ancestors 'self'`
+
+Because the CSP is delivered as a response header (not a `<meta>` tag), it is enforced by the browser regardless of sandbox mode. The `X-Frame-Options: SAMEORIGIN` header is also set. Per-message opt-in for external images: reload the iframe with `?external=1` appended to the URL. The iframe URL is swapped (not srcdoc rewritten) each time the user toggles "Load external images".
 
 ### `has_external_images` Computation
 
