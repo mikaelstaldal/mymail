@@ -14,8 +14,8 @@ while getopts "o:" opt; do
   esac
 done
 
-openapi-typescript openapi.yaml -o web/static/api/types.ts
-tsc --project web/static/tsconfig.json
+openapi-typescript openapi.yaml -o web/ts/api/types.ts
+tsc --project web/ts/tsconfig.json
 go generate ./...
 go build -tags netgo $OUTPUT_FLAG .
 go test ./...

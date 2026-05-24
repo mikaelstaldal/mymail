@@ -8,7 +8,7 @@
     "strict": true,
     "skipLibCheck": true,
     "noEmit": false,
-    "outDir": ".",
+    "outDir": "../static",
     "paths": {
       "preact": ["./vendor/preact/src/index.d.ts"],
       "preact/hooks": ["./vendor/preact/hooks/src/index.d.ts"],

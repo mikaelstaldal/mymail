@@ -18,14 +18,14 @@ bash build.sh
 # Build Go binary only (requires web/static/*.js already compiled)
 go build -tags netgo
 
-# Compile TypeScript → .js files alongside .ts sources
-tsc --project web/static/tsconfig.json
+# Compile TypeScript → web/static/*.js (sources in web/ts/)
+tsc --project web/ts/tsconfig.json
 
 # Type-check TypeScript without emitting files
-tsc --project web/static/tsconfig.json --noEmit
+tsc --project web/ts/tsconfig.json --noEmit
 
 # Regenerate TypeScript API types from openapi.yaml
-openapi-typescript openapi.yaml -o web/static/api/types.ts
+openapi-typescript openapi.yaml -o web/ts/api/types.ts
 
 # Regenerate Go API server stubs from openapi.yaml (run after editing openapi.yaml)
 go generate ./internal
@@ -56,7 +56,8 @@ internal/
   repository/            # SQLite queries and schema (migrations via PRAGMA user_version)
   sanitize/              # HTML sanitization (bluemonday) + cid: resolution
   service/               # Business logic, orchestration
-web/static/              # Embedded web UI assets (HTML/CSS/TypeScript)
+web/ts/                  # TypeScript sources (compiled to web/static/)
+web/static/              # Embedded web UI assets (HTML/CSS/compiled JS/favicons)
 openapi.yaml             # REST API contract — source of truth for code generation
 ```
 
@@ -105,11 +106,11 @@ Base path: `/api/v1`. Full contract in `openapi.yaml`. Error format: `{"error": 
 
 ### Web UI (TypeScript + Preact)
 
-- TypeScript compiled with `tsc` only — no bundler.
+- TypeScript sources in `web/ts/`; compiled to `web/static/` by `tsc` — no bundler.
 - ES6 modules with import maps.
-- Preact + JSX and Quill rich-text editor are vendored (no CDN).
+- Preact + JSX and Quill rich-text editor are vendored (no CDN) in `web/static/vendor/`.
 - Hash-based routing (`/#/inbox`, `/#/compose`, `/#/settings/:tab`, etc.).
-- `openapi-typescript` generates the TypeScript client from `openapi.yaml`.
+- `openapi-typescript` generates `web/ts/api/types.ts` from `openapi.yaml`.
 
 ### Authentication & CSRF
 
