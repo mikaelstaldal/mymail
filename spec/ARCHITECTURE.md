@@ -14,11 +14,13 @@ Layered architecture: `handler → service → repository → SQLite`
 ```
 mymail/
 ├── main.go                   # Entry point, CLI flags, routing, startup
+├── cmd/
+│   └── lda/                  # Thin LDA client binary (forwards to server via UNIX socket)
 ├── internal/
 │   ├── api/                  # Code generated from OpenAPI specification (do not edit)
 │   ├── auth/                 # HTTP Basic Auth middleware (htpasswd)
 │   ├── handler/              # HTTP handlers (REST API)
-│   ├── lda/                  # Local delivery agent (parse & store incoming mail)
+│   ├── lda/                  # Local delivery agent (parse & store incoming mail + socket server)
 │   ├── model/                # Data types
 │   ├── repository/           # SQLite data access layer
 │   ├── sanitize/             # HTML sanitization
@@ -68,6 +70,9 @@ REST API is the single source of truth. "Exactly one default" invariant enforced
 
 ### Filter Evaluation at Delivery Time
 Filters run in the LDA before the message lands in Inbox so badge counts and notifications are always correct. No retroactive filter application.
+
+### Socket-Based LDA Delivery
+The full `mymail` binary carries embedded web assets, ogen-generated HTTP stubs, and SQLite — roughly 14 MB RSS per process. When Postfix spawns two concurrent LDA invocations this overhead doubles. To reduce per-invocation memory cost a separate minimal `mymail-lda` binary (≈3 MB RSS, no SQLite, no HTTP server code) forwards raw RFC 5322 messages to the running server over a UNIX socket. The server handles all database access; the LDA client has no direct DB dependency. If the socket is unreachable the client exits 75 so the MTA retries later.
 
 ### Header-Based Spam Detection
 Reads spam verdicts from headers set by the MTA pipeline (SpamAssassin, Rspamd, etc.). No built-in classifier.

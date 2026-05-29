@@ -39,6 +39,7 @@ func main() {
 	basicAuthFile := flag.String("basic-auth-file", "", "Path to htpasswd file")
 	basicAuthRealm := flag.String("basic-auth-realm", "mymail", "Auth realm")
 	sendmailBin := flag.String("sendmail", "sendmail", "Path or name of sendmail binary")
+	ldaSocket := flag.String("lda-socket", "", "UNIX socket path for LDA delivery (enables socket-based LDA alongside HTTP server)")
 	identityAddress := flag.String("identity-address", "", "Initial identity email address (used with -init)")
 	identityName := flag.String("identity-name", "", "Initial identity display name (used with -init)")
 	flag.Parse()
@@ -53,7 +54,7 @@ func main() {
 	case *demoMode:
 		runDemo(*dataDir)
 	default:
-		runServer(*dataDir, *addr, *port, *publicURL, *basicAuthFile, *basicAuthRealm, *sendmailBin)
+		runServer(*dataDir, *addr, *port, *publicURL, *basicAuthFile, *basicAuthRealm, *sendmailBin, *ldaSocket)
 	}
 }
 
@@ -104,7 +105,7 @@ func runImport(dataDir string, mappingArgs []string) {
 	os.Exit(code)
 }
 
-func runServer(dataDir, addr string, port int, publicURL, basicAuthFile, basicAuthRealm, sendmailBin string) {
+func runServer(dataDir, addr string, port int, publicURL, basicAuthFile, basicAuthRealm, sendmailBin, ldaSocket string) {
 	if port < 1 || port > 65535 {
 		log.Fatalf("invalid port: %d", port)
 	}
@@ -190,6 +191,15 @@ func runServer(dataDir, addr string, port int, publicURL, basicAuthFile, basicAu
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
+
+	if ldaSocket != "" {
+		ln, err := lda.BindSocket(ldaSocket)
+		if err != nil {
+			log.Fatalf("error: lda socket: %v", err)
+		}
+		go lda.ServeSocket(ctx, ln, db)
+		log.Printf("mymail lda socket listening on %s", ldaSocket)
+	}
 
 	scheduler := service.NewScheduler(db, sendmailPath, contactRepo)
 	scheduler.Start(ctx)

@@ -44,14 +44,15 @@ The server, LDA, and import modes require the database to already exist (created
 
 Starts an HTTP server that serves the REST API and the embedded web UI.
 
-| Flag                | Default             | Description                                            |
-|---------------------|---------------------|--------------------------------------------------------|
-| `-port`             | `8080`              | HTTP listen port (1–65535)                             |
-| `-addr`             | `127.0.0.1`         | Bind address                                           |
-| `-data`             | `data/`             | Data directory (stores the database)                   |
-| `-basic-auth-file`  | ``                  | Path to htpasswd file; if set, enables HTTP Basic Auth |
-| `-basic-auth-realm` | `mymail`            | Auth realm shown to clients                            |
-| `-sendmail`         | `sendmail`          | Path to the sendmail binary (resolved via `PATH` if not absolute) |
+| Flag                | Default     | Description                                                                                                          |
+|---------------------|-------------|----------------------------------------------------------------------------------------------------------------------|
+| `-port`             | `8080`      | HTTP listen port (1–65535)                                                                                           |
+| `-addr`             | `127.0.0.1` | Bind address                                                                                                         |
+| `-data`             | `data/`     | Data directory (stores the database)                                                                                 |
+| `-basic-auth-file`  | ``          | Path to htpasswd file; if set, enables HTTP Basic Auth                                                               |
+| `-basic-auth-realm` | `mymail`    | Auth realm shown to clients                                                                                          |
+| `-sendmail`         | `sendmail`  | Path to the sendmail binary (resolved via `PATH` if not absolute)                                                    |
+| `-lda-socket`       | ``          | UNIX socket path for LDA delivery; if set, the server listens on this socket for incoming messages from `mymail-lda` |
 
 At startup the server resolves the configured sendmail binary (using `PATH` lookup when the value is not absolute) and verifies that it exists and is executable. If the lookup fails the server logs a fatal error and exits with a non-zero exit code; it does not start serving HTTP. This makes the misconfiguration visible at boot rather than deferring it to the first send (which would otherwise return 500 to the user).
 
@@ -76,6 +77,37 @@ Exit codes follow standard LDA conventions:
 - `0` — success
 - `1` — permanent failure (message will bounce)
 - `75` — temporary failure (MTA will retry; used e.g. if database is locked)
+
+### Thin LDA client (`mymail-lda`)
+
+A separate minimal binary `mymail-lda` (built from `cmd/lda/`) forwards incoming mail to a running mymail server via a UNIX socket instead of accessing SQLite directly. This reduces per-invocation memory from ~14 MB to ~3 MB RSS — important on memory-constrained servers where Postfix may invoke multiple concurrent LDA processes.
+
+```
+mymail-lda -lda-socket /run/mymail/lda.sock
+```
+
+Postfix configuration when using the thin client:
+
+```
+mailbox_command = /usr/local/bin/mymail-lda -lda-socket /run/mymail/lda.sock
+```
+
+The corresponding server must be started with the matching socket path:
+
+```
+mymail -lda-socket /run/mymail/lda.sock -data /var/lib/mymail ...
+```
+
+| Flag           | Default | Description                                     |
+|----------------|---------|-------------------------------------------------|
+| `-lda-socket`  |         | Path to the mymail server LDA socket (required) |
+
+Exit codes are the same as LDA mode:
+- `0` — success (or duplicate)
+- `1` — permanent failure (parse error)
+- `75` — temporary failure (socket unreachable, server busy, or transient error)
+
+If the socket is unreachable (server not running), the client exits `75` so the MTA queues and retries. The existing `-lda` mode remains available as a fallback for deployments that do not run a persistent server process.
 
 ### Import mode (`-import`)
 

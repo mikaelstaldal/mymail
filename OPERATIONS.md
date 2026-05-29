@@ -34,8 +34,10 @@ This guide covers production installation of mymail on a Linux server, including
 ```bash
 git clone https://github.com/mikaelstaldal/mymail.git
 cd mymail
-./build.sh -o /usr/local/bin/mymail
+./build.sh -o /usr/local/bin
 ```
+
+`mymail-lda` is the minimal Local Delivery Agent client (~3 MB). It forwards incoming messages to the running `mymail` server via a UNIX socket, keeping per-delivery memory usage low on memory-constrained servers.
 
 ---
 
@@ -107,7 +109,8 @@ ExecStart=/usr/local/bin/mymail \
     -port 8080 \
     -public-url https://mail.example.com \
     -basic-auth-file ${CREDENTIALS_DIRECTORY}/basic-auth \
-    -sendmail /usr/sbin/sendmail
+    -sendmail /usr/sbin/sendmail \
+    -lda-socket /run/mymail/lda.sock
 
 Restart=on-failure
 RestartSec=1
@@ -117,6 +120,7 @@ NoNewPrivileges=true
 ProtectSystem=full
 PrivateTmp=true
 ReadWritePaths=/var/lib/mymail
+RuntimeDirectory=mymail
 
 [Install]
 WantedBy=multi-user.target
@@ -143,16 +147,18 @@ journalctl -u mymail -f
 
 ## Configure Postfix
 
-mymail acts as a mailbox command: Postfix calls it with `-lda` for each delivered message.
+mymail receives mail via `mymail-lda`, a minimal delivery agent that forwards each message to the running server over a UNIX socket. This keeps per-invocation memory at ~3 MB regardless of how many concurrent deliveries Postfix spawns.
 
 ### Deliver to the mymail user
 
 Add or update the following in `/etc/postfix/main.cf`:
 
 ```
-# Deliver locally to the mymail user via the LDA
-mailbox_command = /usr/local/bin/mymail -lda -data /var/lib/mymail
+# Deliver locally to the mymail user via the thin LDA client
+mailbox_command = /usr/local/bin/mymail-lda -lda-socket /run/mymail/lda.sock
 ```
+
+Because Postfix runs `mailbox_command` as the recipient user (`mymail`), the socket — created by the server under `/run/mymail/` — is accessible without any extra permission changes.
 
 If you want to receive mail for multiple local addresses and route them all to mymail, ensure those addresses are aliased to the `mymail` system user in `/etc/aliases`:
 
@@ -174,7 +180,7 @@ If you use virtual mailboxes (`virtual_mailbox_maps`), you can invoke the LDA vi
 
 ```
 mymail unix  -       n       n       -       -       pipe
-  flags=DRhu user=mymail argv=/usr/local/bin/mymail -lda -data /var/lib/mymail
+  flags=DRhu user=mymail argv=/usr/local/bin/mymail-lda -lda-socket /run/mymail/lda.sock
 ```
 
 And reference that transport in `main.cf`:
@@ -182,6 +188,16 @@ And reference that transport in `main.cf`:
 ```
 virtual_transport = mymail
 ```
+
+### Fallback: direct database mode
+
+If you do not run a persistent `mymail` server (uncommon), the original direct-database LDA mode is still available:
+
+```
+mailbox_command = /usr/local/bin/mymail -lda -data /var/lib/mymail
+```
+
+This requires no socket but uses ~14 MB RSS per invocation and opens SQLite directly.
 
 ### LDA exit codes
 
@@ -295,14 +311,15 @@ Each argument is `<folder>:<format>:<path>`. Supported formats: `mbox`, `maildir
 
 ## Upgrading
 
-1. Build or download the new binary.
+1. Build or download the new binaries.
 2. Stop the service:
    ```bash
    systemctl stop mymail
    ```
-3. Replace the binary:
+3. Replace both binaries:
    ```bash
    install -o root -g root -m 0755 mymail-new /usr/local/bin/mymail
+   install -o root -g root -m 0755 mymail-lda-new /usr/local/bin/mymail-lda
    ```
 4. Start the service — schema migrations are applied automatically on startup:
    ```bash

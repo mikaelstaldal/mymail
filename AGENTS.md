@@ -16,7 +16,10 @@ Update the architecture spec if necessary. Detailed implementation decisions (SQ
 bash build.sh
 
 # Build Go binary only (requires web/static/*.js already compiled)
-go build -tags netgo
+go build -tags netgo .
+
+# Build thin LDA client binary (no SQLite / web assets — minimal memory footprint)
+go build -tags netgo ./cmd/lda/
 
 # Compile TypeScript → web/static/*.js (sources in web/ts/)
 tsc --project web/ts/tsconfig.json

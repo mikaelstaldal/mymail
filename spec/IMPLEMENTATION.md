@@ -629,6 +629,40 @@ Only the `From` address is upserted for incoming mail (To/Cc not auto-added). Lo
 - All other errors: log to stderr, exit `75`.
 
 
+## Thin LDA Client (`cmd/lda`)
+
+Built as a separate binary (`go build -tags netgo ./cmd/lda/`) with no SQLite, ogen, or HTTP server dependencies. Binary size ≈3 MB; peak RSS ≈3 MB regardless of message size (the raw bytes are held in memory only for the duration of the socket write).
+
+### Socket Protocol
+
+The UNIX socket uses a single-message half-duplex protocol over a `SOCK_STREAM` connection:
+
+1. **Client → Server:** raw RFC 5322 message bytes (the full stdin content).
+2. **Client signals end:** half-close with `CloseWrite()` (sends TCP FIN on the write side).
+3. **Server reads** until EOF on the connection (the half-close signals end of input).
+4. **Server processes** the message through the full LDA pipeline (`runCore`).
+5. **Server → Client:** one of three ASCII strings (no newline): `ok`, `parse_error`, or `transient_error`.
+6. **Server closes** the connection; client reads the response then exits.
+
+Response → exit code mapping in the thin client:
+
+| Response          | Exit code | Meaning                         |
+|-------------------|-----------|---------------------------------|
+| `ok`              | 0         | Delivered (or duplicate/drop)   |
+| `parse_error`     | 1         | Permanent failure — will bounce |
+| `transient_error` | 75        | Temporary failure — MTA retries |
+| connection error  | 75        | Socket unreachable — MTA retries |
+| unexpected        | 75        | Safe fallback                   |
+
+The thin client uses a 30-second dial timeout (`net.DialTimeout`); if the server is overloaded and not accepting connections within that window the client exits 75.
+
+### Server Socket Binding
+
+`lda.BindSocket(path)` removes any stale socket file (from a crashed previous run) then calls `net.Listen("unix", path)`. `lda.ServeSocket(ctx, ln, db)` runs `Accept` in a loop; each connection is handled in its own goroutine. When `ctx` is cancelled (server shutdown) the listener is closed and the socket file is removed.
+
+The socket is created with the default umask-derived permissions. The operator is responsible for ensuring the socket directory and/or file permissions allow the MTA delivery user to connect (e.g. shared group membership or a world-accessible containing directory).
+
+
 ## Background Scheduler Implementation
 
 Single background goroutine started on server startup, stopped cleanly via context cancellation on shutdown.
