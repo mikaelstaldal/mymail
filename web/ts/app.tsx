@@ -54,9 +54,26 @@ function App() {
   }, []);
 
   const pollRefreshRef = useRef<() => void>(() => {});
+  const folderSlugRef = useRef<string | null>(null);
+  folderSlugRef.current =
+    route.type === 'inbox' ? 'inbox' :
+    route.type === 'folder' ? route.slug :
+    null;
+  const prevFoldersRef = useRef<Folder[]>([]);
 
   useEffect(() => {
-    const { stop, refresh } = startPolling(setFolders);
+    const { stop, refresh } = startPolling((folders) => {
+      const slug = folderSlugRef.current;
+      if (slug !== null && prevFoldersRef.current.length > 0) {
+        const prev = prevFoldersRef.current.find(f => f.slug === slug);
+        const next = folders.find(f => f.slug === slug);
+        if (prev !== undefined && next !== undefined && next.unread_count > prev.unread_count) {
+          window.dispatchEvent(new CustomEvent('folder-reload'));
+        }
+      }
+      prevFoldersRef.current = folders;
+      setFolders(folders);
+    });
     pollRefreshRef.current = refresh;
     return stop;
   }, []);
