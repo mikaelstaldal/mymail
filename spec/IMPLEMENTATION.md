@@ -274,7 +274,7 @@ Date filtering uses lexicographic string comparison on the stored `date` column 
 
 **SQLite configuration:**
 - Init: sets `PRAGMA journal_mode=WAL` before initializing schema.
-- Server: 5-second busy timeout; additionally sets `cache_size=-8192` (8 MiB page cache), `mmap_size=134217728` (128 MiB mmap), `synchronous=NORMAL`. These pragmas are baked into the DSN so every connection in the pool inherits them. After opening, runs `PRAGMA optimize` once to update query-planner statistics. Connection pool is sized to `GOMAXPROCS` open/idle connections (allowing concurrent reads under WAL).
+- Server: 5-second busy timeout; additionally sets `mmap_size=134217728` (128 MiB mmap), `synchronous=NORMAL`. These pragmas are baked into the DSN so every connection in the pool inherits them. After opening, runs `PRAGMA optimize` once to update query-planner statistics. Connection pool is sized to `GOMAXPROCS` open/idle connections (allowing concurrent reads under WAL).
 - LDA: 30-second busy timeout (`PRAGMA busy_timeout=30000`).
 - Import: 5-second busy timeout (`PRAGMA busy_timeout=5000`).
 

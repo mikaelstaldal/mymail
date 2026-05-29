@@ -116,7 +116,6 @@ func runServer(dataDir, addr string, port int, publicURL, basicAuthFile, basicAu
 	}
 
 	db, err := repository.OpenDB(dbPath, 5000,
-		"cache_size=-8192",
 		"mmap_size=134217728",
 		"synchronous=NORMAL",
 	)
