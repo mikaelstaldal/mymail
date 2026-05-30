@@ -39,6 +39,17 @@ function parseAddrSpecs(header: string): string[] {
   }).filter(Boolean);
 }
 
+function isOwnAddress(addrString: string, identityAddrs: Set<string>): boolean {
+  const spec = parseAddrSpecs(addrString)[0] ?? '';
+  if (identityAddrs.has(spec)) return true;
+  const plusIdx = spec.indexOf('+');
+  const atIdx = spec.indexOf('@');
+  if (plusIdx !== -1 && atIdx !== -1 && plusIdx < atIdx) {
+    return identityAddrs.has(spec.slice(0, plusIdx) + spec.slice(atIdx));
+  }
+  return false;
+}
+
 function displayName(addr: string): string {
   const m = addr.match(/^([^<>]+?)\s*<[^>]+>$/);
   return m ? m[1].trim() : addr.trim();
@@ -618,12 +629,12 @@ export function ComposeForm({ replyId, replyAllId, forwardId, draftId }: Compose
           const replyTo = msg.reply_to_addr.trim();
           const primary = replyTo ? [replyTo] : [msg.from_addr];
           const toFiltered = primary.filter(
-            a => !allIdentityAddrs.has(parseAddrSpecs(a)[0] ?? '')
+            a => !isOwnAddress(a, allIdentityAddrs)
           );
           const originalTo = msg.to_addr ? msg.to_addr.split(',').map(s => s.trim()).filter(Boolean) : [];
           const originalCc = msg.cc_addr ? msg.cc_addr.split(',').map(s => s.trim()).filter(Boolean) : [];
           const ccFiltered = [...originalTo, ...originalCc].filter(
-            a => !allIdentityAddrs.has(parseAddrSpecs(a)[0] ?? '')
+            a => !isOwnAddress(a, allIdentityAddrs)
           );
           setTo(toFiltered);
           setCc(ccFiltered);

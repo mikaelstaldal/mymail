@@ -925,6 +925,16 @@ When inserting a signature into Quill's HTML content model (on compose open or i
 4. Replace each remaining `\n` with `<br>`.
 Line-ending normalization runs first so that delimiter detection reliably matches `-- ` regardless of how the signature was stored.
 
+### Reply-All Own-Identity Filtering
+
+When building the To and Cc fields for Reply-All pre-population, each candidate address is checked against the set of all identity addresses using `isOwnAddress(addrString, identityAddrs)`:
+
+1. Extract the bare addr-spec from `addrString` with `parseAddrSpecs`.
+2. If the result is an exact (case-insensitive) match for any identity address, the candidate is filtered out.
+3. Otherwise, strip any plus-addressing tag: if the addr-spec contains `+` before `@`, compute the base address `local@domain` (everything before `+` concatenated with `@domain`). If this base address matches any identity address, the candidate is filtered out.
+
+This ensures that `alice+newsletters@example.com` is excluded when `alice@example.com` is an identity, matching the behaviour described in `REQUIREMENTS.md`.
+
 ### Draft Auto-Save Logic
 
 - Auto-save fires every 30 seconds.
