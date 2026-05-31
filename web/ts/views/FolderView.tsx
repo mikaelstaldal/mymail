@@ -9,6 +9,7 @@ type Folder = components['schemas']['Folder'];
 type MessageSummary = components['schemas']['MessageSummary'];
 
 const PAGE_SIZE = 50;
+const DRAFTS_ID = 3;
 const TRASH_ID = 4;
 const JUNK_ID = 7;
 // Drafts (3), Scheduled (5), Snoozed (6) cannot be move targets
@@ -96,6 +97,17 @@ export function FolderView({ folder, folders }: FolderViewProps) {
     }
   };
 
+  const handleBulkDiscard = async () => {
+    if (!confirm(`Discard ${selectedIds.size} draft${selectedIds.size === 1 ? '' : 's'}?`)) return;
+    const ids = [...selectedIds];
+    try {
+      await Promise.all(ids.map(id => api.drafts.delete(id)));
+      void load(0);
+    } catch (e) {
+      showToast(e instanceof Error ? e.message : 'Failed to discard drafts');
+    }
+  };
+
   const handleBulkMove = async () => {
     if (!moveTo) return;
     const ids = [...selectedIds];
@@ -175,9 +187,15 @@ export function FolderView({ folder, folders }: FolderViewProps) {
           <button class="btn btn-ghost btn-sm" onClick={() => void handleBulkMark(false)}>
             Mark unread
           </button>
-          <button class="btn btn-danger btn-sm" onClick={() => void handleBulkDelete()}>
-            Delete
-          </button>
+          {folder.id === DRAFTS_ID ? (
+            <button class="btn btn-danger btn-sm" onClick={() => void handleBulkDiscard()}>
+              Discard
+            </button>
+          ) : (
+            <button class="btn btn-danger btn-sm" onClick={() => void handleBulkDelete()}>
+              Delete
+            </button>
+          )}
           <div class="toolbar-sep" />
           <select
             class="move-select"
