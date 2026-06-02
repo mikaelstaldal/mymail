@@ -24,6 +24,13 @@ import (
 // Extended variants (SQLITE_BUSY_RECOVERY, SQLITE_BUSY_SNAPSHOT, …) share this low byte.
 const sqliteBusy = 5
 
+// MaxMessageBytes caps the size of a single inbound RFC 5322 message accepted by
+// the LDA (stdin or socket). The whole raw message is held in memory and stored
+// in the messages.raw BLOB, so an unbounded read would let a hostile or
+// misconfigured MTA exhaust memory / bloat the database. Messages exceeding this
+// limit are rejected as a permanent parse failure (no point retrying).
+const MaxMessageBytes = 64 << 20 // 64 MiB
+
 var errBusyTimeout = errors.New("SQLITE_BUSY timed out after 30s")
 
 // Run terminates the process via os.Exit: 0 success/duplicate/drop, 1 parse failure, 75 transient error.

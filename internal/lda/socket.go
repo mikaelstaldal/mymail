@@ -41,10 +41,17 @@ func ServeSocket(ctx context.Context, ln net.Listener, db *sql.DB) {
 func handleLDAConn(conn net.Conn, db *sql.DB) {
 	defer conn.Close() //nolint:errcheck
 
-	raw, err := io.ReadAll(conn)
+	// Bound the read: a single message must not be able to exhaust memory.
+	// Read one byte past the limit so we can distinguish "at limit" from "over".
+	raw, err := io.ReadAll(io.LimitReader(conn, MaxMessageBytes+1))
 	if err != nil {
 		log.Printf("lda socket: read message: %v", err)
 		conn.Write([]byte("transient_error")) //nolint:errcheck
+		return
+	}
+	if int64(len(raw)) > MaxMessageBytes {
+		log.Printf("lda socket: message exceeds %d bytes, rejecting", MaxMessageBytes)
+		conn.Write([]byte("parse_error")) //nolint:errcheck
 		return
 	}
 

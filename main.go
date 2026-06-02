@@ -70,10 +70,16 @@ func runLDA(dataDir string) {
 		log.Printf("error: open database: %v", err)
 		os.Exit(75)
 	}
-	raw, err := io.ReadAll(os.Stdin)
+	// Bound the read: a single message must not be able to exhaust memory.
+	// Read one byte past the limit so we can distinguish "at limit" from "over".
+	raw, err := io.ReadAll(io.LimitReader(os.Stdin, lda.MaxMessageBytes+1))
 	if err != nil {
 		log.Printf("lda: read stdin: %v", err)
 		os.Exit(75)
+	}
+	if int64(len(raw)) > lda.MaxMessageBytes {
+		log.Printf("lda: message exceeds %d bytes, rejecting", lda.MaxMessageBytes)
+		os.Exit(1)
 	}
 
 	lda.Run(db, raw) // calls os.Exit internally
@@ -180,6 +186,7 @@ func runServer(dataDir, addr string, port int, publicURL, basicAuthFile, basicAu
 		serverOrigin = u.Scheme + "://" + u.Host
 	}
 	var httpHandler http.Handler = mux
+	httpHandler = maxBodyMiddleware(httpHandler)
 	httpHandler = auth.NewCSRF(serverOrigin)(httpHandler)
 	httpHandler = auth.NewBasicAuth(basicAuthFile, basicAuthRealm)(httpHandler)
 	importMapHash, err := web.ImportMapCSPHash(web.Static)
@@ -225,6 +232,22 @@ func runServer(dataDir, addr string, port int, publicURL, basicAuthFile, basicAu
 	if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 		log.Printf("server: %v", err)
 	}
+}
+
+// maxRequestBody is the hard ceiling on the size of an incoming HTTP request
+// body, as documented in openapi.yaml. It guards against memory exhaustion from
+// oversized JSON payloads and disk exhaustion from oversized multipart uploads
+// (parts above MaxMultipartMemory otherwise spill to temp files).
+const maxRequestBody = 32 << 20 // 32 MiB
+
+// maxBodyMiddleware caps every request body at maxRequestBody bytes. When the
+// limit is exceeded, http.MaxBytesReader makes the next Read fail and responds
+// 413 (Request Entity Too Large) if no bytes have been written yet.
+func maxBodyMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		r.Body = http.MaxBytesReader(w, r.Body, maxRequestBody)
+		next.ServeHTTP(w, r)
+	})
 }
 
 // indexFallbackHandler serves files from the embedded static FS by their path;
