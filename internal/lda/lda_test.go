@@ -401,11 +401,15 @@ func TestRunCore_NoMessageID_Generated(t *testing.T) {
 		"Body without Message-Id header\r\n")
 
 	db := openLDATestDB(t)
+	// Seed default identity — its domain is used for generation, not the To: domain.
+	err := repository.SeedIdentity(db, "Test User", "user@myidentity.example")
+	require.NoError(t, err)
+
 	code := runCore(db, raw)
 	assert.Equal(t, 0, code)
 
 	var msgID string
-	err := db.QueryRow(`SELECT message_id FROM messages WHERE from_addr = 'sender@example.com'`).Scan(&msgID)
+	err = db.QueryRow(`SELECT message_id FROM messages WHERE from_addr = 'sender@example.com'`).Scan(&msgID)
 	assert.NoError(t, err, "message not found")
 	// Generated ID must be stored without angle brackets, consistent with how
 	// ParseMessage strips them from real Message-Id headers via stripAngles.
@@ -413,7 +417,27 @@ func TestRunCore_NoMessageID_Generated(t *testing.T) {
 	// is also stripped to "uuid@domain", which would not match "<uuid@domain>".
 	assert.NotContains(t, msgID, "<")
 	assert.NotContains(t, msgID, ">")
-	assert.Contains(t, msgID, "@domain.org")
+	assert.Contains(t, msgID, "@myidentity.example")
+	assert.NotContains(t, msgID, "@domain.org")
+}
+
+func TestRunCore_NoMessageID_NoIdentity_FallbackLocalhost(t *testing.T) {
+	raw := []byte("From: sender@example.com\r\n" +
+		"To: recip@domain.org\r\n" +
+		"Subject: No ID, no identity\r\n" +
+		"Date: Mon, 01 Jan 2024 12:00:00 +0000\r\n" +
+		"\r\n" +
+		"Body without Message-Id header and no identity in DB\r\n")
+
+	db := openLDATestDB(t)
+	// No identity seeded — expect localhost fallback.
+	code := runCore(db, raw)
+	assert.Equal(t, 0, code)
+
+	var msgID string
+	err := db.QueryRow(`SELECT message_id FROM messages WHERE from_addr = 'sender@example.com'`).Scan(&msgID)
+	assert.NoError(t, err, "message not found")
+	assert.Contains(t, msgID, "@localhost")
 }
 
 // --- detectSpam unit tests ---

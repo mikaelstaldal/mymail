@@ -610,7 +610,7 @@ Run before spam detection and filter evaluation. Use `INSERT OR IGNORE` on the `
 
 ### Message-ID Generation in LDA Mode
 
-When an incoming message lacks a `Message-ID` header, generate one as `<uuid@domain>` where `domain` is extracted from the first address in the `To` header. If the `To` header is absent or unparseable, fall back to `localhost`.
+When an incoming message lacks a `Message-ID` header, generate one as `<uuid@domain>` where `domain` is the host part of the default identity's address. If no default identity exists, use the first identity ordered by position then id. If no identities exist at all, fall back to `localhost`. The stored `message_id` value is stored without angle brackets (consistent with how `ParseMessage` strips them from real `Message-Id` headers).
 
 ### Database Insertion
 

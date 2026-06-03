@@ -66,11 +66,17 @@ func runCore(db *sql.DB, rawBytes []byte) int {
 
 	if pm.MessageID == nil {
 		domain := "localhost"
-		if pm.ToAddr != "" {
-			if addrs, err := mail.ParseAddressList(pm.ToAddr); err == nil && len(addrs) > 0 {
-				if at := strings.LastIndex(addrs[0].Address, "@"); at >= 0 {
-					domain = addrs[0].Address[at+1:]
-				}
+		var addr string
+		if err := withRetry(func() error {
+			return db.QueryRowContext(ctx, `
+				SELECT COALESCE(
+					(SELECT address FROM identities WHERE is_default = 1 LIMIT 1),
+					(SELECT address FROM identities ORDER BY position ASC, id ASC LIMIT 1),
+					''
+				)`).Scan(&addr)
+		}); err == nil {
+			if at := strings.LastIndex(addr, "@"); at >= 0 {
+				domain = addr[at+1:]
 			}
 		}
 		generated := fmt.Sprintf("%s@%s", uuid.New().String(), domain)
