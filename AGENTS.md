@@ -5,7 +5,7 @@ A self-hosted personal (single-user) email client with backend storage, REST API
 ## Specification
 
 Adhere to the functional requirements in `spec/REQUIREMENTS.md` and the architecture in `spec/ARCHITECTURE.md`.
-Update the architecture spec if necessary. Detailed implementation decisions (SQL schema, endpoint semantics, edge cases) are in `spec/IMPLEMENTATION.md`.
+Update those when functionality is added or changed.
 
 ## Build & Development Commands
 
@@ -82,7 +82,7 @@ The database must be created by `-init` before any other mode will start.
 - Pure-Go SQLite (`modernc.org/sqlite`) — no CGO.
 - Single file at `<data>/mymail.sqlite`.
 - Schema versioned via `PRAGMA user_version`; migrations applied on server startup.
-- **Current schema version: 4** (see `spec/IMPLEMENTATION.md` for full DDL).
+- **Current schema version: 4** (see `internal/repository/db.go` for full DDL).
 - FTS5 content table (`messages_fts`) kept in sync with `messages` via triggers.
 - All timestamps stored as UTC RFC 3339 strings.
 - `messages.references` column name collides with SQL reserved word — always quote it as `"references"` in queries.
@@ -137,7 +137,7 @@ Each layer has its own test scope:
 - **Handler:** integration-test HTTP endpoints by wiring the full `handler → service → repository` stack against an in-memory DB. Use `net/http/httptest`.
 - **LDA:** test the parsing pipeline end-to-end by feeding raw RFC 5322 messages and asserting what lands in the DB.
 - **Assertions:** use `github.com/stretchr/testify/assert` and `github.com/stretchr/testify/require` for all test assertions.
-- **FTS search input sanitization:** `spec/IMPLEMENTATION.md` requires a unit test verifying that `"`, non-ASCII characters, and FTS5 operator keywords (`AND`, `OR`, `NOT`, `NEAR`) are all treated as literals.
+- **FTS search input sanitization:** a unit test verifying that `"`, non-ASCII characters, and FTS5 operator keywords (`AND`, `OR`, `NOT`, `NEAR`) are all treated as literals.
 
 Place tests in `_test.go` files alongside the package under test. Use table-driven tests for endpoint/edge-case coverage.
 
