@@ -392,7 +392,7 @@ Any attribute not listed above is stripped. Any value not matching the listed ru
 
 `color`, `background-color`, `font-family`, `font-size`, `font-style`, `font-variant`, `font-weight`, `letter-spacing`, `line-height`, `text-align`, `text-decoration`, `text-indent`, `vertical-align`, `white-space`, `word-spacing`, `border`, `border-color`, `border-style`, `border-width`, `border-collapse`, `border-spacing`, `padding`, `margin`, `width`, `max-width`, `height`
 
-**Explicitly forbidden regardless of property name:** any value containing `url(`, `expression(`, `-moz-binding`, or a CSS comment (`/*`).
+**Value validation (regardless of property name):** declaration values are checked against an allowlist, not a blocklist. A value is stripped if it contains a backslash CSS escape (e.g. `u\72l(`), a CSS comment (`/*`, `*/`), or any functional notation other than the color functions `rgb()`/`rgba()`/`hsl()`/`hsla()`. This blocks `url()`, `expression()`, `image-set()`, `-moz-binding`, and similar — including escape- and comment-obfuscated spellings — and also rejects stray/unbalanced parentheses.
 
 **Not allowed:** `background` (shorthand), `position`, `display`, `overflow`, `content`, `z-index`, `opacity`, and all vendor-prefixed properties.
 

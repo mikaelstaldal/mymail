@@ -38,6 +38,72 @@ func TestStyleURLStripped(t *testing.T) {
 	assert.NotContains(t, out, "url(")
 }
 
+// TestCSSValueAllowed exercises the value allowlist directly. bluemonday lower-
+// cases and decodes hex escapes (\28) before invoking this handler, so the
+// inputs here are written as the handler would receive them.
+func TestCSSValueAllowed(t *testing.T) {
+	allowed := []string{
+		"red",
+		"#ff0000",
+		"rgb(1, 2, 3)",
+		"rgba(0,0,0,.5)",
+		"hsl(120, 50%, 50%)",
+		"hsla(120,50%,50%,.5)",
+		"arial, sans-serif",
+		"12px",
+		"1em",
+		"100%",
+	}
+	forbidden := []string{
+		// Disallowed functions, however spelled.
+		"url(http://evil.com/x)",
+		"expression(alert(1))",
+		"image-set(http://evil.com/x)",
+		// Non-hex backslash escape that the browser decodes back to url().
+		`u\rl(http://evil.com/x)`,
+		// CSS comments used to split tokens.
+		"red /* x */",
+		"u/**/rl(http://evil.com/x)",
+		// Stray / unbalanced parentheses.
+		"(",
+		")",
+		"foo)",
+	}
+	for _, v := range allowed {
+		assert.True(t, cssValueAllowed(v), "expected allowed: %q", v)
+	}
+	for _, v := range forbidden {
+		assert.False(t, cssValueAllowed(v), "expected forbidden: %q", v)
+	}
+}
+
+// TestStyleEscapeBypassStripped verifies that CSS escape sequences cannot be
+// used to smuggle a forbidden function (e.g. url()) past the value allowlist.
+func TestStyleEscapeBypassStripped(t *testing.T) {
+	cases := []string{
+		// hex escape decoded to "url(" by bluemonday before the handler runs
+		`<p style="color: u\72l(http://evil.com/x)">text</p>`,
+		`<p style="color: url\28 http://evil.com/x\29">text</p>`,
+		// non-hex backslash escape decoded to "url(" by the browser
+		`<p style="color: u\rl(http://evil.com/x)">text</p>`,
+		// comment-split function name
+		`<p style="color: u/**/rl(http://evil.com/x)">text</p>`,
+	}
+	for _, c := range cases {
+		out := SanitizeHTML(c)
+		assert.NotContains(t, out, "evil.com", "input: %s", c)
+		assert.NotContains(t, out, "url", "input: %s", c)
+	}
+}
+
+// TestStyleColorFunctionsPreserved confirms the value allowlist keeps the
+// legitimate color functions that real email styling relies on.
+func TestStyleColorFunctionsPreserved(t *testing.T) {
+	out := SanitizeHTML(`<p style="color: rgb(255, 0, 0); background-color: rgba(0,0,0,.5)">text</p>`)
+	assert.Contains(t, out, "rgb(255, 0, 0)")
+	assert.Contains(t, out, "rgba(0,0,0,.5)")
+}
+
 func TestReSrc(t *testing.T) {
 	allowed := []string{
 		"https://example.com/image.png",

@@ -854,13 +854,15 @@ Use `github.com/microcosm-cc/bluemonday` with a custom email-appropriate policy.
 
 **Per-element attribute configuration:** bluemonday's `AllowAttrs(...).OnElements(...)` form is used to scope attributes to the elements where they are valid. The policy mirrors the per-element matrix in REQUIREMENTS.md → HTML Sanitization (e.g. `colspan`/`rowspan` only on `td`/`th`, `align` only on table-related elements plus headings, paragraphs, and `div`). A unit test verifies that disallowed combinations (e.g. `<p colspan="2">`) are stripped.
 
-**CSS property matching:** bluemonday's CSS handling is regex-based. After parsing the `style` attribute into declarations, each declaration's property name is checked for **exact** match against the allowlist (so `background` does not match `background-color`). The forbidden value patterns below are checked against the raw declaration value before the property allowlist. The residual risk is that a sufficiently obscure CSS comment or encoding trick could slip past the regex; the consequence is at most an unexpected style being applied inside the sandboxed iframe (no script execution, no network access). Mitigations beyond regex matching are not added because no maintained Go CSS parser library matches the dependency profile (CGO-free, single binary). This decision is documented here so it is auditable.
+**CSS property matching:** After parsing the `style` attribute into declarations, each declaration's property name is checked for **exact** match against the allowlist (so `background` does not match `background-color`). Note that no `url()`-accepting property (`background`, `background-image`, `list-style-image`, `cursor`, …) is on the allowlist, so external-resource references have no property to attach to even before value filtering runs.
 
-**Forbidden value patterns** (checked before the property allowlist):
-- `url(`
-- `expression(`
-- `-moz-binding`
-- `/*` (CSS comment)
+**CSS value validation (allowlist, not blocklist):** Each declaration value is validated against an allowlist rather than a substring blocklist, because a blocklist is fragile against CSS escapes (`u\72l(`, `url\28`) and comment-splitting (`u/**/rl(`) that the browser later decodes back into a forbidden token. bluemonday lower-cases the value and decodes hex escapes (e.g. `\28` → `(`) before the value handler runs; the handler then:
+
+- rejects any value containing a backslash (a residual non-hex CSS escape) — no allowlisted property needs one;
+- rejects any value containing a CSS comment (`/*` or `*/`);
+- permits functional notation only for an explicit set of color functions (`rgb`, `rgba`, `hsl`, `hsla`): well-formed calls to those are stripped and the value is rejected if any parenthesis remains. This blocks `url(`, `expression(`, `image-set(`, etc. regardless of spelling, and also rejects unbalanced/stray parentheses.
+
+The consequence of any value that slips through is at most an unexpected style applied inside the sandboxed iframe (no script execution; network access additionally gated by the iframe CSP). A full CSS value parser is not added because no maintained Go CSS library matches the dependency profile (CGO-free, single binary); this decision is documented here so it is auditable.
 
 **Links:** Add `target="_blank"` and `rel="noopener noreferrer"` to all `<a href>` elements during sanitization.
 

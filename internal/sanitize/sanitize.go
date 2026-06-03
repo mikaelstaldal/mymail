@@ -21,7 +21,11 @@ var (
 		"padding", "margin", "width", "max-width", "height",
 	}
 
-	cssForbiddenSubstrings = []string{"url(", "expression(", "-moz-binding", "/*"}
+	// reAllowedCSSFunc matches a single, well-formed (non-nested) call to one
+	// of the only CSS functional notations permitted in style values — the
+	// color functions, e.g. "rgb(1, 2, 3)" or "rgba(0,0,0,.5)". Everything
+	// else (notably url() and expression()) is rejected by cssValueAllowed.
+	reAllowedCSSFunc = regexp.MustCompile(`\b(?:rgb|rgba|hsl|hsla)\([^()]*\)`)
 
 	reNumeric = regexp.MustCompile(`^[0-9]+$`)
 	reAlign   = regexp.MustCompile(`^(left|right|center|justify)$`)
@@ -45,13 +49,26 @@ var allAllowedElements = []string{
 	"table", "tbody", "td", "tfoot", "th", "thead", "tr", "ul",
 }
 
+// cssValueAllowed validates a CSS declaration value against an allowlist
+// rather than a substring blocklist. bluemonday decodes hex escapes (\28) and
+// lower-cases the value before calling this handler, but it leaves non-hex
+// escapes (u\rl(...)) and comments intact — both of which a substring
+// blocklist would miss while the browser still decodes them. We therefore
+// reject any value containing a backslash escape or comment outright (no
+// allowlisted property needs either), and permit functional notation only for
+// an explicit set of color functions, blocking url(), expression(), and the
+// like regardless of how they are spelled.
 func cssValueAllowed(val string) bool {
-	for _, forbidden := range cssForbiddenSubstrings {
-		if strings.Contains(val, forbidden) {
-			return false
-		}
+	if strings.ContainsRune(val, '\\') {
+		return false
 	}
-	return true
+	if strings.Contains(val, "/*") || strings.Contains(val, "*/") {
+		return false
+	}
+	// Strip the well-formed allowed function calls, then reject the value if
+	// any parenthesis remains — that signals a disallowed or malformed call.
+	stripped := reAllowedCSSFunc.ReplaceAllString(val, "")
+	return !strings.ContainsAny(stripped, "()")
 }
 
 // NewEmailPolicy constructs a bluemonday policy appropriate for rendering
