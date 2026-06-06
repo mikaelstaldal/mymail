@@ -52,8 +52,8 @@ github.com/mattn/go-runewidth v0.0.19 h1:v++JhqYnZuu5jSKrk9RbgF5v4CGUjqRfBm05byF
 github.com/mattn/go-runewidth v0.0.19/go.mod h1:XBkDxAl56ILZc9knddidhrOlY5R/pDhgLpndooCuJAs=
 github.com/microcosm-cc/bluemonday v1.0.27 h1:MpEUotklkwCSLeH+Qdx1VJgNqLlpY2KXwXFM08ygZfk=
 github.com/microcosm-cc/bluemonday v1.0.27/go.mod h1:jFi9vgW+H7c3V0lb6nR74Ib/DIB5OBs92Dimizgw2cA=
-github.com/mikaelstaldal/go-server-common v1.1.0 h1:NXzSc2CrSpkvrCvELvUWSW7ExU3WDgLXl7OE9T46CCM=
-github.com/mikaelstaldal/go-server-common v1.1.0/go.mod h1:Gq5rq3qkiELXJdAUZj0a1Tp8UQPuGyebPz3vRdPcgb0=
+github.com/mikaelstaldal/go-server-common v1.2.0 h1:mZgy1im1njDBSlOZQPD8QBpftCinBGdaNXC07jh38zs=
+github.com/mikaelstaldal/go-server-common v1.2.0/go.mod h1:C7tS+gUM7RJc++zv/1O/6mk/Pedy7BMoAgKxG1klmt0=
 github.com/ncruces/go-strftime v1.0.0 h1:HMFp8mLCTPp341M/ZnA4qaf7ZlsbTc+miZjCLOFAw7w=
 github.com/ncruces/go-strftime v1.0.0/go.mod h1:Fwc5htZGVVkseilnfgOVb9mKy6w1naJmn9CehxcKcls=
 github.com/ogen-go/ogen v1.20.3 h1:1tvJuJE0BnQ7Nukd6ykiTOP0ucfL0yrAjHUg3S1DCQk=

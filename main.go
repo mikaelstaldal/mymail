@@ -18,6 +18,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/mikaelstaldal/go-server-common/csrf"
 	"github.com/mikaelstaldal/mymail/internal/api"
 	"github.com/mikaelstaldal/mymail/internal/auth"
 	"github.com/mikaelstaldal/mymail/internal/handler"
@@ -187,7 +188,7 @@ func runServer(dataDir, addr string, port int, publicURL, basicAuthFile, basicAu
 	}
 	var httpHandler http.Handler = mux
 	httpHandler = maxBodyMiddleware(httpHandler)
-	httpHandler = auth.NewCSRF(serverOrigin)(httpHandler)
+	httpHandler = csrf.Middleware(serverOrigin)(httpHandler)
 	httpHandler = auth.NewBasicAuth(basicAuthFile, basicAuthRealm)(httpHandler)
 	importMapHash, err := web.ImportMapCSPHash(web.Static)
 	if err != nil {

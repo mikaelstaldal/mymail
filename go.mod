@@ -10,7 +10,7 @@ require (
 	github.com/google/uuid v1.6.0
 	github.com/jaytaylor/html2text v0.0.0-20260303211410-1a4bdc82ecec
 	github.com/microcosm-cc/bluemonday v1.0.27
-	github.com/mikaelstaldal/go-server-common v1.1.0
+	github.com/mikaelstaldal/go-server-common v1.2.0
 	github.com/ogen-go/ogen v1.20.3
 	github.com/stretchr/testify v1.11.1
 	golang.org/x/net v0.52.0
