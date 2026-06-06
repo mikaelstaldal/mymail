@@ -184,7 +184,7 @@ func runServer(dataDir, addr string, port int, publicURL, basicAuthFile, basicAu
 		log.Fatalf("error: %v", err)
 	}
 	var httpHandler http.Handler = mux
-	httpHandler = maxBodyMiddleware(httpHandler)
+	httpHandler = http.MaxBytesHandler(httpHandler, maxRequestBody)
 	httpHandler = csrf.Middleware(serverOrigin)(httpHandler)
 	httpHandler = auth.NewBasicAuth(basicAuthFile, basicAuthRealm)(httpHandler)
 	importMapHash, err := commonweb.ImportMapCSPHash(web.Static)
@@ -242,16 +242,6 @@ func runServer(dataDir, addr string, port int, publicURL, basicAuthFile, basicAu
 // oversized JSON payloads and disk exhaustion from oversized multipart uploads
 // (parts above MaxMultipartMemory otherwise spill to temp files).
 const maxRequestBody = 32 << 20 // 32 MiB
-
-// maxBodyMiddleware caps every request body at maxRequestBody bytes. When the
-// limit is exceeded, http.MaxBytesReader makes the next Read fail and responds
-// 413 (Request Entity Too Large) if no bytes have been written yet.
-func maxBodyMiddleware(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		r.Body = http.MaxBytesReader(w, r.Body, maxRequestBody)
-		next.ServeHTTP(w, r)
-	})
-}
 
 // indexFallbackHandler serves files from the embedded static FS by their path;
 // anything not found falls back to index.html for hash-based client-side routing.
