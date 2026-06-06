@@ -8,7 +8,6 @@ import (
 	"io/fs"
 	"log"
 	"net/http"
-	"net/url"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -19,6 +18,8 @@ import (
 	"time"
 
 	"github.com/mikaelstaldal/go-server-common/csrf"
+	"github.com/mikaelstaldal/go-server-common/httputil"
+	commonweb "github.com/mikaelstaldal/go-server-common/web"
 	"github.com/mikaelstaldal/mymail/internal/api"
 	"github.com/mikaelstaldal/mymail/internal/auth"
 	"github.com/mikaelstaldal/mymail/internal/handler"
@@ -178,23 +179,24 @@ func runServer(dataDir, addr string, port int, publicURL, basicAuthFile, basicAu
 	mux.Handle("/api/v1/", ogenServer)
 	mux.HandleFunc("/", indexFallbackHandler())
 
-	serverOrigin := fmt.Sprintf("http://%s:%d", addr, port)
-	if publicURL != "" {
-		u, err := url.Parse(publicURL)
-		if err != nil || u.Host == "" {
-			log.Fatalf("invalid -public-url %q: must be a full URL like https://example.com", publicURL)
-		}
-		serverOrigin = u.Scheme + "://" + u.Host
+	serverOrigin, err := csrf.ResolveServerOrigin(publicURL, addr, port)
+	if err != nil {
+		log.Fatalf("error: %v", err)
 	}
 	var httpHandler http.Handler = mux
 	httpHandler = maxBodyMiddleware(httpHandler)
 	httpHandler = csrf.Middleware(serverOrigin)(httpHandler)
 	httpHandler = auth.NewBasicAuth(basicAuthFile, basicAuthRealm)(httpHandler)
-	importMapHash, err := web.ImportMapCSPHash(web.Static)
+	importMapHash, err := commonweb.ImportMapCSPHash(web.Static)
 	if err != nil {
 		log.Fatalf("error: compute importmap CSP hash: %v", err)
 	}
-	httpHandler = auth.NewSecurityHeaders(importMapHash)(httpHandler)
+	csp := "default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self' " + importMapHash
+	httpHandler = httputil.SecurityHeaders(httputil.SecurityHeadersOptions{
+		CSP:            csp,
+		ReferrerPolicy: "same-origin",
+		HSTS:           "max-age=31536000",
+	})(httpHandler)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()

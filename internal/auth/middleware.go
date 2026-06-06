@@ -39,22 +39,3 @@ func NewBasicAuth(htpasswdPath, realm string) func(http.Handler) http.Handler {
 		})
 	}
 }
-
-// NewSecurityHeaders returns a middleware that adds standard security headers.
-// importMapHash is the precomputed 'sha256-…' CSP token for the inline
-// importmap in index.html (see web.ImportMapCSPHash); it is added to
-// script-src so the importmap is allowed without 'unsafe-inline'.
-func NewSecurityHeaders(importMapHash string) func(http.Handler) http.Handler {
-	csp := "default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self' " + importMapHash
-	return func(next http.Handler) http.Handler {
-		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			h := w.Header()
-			h.Set("X-Content-Type-Options", "nosniff")
-			h.Set("X-Frame-Options", "DENY")
-			h.Set("Referrer-Policy", "same-origin")
-			h.Set("Content-Security-Policy", csp)
-			h.Set("Strict-Transport-Security", "max-age=31536000")
-			next.ServeHTTP(w, r)
-		})
-	}
-}

@@ -10,11 +10,11 @@ require (
 	github.com/google/uuid v1.6.0
 	github.com/jaytaylor/html2text v0.0.0-20260303211410-1a4bdc82ecec
 	github.com/microcosm-cc/bluemonday v1.0.27
-	github.com/mikaelstaldal/go-server-common v1.2.0
+	github.com/mikaelstaldal/go-server-common v1.4.0
 	github.com/ogen-go/ogen v1.20.3
 	github.com/stretchr/testify v1.11.1
-	golang.org/x/net v0.52.0
-	golang.org/x/text v0.35.0
+	golang.org/x/net v0.54.0
+	golang.org/x/text v0.37.0
 	modernc.org/sqlite v1.48.1
 )
 
@@ -47,10 +47,10 @@ require (
 	github.com/ssor/bom v0.0.0-20170718123548-6386211fdfcf // indirect
 	go.uber.org/multierr v1.11.0 // indirect
 	go.uber.org/zap v1.27.1 // indirect
-	golang.org/x/crypto v0.49.0 // indirect
+	golang.org/x/crypto v0.52.0 // indirect
 	golang.org/x/exp v0.0.0-20251023183803-a4bb9ffd2546 // indirect
 	golang.org/x/sync v0.20.0 // indirect
-	golang.org/x/sys v0.42.0 // indirect
+	golang.org/x/sys v0.45.0 // indirect
 	gopkg.in/check.v1 v1.0.0-20201130134442-10cb98267c6c // indirect
 	gopkg.in/yaml.v2 v2.4.0 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
@@ -58,3 +58,5 @@ require (
 	modernc.org/mathutil v1.7.1 // indirect
 	modernc.org/memory v1.11.0 // indirect
 )
+
+replace github.com/mikaelstaldal/go-server-common => ../go-server-common
