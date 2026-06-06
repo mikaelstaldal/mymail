@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'preact/hooks';
+import { getMycalUrl } from '../../util/config.js';
 
 type Density = 'compact' | 'normal' | 'relaxed';
 type BodyView = 'html' | 'text';
@@ -23,6 +24,8 @@ export function Preferences() {
   );
   const [notifEnabled, setNotifEnabled] = useState(() => localStorage.getItem('notificationsEnabled') === 'true');
   const [notifMessage, setNotifMessage] = useState<string | null>(null);
+  const serverMycalUrl = window.__serverConfig?.mycalUrl ?? '';
+  const [mycalUrl, setMycalUrl] = useState(() => getMycalUrl());
 
   useEffect(() => {
     // Auto-disable if notification permission was revoked since last visit
@@ -51,6 +54,16 @@ export function Preferences() {
   function changeBodyView(value: BodyView) {
     setBodyView(value);
     localStorage.setItem('preferredBodyView', value);
+  }
+
+  function changeMycalUrl(value: string) {
+    const trimmed = value.trim();
+    setMycalUrl(trimmed);
+    if (trimmed) {
+      localStorage.setItem('mycalUrl', trimmed);
+    } else {
+      localStorage.removeItem('mycalUrl');
+    }
   }
 
   async function toggleNotifications(enable: boolean) {
@@ -155,6 +168,25 @@ export function Preferences() {
           />
           <span class="pref-toggle-track" />
         </label>
+      </div>
+
+      <div class="pref-row">
+        <div class="pref-row-info">
+          <div class="pref-label">MyCal URL</div>
+          <div class="pref-description">
+            Base URL of your MyCal instance. When set, .ics email attachments can be imported directly into MyCal.
+            {serverMycalUrl && !localStorage.getItem('mycalUrl') && (
+              <span> Auto-configured from server.</span>
+            )}
+          </div>
+        </div>
+        <input
+          type="url"
+          class="pref-text-input"
+          value={mycalUrl}
+          placeholder={serverMycalUrl || 'http://localhost:8081'}
+          onInput={e => changeMycalUrl((e.target as HTMLInputElement).value)}
+        />
       </div>
     </div>
   );

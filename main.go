@@ -2,12 +2,16 @@ package main
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/base64"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"io"
 	"io/fs"
 	"log"
 	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -113,6 +117,49 @@ func runImport(dataDir string, mappingArgs []string) {
 	os.Exit(code)
 }
 
+// deriveMycalURL returns the MyCal base URL derived from publicURL by replacing
+// its path with "/mycal". Returns empty string if publicURL has no path segment.
+func deriveMycalURL(publicURL string) string {
+	if publicURL == "" {
+		return ""
+	}
+	u, err := url.Parse(publicURL)
+	if err != nil || strings.Trim(u.Path, "/") == "" {
+		return ""
+	}
+	u.Path = "/mycal"
+	u.RawQuery = ""
+	u.Fragment = ""
+	return u.String()
+}
+
+// serverConfigScript returns an inline JS snippet that sets window.__serverConfig.
+func serverConfigScript(mycalURL string) string {
+	b, _ := json.Marshal(mycalURL)
+	return "window.__serverConfig={mycalUrl:" + string(b) + "};"
+}
+
+// inlineScriptCSPHash returns the CSP sha256 hash token for an inline script.
+func inlineScriptCSPHash(script string) string {
+	h := sha256.Sum256([]byte(script))
+	return "'sha256-" + base64.StdEncoding.EncodeToString(h[:]) + "'"
+}
+
+// buildIndexHTML reads index.html from the embedded FS and, when configScript is
+// non-empty, injects it as an inline <script> before </head>.
+func buildIndexHTML(staticFS fs.FS, configScript string) ([]byte, error) {
+	content, err := fs.ReadFile(staticFS, "static/index.html")
+	if err != nil {
+		return nil, err
+	}
+	if configScript == "" {
+		return content, nil
+	}
+	modified := strings.Replace(string(content), "</head>",
+		"<script>"+configScript+"</script>\n</head>", 1)
+	return []byte(modified), nil
+}
+
 func runServer(dataDir, addr string, port int, publicURL, basicAuthFile, basicAuthRealm, sendmailBin, ldaSocket string) {
 	if port < 1 || port > 65535 {
 		log.Fatalf("invalid port: %d", port)
@@ -175,9 +222,24 @@ func runServer(dataDir, addr string, port int, publicURL, basicAuthFile, basicAu
 		log.Fatalf("error: create API server: %v", err)
 	}
 
+	importMapHash, err := commonweb.ImportMapCSPHash(web.Static)
+	if err != nil {
+		log.Fatalf("error: compute importmap CSP hash: %v", err)
+	}
+
+	var configScript string
+	if mycalURL := deriveMycalURL(publicURL); mycalURL != "" {
+		configScript = serverConfigScript(mycalURL)
+		log.Printf("mymail: MyCal URL auto-configured as %s", mycalURL)
+	}
+	indexHTML, err := buildIndexHTML(web.Static, configScript)
+	if err != nil {
+		log.Fatalf("error: build index.html: %v", err)
+	}
+
 	mux := http.NewServeMux()
 	mux.Handle("/api/v1/", ogenServer)
-	mux.HandleFunc("/", indexFallbackHandler())
+	mux.HandleFunc("/", indexFallbackHandler(indexHTML))
 
 	serverOrigin, err := csrf.ResolveServerOrigin(publicURL, addr, port)
 	if err != nil {
@@ -187,11 +249,11 @@ func runServer(dataDir, addr string, port int, publicURL, basicAuthFile, basicAu
 	httpHandler = http.MaxBytesHandler(httpHandler, maxRequestBody)
 	httpHandler = csrf.Middleware(serverOrigin)(httpHandler)
 	httpHandler = auth.NewBasicAuth(basicAuthFile, basicAuthRealm)(httpHandler)
-	importMapHash, err := commonweb.ImportMapCSPHash(web.Static)
-	if err != nil {
-		log.Fatalf("error: compute importmap CSP hash: %v", err)
-	}
+
 	csp := "default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self' " + importMapHash
+	if configScript != "" {
+		csp += " " + inlineScriptCSPHash(configScript)
+	}
 	httpHandler = httputil.SecurityHeaders(httputil.SecurityHeadersOptions{
 		CSP:            csp,
 		ReferrerPolicy: "same-origin",
@@ -244,8 +306,9 @@ func runServer(dataDir, addr string, port int, publicURL, basicAuthFile, basicAu
 const maxRequestBody = 32 << 20 // 32 MiB
 
 // indexFallbackHandler serves files from the embedded static FS by their path;
-// anything not found falls back to index.html for hash-based client-side routing.
-func indexFallbackHandler() http.HandlerFunc {
+// anything not found falls back to indexHTML for hash-based client-side routing.
+// indexHTML is the (possibly config-injected) content of index.html.
+func indexFallbackHandler(indexHTML []byte) http.HandlerFunc {
 	staticSub, err := fs.Sub(web.Static, "static")
 	if err != nil {
 		panic(fmt.Sprintf("web: sub static: %v", err))
@@ -253,21 +316,21 @@ func indexFallbackHandler() http.HandlerFunc {
 	fileServer := http.FileServer(http.FS(staticSub))
 	return func(w http.ResponseWriter, r *http.Request) {
 		// Probe the sub-FS: strip the leading slash to get the bare file path.
+		// Skip index.html so it is always served from the (possibly modified) indexHTML.
 		fsPath := strings.TrimPrefix(r.URL.Path, "/")
-		f, err := staticSub.Open(fsPath)
-		if err == nil {
-			stat, serr := f.Stat()
-			_ = f.Close()
-			if serr == nil && !stat.IsDir() {
-				fileServer.ServeHTTP(w, r)
-				return
+		if fsPath != "" && fsPath != "index.html" {
+			f, err := staticSub.Open(fsPath)
+			if err == nil {
+				stat, serr := f.Stat()
+				_ = f.Close()
+				if serr == nil && !stat.IsDir() {
+					fileServer.ServeHTTP(w, r)
+					return
+				}
 			}
 		}
-		// Serve index.html for all unmatched paths (hash routing).
-		// Use "/" so the file server finds index.html via directory lookup — passing
-		// "/index.html" directly would trigger Go's built-in redirect of that path to "./".
-		r2 := r.Clone(r.Context())
-		r2.URL.Path = "/"
-		fileServer.ServeHTTP(w, r2)
+		// Serve index.html for root and all unmatched paths (hash routing).
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		_, _ = w.Write(indexHTML)
 	}
 }

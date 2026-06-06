@@ -674,6 +674,29 @@ html, body {
   font-size: 11.5px;
 }
 
+.import-cal-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 10px;
+  background: var(--list-bg);
+  border: 1px solid var(--list-border);
+  border-radius: var(--border-radius);
+  color: var(--text-primary);
+  font-size: 12.5px;
+  cursor: pointer;
+  transition: background 0.1s;
+  margin-left: 4px;
+}
+.import-cal-btn:hover:not(:disabled) { background: var(--list-item-hover); }
+.import-cal-btn:disabled { opacity: 0.7; cursor: default; }
+
+.import-cal-error {
+  color: var(--color-danger, #c0392b);
+  font-size: 12px;
+  margin-left: 4px;
+}
+
 .body-toggle {
   display: flex;
   align-items: center;
@@ -1556,4 +1579,20 @@ html, body {
   background: var(--list-item-active-bg);
   color: var(--btn-primary);
   font-weight: 600;
+}
+
+.pref-text-input {
+  padding: 6px 10px;
+  border: 1px solid var(--field-border);
+  border-radius: var(--border-radius);
+  font-size: 13px;
+  color: var(--text-primary);
+  background: var(--topbar-bg);
+  font-family: inherit;
+  min-width: 220px;
+}
+.pref-text-input:focus {
+  outline: none;
+  box-shadow: var(--focus-ring);
+  border-color: var(--btn-primary);
 }

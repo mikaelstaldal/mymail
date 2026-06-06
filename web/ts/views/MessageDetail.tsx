@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from 'preact/hooks';
 import { api, NotFoundError } from '../api/client.js';
 import { navigate } from '../router.js';
 import { showToast } from '../util/toast.js';
+import { getMycalUrl } from '../util/config.js';
 import { formatDateFull, formatDateAdaptive } from '../util/date.js';
 import type { components } from '../api/types.js';
 
@@ -23,6 +24,14 @@ function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+type AttachmentMeta = components['schemas']['AttachmentMeta'];
+
+function isIcs(a: AttachmentMeta): boolean {
+  return a.content_type === 'text/calendar'
+    || a.content_type === 'application/ics'
+    || a.filename.toLowerCase().endsWith('.ics');
 }
 
 function senderName(addr: string): string {
@@ -135,6 +144,7 @@ export function MessageDetail({ id, folders }: MessageDetailProps) {
   const [rescheduleOpen, setRescheduleOpen] = useState(false);
   const [rescheduleValue, setRescheduleValue] = useState('');
   const [actionInFlight, setActionInFlight] = useState(false);
+  const [icsImportStatus, setIcsImportStatus] = useState<Record<number, 'loading' | 'success' | string>>({});
   const msgDetailRef = useRef<HTMLDivElement>(null);
   const threadStripRef = useRef<HTMLDivElement>(null);
   const [threadHeight, setThreadHeight] = useState<number | null>(null);
@@ -378,6 +388,37 @@ export function MessageDetail({ id, folders }: MessageDetailProps) {
     }
   };
 
+  const importToMycal = async (attachmentId: number) => {
+    const base = getMycalUrl().replace(/\/$/, '');
+    if (!base) return;
+    setIcsImportStatus(prev => ({ ...prev, [attachmentId]: 'loading' }));
+    try {
+      const dataResp = await fetch(`api/v1/attachments/${attachmentId}`);
+      if (!dataResp.ok) throw new Error(`Failed to fetch attachment (${dataResp.status})`);
+      const blob = await dataResp.blob();
+      const importResp = await fetch(`${base}/api/v1/import-single`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'text/calendar' },
+        body: blob,
+      });
+      if (importResp.status === 201) {
+        setIcsImportStatus(prev => ({ ...prev, [attachmentId]: 'success' }));
+      } else {
+        let errMsg = `Error ${importResp.status}`;
+        try {
+          const body = await importResp.json() as { error?: string };
+          if (body.error) errMsg = body.error;
+        } catch { /* ignore */ }
+        setIcsImportStatus(prev => ({ ...prev, [attachmentId]: errMsg }));
+      }
+    } catch (e) {
+      setIcsImportStatus(prev => ({
+        ...prev,
+        [attachmentId]: e instanceof Error ? e.message : 'Import failed',
+      }));
+    }
+  };
+
   if (loading) return <div class="msg-detail-status">Loading…</div>;
   if (notFound) return <div class="msg-detail-status msg-detail-not-found">Not found</div>;
   if (error) return <div class="msg-detail-status msg-detail-error">{error}</div>;
@@ -602,18 +643,34 @@ export function MessageDetail({ id, folders }: MessageDetailProps) {
           <div class="msg-detail-field msg-detail-attachments">
             <span class="msg-detail-label">Attachments</span>
             <ul class="attachment-list">
-              {msg.attachments.map(a => (
-                <li key={a.id}>
-                  <a
-                    href={`api/v1/attachments/${a.id}`}
-                    download={a.filename}
-                    class="attachment-link"
-                  >
-                    📎 {a.filename}
-                    <span class="attachment-size">({formatBytes(a.size)})</span>
-                  </a>
-                </li>
-              ))}
+              {msg.attachments.map(a => {
+                const status = icsImportStatus[a.id];
+                return (
+                  <li key={a.id}>
+                    <a
+                      href={`api/v1/attachments/${a.id}`}
+                      download={a.filename}
+                      class="attachment-link"
+                    >
+                      📎 {a.filename}
+                      <span class="attachment-size">({formatBytes(a.size)})</span>
+                    </a>
+                    {isIcs(a) && getMycalUrl() && (
+                      <button
+                        class="import-cal-btn"
+                        disabled={status === 'loading' || status === 'success'}
+                        onClick={() => void importToMycal(a.id)}
+                        title="Import this event into MyCal"
+                      >
+                        {status === 'loading' ? 'Importing…' : status === 'success' ? 'Imported' : '📅 Import to Calendar'}
+                      </button>
+                    )}
+                    {isIcs(a) && status && status !== 'loading' && status !== 'success' && (
+                      <span class="import-cal-error">{status}</span>
+                    )}
+                  </li>
+                );
+              })}
             </ul>
           </div>
         )}
