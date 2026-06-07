@@ -170,7 +170,9 @@ export function MessageDetail({ id, folders }: MessageDetailProps) {
       setMsg(m);
       setLoading(false);
       if (!m.read) {
-        void api.messages.patch(id, { read: true });
+        void api.messages.patch(id, { read: true }).then(() => {
+          window.dispatchEvent(new CustomEvent('folder-reload'));
+        });
       }
     }).catch(e => {
       if (cancelled) return;
@@ -210,7 +212,9 @@ export function MessageDetail({ id, folders }: MessageDetailProps) {
       // Only apply if the user hasn't clicked a different entry while waiting.
       if (expandedThreadIdRef.current !== entryId) return;
       if (!m.read) {
-        void api.messages.patch(entryId, { read: true });
+        void api.messages.patch(entryId, { read: true }).then(() => {
+          window.dispatchEvent(new CustomEvent('folder-reload'));
+        });
         setThread(t => t ? {
           ...t,
           items: t.items.map(i => i.id === entryId ? { ...i, read: true } : i),
