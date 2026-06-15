@@ -731,6 +731,7 @@ html, body {
   display: flex;
   flex-direction: column;
   min-height: 0;
+  max-width: 900px;
 }
 
 .body-iframe {
