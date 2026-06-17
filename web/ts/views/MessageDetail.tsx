@@ -138,6 +138,9 @@ export function MessageDetail({ id, folders }: MessageDetailProps) {
   const expandedThreadIdRef = useRef<number | null>(null);
   const [expandedMsg, setExpandedMsg] = useState<MessageDetailType | null>(null);
   const [expandedLoading, setExpandedLoading] = useState(false);
+  const [showHeaders, setShowHeaders] = useState(false);
+  const [allHeaders, setAllHeaders] = useState<string | null>(null);
+  const [headersLoading, setHeadersLoading] = useState(false);
   const [moveTo, setMoveTo] = useState('');
   const [snoozeOpen, setSnoozeOpen] = useState(false);
   const [snoozeValue, setSnoozeValue] = useState('');
@@ -162,6 +165,8 @@ export function MessageDetail({ id, folders }: MessageDetailProps) {
     setExternalImages(false);
     setActionInFlight(false);
     setThreadHeight(null);
+    setShowHeaders(false);
+    setAllHeaders(null);
     setMoveTo('');
     setSnoozeOpen(false);
 
@@ -246,6 +251,21 @@ export function MessageDetail({ id, folders }: MessageDetailProps) {
     };
     window.addEventListener('mousemove', onMove);
     window.addEventListener('mouseup', onUp);
+  };
+
+  const handleToggleHeaders = async () => {
+    if (showHeaders) { setShowHeaders(false); return; }
+    setShowHeaders(true);
+    if (allHeaders !== null) return;
+    setHeadersLoading(true);
+    try {
+      const text = await api.messages.getHeaders(msg!.id);
+      setAllHeaders(text);
+    } catch (_) {
+      setAllHeaders('(failed to load headers)');
+    } finally {
+      setHeadersLoading(false);
+    }
   };
 
   const folderSlug = (fid: number) =>
@@ -565,6 +585,14 @@ export function MessageDetail({ id, folders }: MessageDetailProps) {
           </span>
         )}
         <span class="ml-auto" />
+        {folderId !== DRAFTS_ID && (
+          <button
+            class={`btn btn-ghost btn-sm${showHeaders ? ' active' : ''}`}
+            onClick={() => void handleToggleHeaders()}
+          >
+            All headers
+          </button>
+        )}
         <span class="msg-folder-indicator">{folders.find(f => f.id === folderId)?.name ?? ''}</span>
       </div>
 
@@ -679,6 +707,15 @@ export function MessageDetail({ id, folders }: MessageDetailProps) {
           </div>
         )}
       </div>
+
+      {showHeaders && (
+        <div class="msg-headers-panel">
+          {headersLoading
+            ? <div class="msg-headers-loading">Loading…</div>
+            : <pre class="msg-headers-pre">{allHeaders}</pre>
+          }
+        </div>
+      )}
 
       {hasBoth && (
         <div class="body-toggle">

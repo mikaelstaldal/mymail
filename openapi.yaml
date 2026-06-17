@@ -1294,6 +1294,31 @@ paths:
         'default':
           $ref: '#/components/responses/Default'
 
+  /messages/{id}/headers:
+    get:
+      summary: Get message headers
+      description: |
+        Returns the raw RFC 5322 header block (everything before the first blank line).
+        Returns 404 for drafts, which have no stored raw message.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Raw RFC 5322 headers as plain text.
+          content:
+            text/plain:
+              schema:
+                type: string
+                format: binary
+        '404':
+          $ref: '#/components/responses/NotFound'
+        'default':
+          $ref: '#/components/responses/Default'
+
   /messages/{id}/body:
     get:
       summary: Get message HTML body

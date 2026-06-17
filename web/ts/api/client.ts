@@ -179,6 +179,17 @@ export const api = {
 
     cancelSnooze: (id: number) =>
       request<{ id: number; folder_id: number }>('DELETE', `/messages/${id}/snooze`),
+
+    getHeaders: async (id: number): Promise<string> => {
+      const res = await fetchWithRetry(BASE + `/messages/${id}/headers`, { method: 'GET' });
+      if (res.status === 401) { window.location.reload(); throw new Error('Unauthorized'); }
+      if (res.status === 404) throw new NotFoundError();
+      if (!res.ok) {
+        const data = await res.json() as { error?: string };
+        throw new Error(data.error ?? res.statusText);
+      }
+      return res.text();
+    },
   },
 
   scheduled: {

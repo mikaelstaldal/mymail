@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -9,6 +10,32 @@ import (
 	"github.com/mikaelstaldal/mymail/internal/api"
 	"github.com/mikaelstaldal/mymail/internal/repository"
 )
+
+func (h *Handler) MessagesIDHeadersGet(ctx context.Context, params api.MessagesIDHeadersGetParams) (api.MessagesIDHeadersGetRes, error) {
+	id := int64(params.ID)
+
+	raw, err := h.messages.GetRawMessage(ctx, id)
+	if errors.Is(err, repository.ErrNotFound) {
+		return &api.Error{Error: "message not found"}, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+
+	if raw == nil {
+		return &api.Error{Error: "no headers for draft"}, nil
+	}
+
+	headerBlock, _, ok := bytes.Cut(raw, []byte("\r\n\r\n"))
+	if !ok {
+		headerBlock, _, ok = bytes.Cut(raw, []byte("\n\n"))
+		if !ok {
+			headerBlock = raw
+		}
+	}
+
+	return &api.MessagesIDHeadersGetOK{Data: bytes.NewReader(headerBlock)}, nil
+}
 
 func (h *Handler) MessagesIDBodyGet(ctx context.Context, params api.MessagesIDBodyGetParams) (api.MessagesIDBodyGetRes, error) {
 	msg, err := h.messages.GetMessageDetail(ctx, int64(params.ID))
