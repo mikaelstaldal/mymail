@@ -60,6 +60,7 @@ export function FolderView({ folder, folders }: FolderViewProps) {
     try {
       await api.folders.markAllRead(folder.id);
       setItems(prev => prev.map(m => ({ ...m, read: true })));
+      window.dispatchEvent(new CustomEvent('folder-reload'));
     } catch (e) {
       showToast(e instanceof Error ? e.message : 'Failed to mark all read');
     }
