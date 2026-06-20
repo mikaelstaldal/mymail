@@ -31,8 +31,8 @@ func ResolveSendmailPath(configured string) (string, error) {
 
 // SendFields holds all compose fields and the resolved identity needed to build a MIME message.
 type SendFields struct {
-	FromName    string   // identity display name
-	FromAddr    string   // identity email address (bare addr-spec)
+	FromName    string // identity display name
+	FromAddr    string // identity email address (bare addr-spec)
 	ToAddr      string
 	CcAddr      string
 	BccAddr     string
@@ -51,7 +51,7 @@ type SendFields struct {
 func BuildMIMEMessage(fields SendFields, attachments []model.DBAttachment) ([]byte, bool, string, error) {
 	// Sanitize outgoing HTML and detect external images
 	if fields.BodyHTML != "" {
-		fields.BodyHTML = sanitize.SanitizeHTML(fields.BodyHTML)
+		fields.BodyHTML = sanitize.HTML(fields.BodyHTML)
 	}
 	hasExternalImages := sanitize.HasExternalImages(fields.BodyHTML)
 

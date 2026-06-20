@@ -96,8 +96,8 @@ func NewEmailPolicy() *bluemonday.Policy {
 
 var policy = NewEmailPolicy()
 
-// SanitizeHTML sanitizes html using the email policy.
-func SanitizeHTML(h string) string {
+// HTML sanitizes html using the email policy.
+func HTML(h string) string {
 	return policy.Sanitize(h)
 }
 

@@ -265,7 +265,7 @@ func sanitizeForSend(rawHTML string) (sanitizedHTML string, hasExtImg bool) {
 	if rawHTML == "" {
 		return "", false
 	}
-	sanitizedHTML = sanitize.SanitizeHTML(rawHTML)
+	sanitizedHTML = sanitize.HTML(rawHTML)
 	hasExtImg = sanitize.HasExternalImages(sanitizedHTML)
 	return sanitizedHTML, hasExtImg
 }
@@ -281,7 +281,7 @@ func (h *Handler) executeSend(
 ) (int64, error) {
 	// Sanitize body_html once here for both MIME construction and DB storage.
 	if v.bodyHTML != "" {
-		v.bodyHTML = sanitize.SanitizeHTML(v.bodyHTML)
+		v.bodyHTML = sanitize.HTML(v.bodyHTML)
 	}
 
 	fields := service.SendFields{

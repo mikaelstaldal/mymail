@@ -108,7 +108,7 @@ func ParseMessage(raw []byte) (*model.ParsedMessage, error) {
 		attachments = []model.DBAttachment{}
 	}
 
-	bodyHTML := sanitize.SanitizeHTML(sanitize.ResolveCID(rawHTML, state.cidMap, state.cidCT))
+	bodyHTML := sanitize.HTML(sanitize.ResolveCID(rawHTML, state.cidMap, state.cidCT))
 
 	bodyText := ""
 	if state.bodyText != nil {

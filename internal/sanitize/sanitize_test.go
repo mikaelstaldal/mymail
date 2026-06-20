@@ -7,34 +7,34 @@ import (
 )
 
 func TestScriptStripped(t *testing.T) {
-	out := SanitizeHTML(`<p>hello</p><script>alert(1)</script>`)
+	out := HTML(`<p>hello</p><script>alert(1)</script>`)
 	assert.NotContains(t, out, "<script")
 	assert.Contains(t, out, "hello")
 }
 
 func TestDataImagePreserved(t *testing.T) {
 	src := `data:image/png;base64,iVBORw0KGgo=`
-	out := SanitizeHTML(`<img src="` + src + `" alt="test">`)
+	out := HTML(`<img src="` + src + `" alt="test">`)
 	assert.Contains(t, out, src)
 }
 
 func TestJavascriptSrcStripped(t *testing.T) {
-	out := SanitizeHTML(`<img src="javascript:alert(1)" alt="x">`)
+	out := HTML(`<img src="javascript:alert(1)" alt="x">`)
 	assert.NotContains(t, out, "javascript:")
 }
 
 func TestColspanAllowedOnTD(t *testing.T) {
-	out := SanitizeHTML(`<table><tr><td colspan="2">cell</td></tr></table>`)
+	out := HTML(`<table><tr><td colspan="2">cell</td></tr></table>`)
 	assert.Contains(t, out, `colspan="2"`)
 }
 
 func TestColspanStrippedOnP(t *testing.T) {
-	out := SanitizeHTML(`<p colspan="2">text</p>`)
+	out := HTML(`<p colspan="2">text</p>`)
 	assert.NotContains(t, out, "colspan")
 }
 
 func TestStyleURLStripped(t *testing.T) {
-	out := SanitizeHTML(`<p style="background: url(http://evil.com/x.png)">text</p>`)
+	out := HTML(`<p style="background: url(http://evil.com/x.png)">text</p>`)
 	assert.NotContains(t, out, "url(")
 }
 
@@ -90,7 +90,7 @@ func TestStyleEscapeBypassStripped(t *testing.T) {
 		`<p style="color: u/**/rl(http://evil.com/x)">text</p>`,
 	}
 	for _, c := range cases {
-		out := SanitizeHTML(c)
+		out := HTML(c)
 		assert.NotContains(t, out, "evil.com", "input: %s", c)
 		assert.NotContains(t, out, "url", "input: %s", c)
 	}
@@ -99,7 +99,7 @@ func TestStyleEscapeBypassStripped(t *testing.T) {
 // TestStyleColorFunctionsPreserved confirms the value allowlist keeps the
 // legitimate color functions that real email styling relies on.
 func TestStyleColorFunctionsPreserved(t *testing.T) {
-	out := SanitizeHTML(`<p style="color: rgb(255, 0, 0); background-color: rgba(0,0,0,.5)">text</p>`)
+	out := HTML(`<p style="color: rgb(255, 0, 0); background-color: rgba(0,0,0,.5)">text</p>`)
 	assert.Contains(t, out, "rgb(255, 0, 0)")
 	assert.Contains(t, out, "rgba(0,0,0,.5)")
 }
@@ -156,12 +156,12 @@ func TestReSrc(t *testing.T) {
 }
 
 func TestSVGDataURIStripped(t *testing.T) {
-	out := SanitizeHTML(`<img src="data:image/svg+xml;base64,PHN2Zy8+" alt="x">`)
+	out := HTML(`<img src="data:image/svg+xml;base64,PHN2Zy8+" alt="x">`)
 	assert.NotContains(t, out, "svg+xml")
 }
 
 func TestLinksGetTargetBlank(t *testing.T) {
-	out := SanitizeHTML(`<a href="https://example.com">link</a>`)
+	out := HTML(`<a href="https://example.com">link</a>`)
 	assert.Contains(t, out, `target="_blank"`)
 	// bluemonday emits noreferrer before noopener
 	assert.Contains(t, out, "noreferrer")
