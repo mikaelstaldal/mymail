@@ -3,180 +3,37 @@ package repository
 import (
 	"database/sql"
 	"fmt"
-	"net/url"
 	"os"
-	"path/filepath"
-	"strings"
 
-	_ "modernc.org/sqlite"
+	"github.com/mikaelstaldal/go-server-common/sqlite"
 )
+
+// migrations lists the schema versions in order: migrations[0] takes the
+// database from user_version 0 to 1, migrations[1] from 1 to 2, and so on.
+// Append a new schemaVN slice here to add a migration.
+var migrations = [][]string{
+	schemaV1,
+	schemaV2,
+	schemaV3,
+	schemaV4,
+}
 
 // OpenDB opens the SQLite database at path, enables foreign keys, sets the
 // busy_timeout pragma (0 = skip), applies any extraPragmas, and runs pending
 // schema migrations. Pragmas are baked into the DSN so every connection in
 // the pool inherits them automatically.
 func OpenDB(path string, busyTimeout int, extraPragmas ...string) (*sql.DB, error) {
-	params := url.Values{}
-	params.Add("_pragma", "foreign_keys=on")
-	if busyTimeout > 0 {
-		params.Add("_pragma", fmt.Sprintf("busy_timeout=%d", busyTimeout))
-	}
-	for _, p := range extraPragmas {
-		params.Add("_pragma", p)
-	}
-	// If path already contains query params (e.g. in-memory URIs used in tests),
-	// append with "&" rather than "?" to avoid a double-separator.
-	sep := "?"
-	if strings.Contains(path, "?") {
-		sep = "&"
-	}
-	dsn := path + sep + params.Encode()
-
-	db, err := sql.Open("sqlite", dsn)
-	if err != nil {
-		return nil, fmt.Errorf("open database: %w", err)
-	}
-
-	if err := InitSchema(db); err != nil {
-		db.Close()
-		return nil, err
-	}
-
-	return db, nil
+	return sqlite.Open(path, busyTimeout, migrations, extraPragmas...)
 }
 
 // InitSchema applies pending schema migrations using PRAGMA user_version.
-// Each if-block is independent so multiple migrations can apply in one startup.
 func InitSchema(db *sql.DB) error {
-	var version int
-	if err := db.QueryRow("PRAGMA user_version").Scan(&version); err != nil {
-		return fmt.Errorf("read user_version: %w", err)
-	}
-
-	if version < 1 {
-		// WAL mode must be set before schema initialization and outside a transaction.
-		if _, err := db.Exec("PRAGMA journal_mode = WAL"); err != nil {
-			return fmt.Errorf("set WAL mode: %w", err)
-		}
-
-		tx, err := db.Begin()
-		if err != nil {
-			return fmt.Errorf("begin migration to v1: %w", err)
-		}
-		defer tx.Rollback()
-
-		for _, stmt := range schemaV1 {
-			if _, err := tx.Exec(stmt); err != nil {
-				preview := stmt
-				if len(preview) > 60 {
-					preview = preview[:60]
-				}
-				return fmt.Errorf("schema v1 %q: %w", preview, err)
-			}
-		}
-
-		// Best-effort atomicity: PRAGMA user_version inside a transaction is
-		// committed together with the DDL on most SQLite versions.
-		if _, err := tx.Exec("PRAGMA user_version = 1"); err != nil {
-			return fmt.Errorf("set user_version = 1: %w", err)
-		}
-
-		if err := tx.Commit(); err != nil {
-			return fmt.Errorf("commit migration to v1: %w", err)
-		}
-	}
-
-	if version < 2 {
-		tx, err := db.Begin()
-		if err != nil {
-			return fmt.Errorf("begin migration to v2: %w", err)
-		}
-		defer tx.Rollback()
-
-		for _, stmt := range schemaV2 {
-			if _, err := tx.Exec(stmt); err != nil {
-				preview := stmt
-				if len(preview) > 60 {
-					preview = preview[:60]
-				}
-				return fmt.Errorf("schema v2 %q: %w", preview, err)
-			}
-		}
-
-		if _, err := tx.Exec("PRAGMA user_version = 2"); err != nil {
-			return fmt.Errorf("set user_version = 2: %w", err)
-		}
-
-		if err := tx.Commit(); err != nil {
-			return fmt.Errorf("commit migration to v2: %w", err)
-		}
-	}
-
-	if version < 3 {
-		tx, err := db.Begin()
-		if err != nil {
-			return fmt.Errorf("begin migration to v3: %w", err)
-		}
-		defer tx.Rollback()
-
-		for _, stmt := range schemaV3 {
-			if _, err := tx.Exec(stmt); err != nil {
-				preview := stmt
-				if len(preview) > 60 {
-					preview = preview[:60]
-				}
-				return fmt.Errorf("schema v3 %q: %w", preview, err)
-			}
-		}
-
-		if _, err := tx.Exec("PRAGMA user_version = 3"); err != nil {
-			return fmt.Errorf("set user_version = 3: %w", err)
-		}
-
-		if err := tx.Commit(); err != nil {
-			return fmt.Errorf("commit migration to v3: %w", err)
-		}
-	}
-
-	if version < 4 {
-		tx, err := db.Begin()
-		if err != nil {
-			return fmt.Errorf("begin migration to v4: %w", err)
-		}
-		defer tx.Rollback()
-
-		for _, stmt := range schemaV4 {
-			if _, err := tx.Exec(stmt); err != nil {
-				preview := stmt
-				if len(preview) > 60 {
-					preview = preview[:60]
-				}
-				return fmt.Errorf("schema v4 %q: %w", preview, err)
-			}
-		}
-
-		if _, err := tx.Exec("PRAGMA user_version = 4"); err != nil {
-			return fmt.Errorf("set user_version = 4: %w", err)
-		}
-
-		if err := tx.Commit(); err != nil {
-			return fmt.Errorf("commit migration to v4: %w", err)
-		}
-	}
-
-	return nil
+	return sqlite.Migrate(db, migrations)
 }
 
-// CreateDataDir creates the data directory with mode 0700 and sets the
-// database file permissions to 0600 after creation (init mode only).
+// CreateDataDir creates the parent directory of dbPath with mode 0700.
 func CreateDataDir(dbPath string) error {
-	dir := filepath.Dir(dbPath)
-	if err := os.MkdirAll(dir, 0700); err != nil {
-		return fmt.Errorf("create data directory: %w", err)
-	}
-	// Chmod is a no-op if the file doesn't exist yet; caller must re-apply after
-	// sql.Open creates the file.
-	return nil
+	return sqlite.CreateDataDir(dbPath)
 }
 
 // CheckDBExists returns an error if the database file at path does not exist.
