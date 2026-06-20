@@ -330,7 +330,10 @@ func indexFallbackHandler(indexHTML []byte) http.HandlerFunc {
 	if err != nil {
 		panic(fmt.Sprintf("web: sub static: %v", err))
 	}
-	fileServer := http.FileServer(http.FS(staticSub))
+	staticHandler, err := httputil.StaticHandler(staticSub)
+	if err != nil {
+		panic(fmt.Sprintf("web: static handler: %v", err))
+	}
 	return func(w http.ResponseWriter, r *http.Request) {
 		// Probe the sub-FS: strip the leading slash to get the bare file path.
 		// Skip index.html so it is always served from the (possibly modified) indexHTML.
@@ -341,13 +344,15 @@ func indexFallbackHandler(indexHTML []byte) http.HandlerFunc {
 				stat, serr := f.Stat()
 				_ = f.Close()
 				if serr == nil && !stat.IsDir() {
-					fileServer.ServeHTTP(w, r)
+					// StaticHandler adds Cache-Control, ETag, gzip and 304 handling.
+					staticHandler.ServeHTTP(w, r)
 					return
 				}
 			}
 		}
 		// Serve index.html for root and all unmatched paths (hash routing).
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		w.Header().Set("Cache-Control", "no-cache")
 		_, _ = w.Write(indexHTML)
 	}
 }
