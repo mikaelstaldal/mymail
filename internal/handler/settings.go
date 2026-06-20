@@ -9,12 +9,6 @@ import (
 	"github.com/mikaelstaldal/mymail/internal/repository"
 )
 
-// ── Health ────────────────────────────────────────────────────────────────────
-
-func (h *Handler) HealthGet(_ context.Context) (*api.HealthGetOK, error) {
-	return &api.HealthGetOK{Status: api.HealthGetOKStatusOk}, nil
-}
-
 // ── Filters ───────────────────────────────────────────────────────────────────
 
 func (h *Handler) FiltersGet(ctx context.Context) (*api.FiltersGetOK, error) {

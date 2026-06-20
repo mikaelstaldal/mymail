@@ -436,7 +436,7 @@ External images in email bodies are blocked by the CSP (no `https:` in `img-src`
 
 Optional HTTP Basic Auth over all endpoints (API + static UI). Passwords stored as bcrypt hashes in an htpasswd file. If not configured, all requests are accepted without authentication (loopback-only deployments).
 
-When authentication is required and credentials are missing or invalid, all endpoints (except `GET /api/v1/health`) respond with `401 Unauthorized` and `WWW-Authenticate: Basic realm="<realm>"` where `<realm>` is the `-basic-auth-realm` flag value.
+When authentication is required and credentials are missing or invalid, all endpoints respond with `401 Unauthorized` and `WWW-Authenticate: Basic realm="<realm>"` where `<realm>` is the `-basic-auth-realm` flag value.
 
 ### CSRF Protection
 

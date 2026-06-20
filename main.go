@@ -22,11 +22,11 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/mikaelstaldal/go-server-common/auth"
 	"github.com/mikaelstaldal/go-server-common/csrf"
 	"github.com/mikaelstaldal/go-server-common/httputil"
 	commonweb "github.com/mikaelstaldal/go-server-common/web"
 	"github.com/mikaelstaldal/mymail/internal/api"
-	"github.com/mikaelstaldal/mymail/internal/auth"
 	"github.com/mikaelstaldal/mymail/internal/handler"
 	"github.com/mikaelstaldal/mymail/internal/lda"
 	"github.com/mikaelstaldal/mymail/internal/repository"
@@ -166,6 +166,16 @@ func runServer(dataDir, addr string, port int, publicURL, basicAuthFile, basicAu
 		log.Fatalf("invalid port: %d", port)
 	}
 
+	var authMiddleware func(http.Handler) http.Handler
+	if basicAuthFile != "" {
+		htpasswd, err := auth.LoadHtpasswd(basicAuthFile)
+		if err != nil {
+			log.Fatalf("load htpasswd: %v", err)
+		}
+		authMiddleware = htpasswd.Middleware(basicAuthRealm)
+		log.Printf("basic authentication enabled")
+	}
+
 	dbPath := filepath.Join(dataDir, "mymail.sqlite")
 	if err := repository.CheckDBExists(dbPath); err != nil {
 		log.Fatalf("error: %v", err)
@@ -258,7 +268,9 @@ func runServer(dataDir, addr string, port int, publicURL, basicAuthFile, basicAu
 		ReferrerPolicy: "same-origin",
 		HSTS:           "max-age=31536000",
 	})(httpHandler)
-	httpHandler = auth.NewBasicAuth(basicAuthFile, basicAuthRealm)(httpHandler)
+	if authMiddleware != nil {
+		httpHandler = authMiddleware(httpHandler)
+	}
 	httpHandler = http.MaxBytesHandler(httpHandler, maxRequestBody)
 
 	ctx, cancel := context.WithCancel(context.Background())

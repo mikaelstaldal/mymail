@@ -105,8 +105,6 @@ User-created folders have `id >= 100`.
 
 Base path: `/api/v1`. Full contract in `openapi.yaml`. Error format: `{"error": "message"}`. Max request body: 32 MiB. Bulk endpoints cap at 1000 message IDs.
 
-`GET /api/v1/health` is exempt from authentication.
-
 ### Web UI (TypeScript + Preact)
 
 - TypeScript sources in `web/ts/`; compiled to `web/static/` by `tsc` — no bundler.

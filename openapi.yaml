@@ -4,7 +4,7 @@ info:
   description: |
     REST API for mymail — a self-hosted personal email client.
 
-    **Authentication:** When `-basic-auth-file` is configured, all endpoints except `GET /health`
+    **Authentication:** When `-basic-auth-file` is configured, all endpoints 
     require HTTP Basic Auth. Missing or invalid credentials return `401 Unauthorized` with
     `WWW-Authenticate: Basic realm="<realm>"`. The `401` response is not individually listed on
     each endpoint but applies globally to all authenticated endpoints.
@@ -2483,29 +2483,5 @@ paths:
           description: Deleted
         '404':
           $ref: '#/components/responses/NotFound'
-        'default':
-          $ref: '#/components/responses/Default'
-
-  # ── Health ─────────────────────────────────────────────────────────────────
-
-  /health:
-    get:
-      summary: Liveness check
-      description: |
-        Returns 200 when the server is ready to serve requests. Intended for reverse proxy health
-        checks and container readiness probes. Does not require authentication. Does not perform a
-        database query — it only checks that the HTTP server is running.
-      responses:
-        '200':
-          description: OK
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  status:
-                    type: string
-                    enum: [ok]
-                required: [status]
         'default':
           $ref: '#/components/responses/Default'
