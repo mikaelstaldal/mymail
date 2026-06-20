@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -246,9 +247,7 @@ func runServer(dataDir, addr string, port int, publicURL, basicAuthFile, basicAu
 		log.Fatalf("error: %v", err)
 	}
 	var httpHandler http.Handler = mux
-	httpHandler = http.MaxBytesHandler(httpHandler, maxRequestBody)
 	httpHandler = csrf.Middleware(serverOrigin)(httpHandler)
-	httpHandler = auth.NewBasicAuth(basicAuthFile, basicAuthRealm)(httpHandler)
 
 	csp := "default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self' " + importMapHash
 	if configScript != "" {
@@ -259,6 +258,8 @@ func runServer(dataDir, addr string, port int, publicURL, basicAuthFile, basicAu
 		ReferrerPolicy: "same-origin",
 		HSTS:           "max-age=31536000",
 	})(httpHandler)
+	httpHandler = auth.NewBasicAuth(basicAuthFile, basicAuthRealm)(httpHandler)
+	httpHandler = http.MaxBytesHandler(httpHandler, maxRequestBody)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -275,10 +276,14 @@ func runServer(dataDir, addr string, port int, publicURL, basicAuthFile, basicAu
 	scheduler := service.NewScheduler(db, sendmailPath, contactRepo)
 	scheduler.Start(ctx)
 
-	listenAddr := fmt.Sprintf("%s:%d", addr, port)
+	serverAddr := fmt.Sprintf("%s:%d", addr, port)
 	srv := &http.Server{
-		Addr:    listenAddr,
-		Handler: httpHandler,
+		Addr:              serverAddr,
+		Handler:           httpHandler,
+		ReadHeaderTimeout: 2 * time.Second,
+		ReadTimeout:       5 * time.Second,
+		WriteTimeout:      20 * time.Second,
+		IdleTimeout:       time.Minute,
 	}
 
 	sigCh := make(chan os.Signal, 1)
@@ -293,9 +298,9 @@ func runServer(dataDir, addr string, port int, publicURL, basicAuthFile, basicAu
 		srv.Shutdown(shutdownCtx) //nolint:errcheck
 	}()
 
-	log.Printf("mymail listening on %s", listenAddr)
-	if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-		log.Printf("server: %v", err)
+	log.Printf("Starting server on %s", serverAddr)
+	if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+		log.Printf("Failed to start server: %v", err)
 	}
 }
 
