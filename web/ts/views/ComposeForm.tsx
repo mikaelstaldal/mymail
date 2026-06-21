@@ -55,6 +55,11 @@ function displayName(addr: string): string {
   return m ? m[1].trim() : addr.trim();
 }
 
+function addrSpec(addr: string): string {
+  const m = addr.match(/<([^>]+)>/);
+  return m ? m[1].trim() : addr.trim();
+}
+
 function signatureToHtml(sig: string): string {
   const normalized = sig.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
   const lines = normalized.split('\n');
@@ -278,7 +283,7 @@ function AddressField({ label, tags, onTagsChange, extra }: AddressFieldProps) {
       <div class="cf-autocomplete-wrap">
         <div class="cf-tags-input" onClick={() => inputRef.current?.focus()}>
           {tags.map((t, i) => (
-            <span key={i} class="cf-addr-tag">
+            <span key={i} class="cf-addr-tag" title={addrSpec(t)}>
               {displayName(t) || t}
               <button type="button" onClick={() => removeTag(i)} aria-label="Remove">×</button>
             </span>
