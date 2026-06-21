@@ -1,6 +1,7 @@
 package lda
 
 import (
+	"mime"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -163,4 +164,37 @@ func TestParseMessage_NoDate(t *testing.T) {
 	pm, err := ParseMessage(raw)
 	require.NoError(t, err)
 	assert.Nil(t, pm.Date)
+}
+
+func TestDecodeHeader(t *testing.T) {
+	cases := []struct {
+		name    string
+		raw     string
+		decoded string
+	}{
+		{
+			name:    "Only address",
+			raw:     "sender@example.com",
+			decoded: "sender@example.com",
+		},
+		{
+			name:    "Name and address",
+			raw:     "John Doe <sender@example.com>",
+			decoded: "John Doe <sender@example.com>",
+		},
+		{
+			name:    "Strange",
+			raw:     "=?utf-8?b?TWFzc2FnZWtsaW5pa2VuIE5vcnJ0w6RsamUgLSBCYW5nw6VyZHNnYXRhbiAy?= =?utf-8?b?QSwgTm9ycnTDpGxqZQ==?= <noreply@transactional.bokadirekt.se>",
+			decoded: "Massagekliniken Norrtälje - Bangårdsgatan 2A, Norrtälje <noreply@transactional.bokadirekt.se>",
+		},
+	}
+
+	dec := new(mime.WordDecoder)
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			decoded := decodeAddrHeader(dec, tc.raw)
+			assert.Equal(t, tc.decoded, decoded)
+		})
+	}
 }
