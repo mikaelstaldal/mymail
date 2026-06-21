@@ -9,6 +9,7 @@ import (
 	"regexp"
 	"strings"
 	"time"
+	"unicode"
 
 	oas "github.com/mikaelstaldal/mymail/internal/api"
 	"github.com/mikaelstaldal/mymail/internal/model"
@@ -1183,11 +1184,118 @@ func (r *MessageRepository) MarkNotJunk(ctx context.Context, id int64) (model.DB
 	return r.GetMessageDetail(ctx, id)
 }
 
+// searchTimeout bounds a single search query. Must stay below the HTTP
+// server's WriteTimeout (see main.go) so the query is cancelled and a clean
+// error returned before the connection write deadline trips.
+const searchTimeout = 15 * time.Second
+
+// snippetSourceLimit bounds how many leading characters of body_text are read
+// per result row when building the highlighted excerpt. The FTS5 snippet()
+// function re-reads and re-tokenizes the *entire* body of every returned row
+// (the table uses content='messages', so the text is not stored in the index);
+// for large messages that is pathologically slow. Building the excerpt in Go
+// from a bounded prefix instead keeps the cost constant per row.
+const snippetSourceLimit = 64 * 1024
+
+// snippetContextTokens is the approximate number of whitespace/word tokens
+// shown in a snippet, matching the old FTS5 snippet() token budget.
+const snippetContextTokens = 15
+
 // sanitizeFTSQuery escapes double quotes and wraps the input in outer quotes
 // to produce a literal phrase match for SQLite FTS5.
 func sanitizeFTSQuery(q string) string {
 	escaped := strings.ReplaceAll(q, `"`, `""`)
 	return `"` + escaped + `"`
+}
+
+// token is a word in a body of text together with its byte offsets.
+type token struct {
+	start, end int
+	lower      string
+}
+
+// tokenizeText splits text into alphanumeric word tokens, approximating the
+// FTS5 unicode61 tokenizer (split on non-alphanumeric, fold to lower case).
+func tokenizeText(text string) []token {
+	var tokens []token
+	start := -1
+	for i, r := range text {
+		if unicode.IsLetter(r) || unicode.IsDigit(r) {
+			if start < 0 {
+				start = i
+			}
+			continue
+		}
+		if start >= 0 {
+			tokens = append(tokens, token{start, i, strings.ToLower(text[start:i])})
+			start = -1
+		}
+	}
+	if start >= 0 {
+		tokens = append(tokens, token{start, len(text), strings.ToLower(text[start:])})
+	}
+	return tokens
+}
+
+// buildSnippet produces a short highlighted excerpt of body around the first
+// occurrence of a query term, wrapping matched terms in ** markers and adding
+// … at truncated boundaries — mirroring the output of the FTS5 snippet()
+// function it replaces, but computed in Go from a bounded prefix so the cost is
+// independent of total message size.
+func buildSnippet(body, query string) string {
+	bodyTokens := tokenizeText(body)
+	if len(bodyTokens) == 0 {
+		return strings.TrimSpace(body)
+	}
+
+	queryTokens := tokenizeText(query)
+	querySet := make(map[string]struct{}, len(queryTokens))
+	for _, t := range queryTokens {
+		querySet[t.lower] = struct{}{}
+	}
+
+	// Find the first body token that matches a query term.
+	match := -1
+	if len(querySet) > 0 {
+		for i, t := range bodyTokens {
+			if _, ok := querySet[t.lower]; ok {
+				match = i
+				break
+			}
+		}
+	}
+
+	// Center the window on the match (or start at the beginning if none found).
+	lo, hi := 0, snippetContextTokens
+	if match >= 0 {
+		lo = max(match-snippetContextTokens/2, 0)
+		hi = lo + snippetContextTokens
+	}
+	if hi > len(bodyTokens) {
+		hi = len(bodyTokens)
+	}
+
+	var sb strings.Builder
+	if lo > 0 {
+		sb.WriteString("…")
+	}
+	for i := lo; i < hi; i++ {
+		t := bodyTokens[i]
+		if i > lo {
+			sb.WriteString(body[bodyTokens[i-1].end:t.start])
+		}
+		if _, ok := querySet[t.lower]; ok {
+			sb.WriteString("**")
+			sb.WriteString(body[t.start:t.end])
+			sb.WriteString("**")
+		} else {
+			sb.WriteString(body[t.start:t.end])
+		}
+	}
+	if hi < len(bodyTokens) {
+		sb.WriteString("…")
+	}
+	return sb.String()
 }
 
 // SearchMessages performs FTS5 phrase-match search with optional folder and date filters.
@@ -1198,6 +1306,14 @@ func (r *MessageRepository) SearchMessages(
 	dateFrom, dateTo *time.Time,
 	limit, offset int,
 ) ([]oas.MessagesSearchGetOKItemsItem, int, error) {
+	// Bound the query so a pathologically slow search fails fast with a clean
+	// error instead of running past the HTTP server's WriteTimeout (which would
+	// trip the connection write deadline mid-response and log a confusing
+	// "superfluous response.WriteHeader call"). Kept comfortably below that
+	// timeout to leave headroom for encoding and writing the response.
+	ctx, cancel := context.WithTimeout(ctx, searchTimeout)
+	defer cancel()
+
 	ftsQuery := sanitizeFTSQuery(q)
 
 	// Build WHERE conditions (beyond the MATCH clause).
@@ -1231,9 +1347,13 @@ func (r *MessageRepository) SearchMessages(
 	}
 
 	// Main query with snippet.
+	// Read a bounded prefix of body_text and build the highlighted excerpt in
+	// Go (see buildSnippet). Calling FTS5 snippet() here would re-tokenize the
+	// full body of every returned row, which is catastrophically slow for large
+	// messages and can exceed the request timeout.
 	mainSQL := `SELECT m.id, m.folder_id, m.message_id, m.from_addr, m.to_addr,
 		m.subject, m.date, m.read, m.flagged, m.has_attachments, m.send_failure_count, m.created_at,
-		snippet(messages_fts, 4, '**', '**', '…', 15)
+		substr(m.body_text, 1, ` + fmt.Sprint(snippetSourceLimit) + `)
 	FROM messages_fts JOIN messages m ON messages_fts.rowid = m.id
 	WHERE ` + whereClause + ` ORDER BY rank LIMIT ? OFFSET ?`
 
@@ -1255,12 +1375,12 @@ func (r *MessageRepository) SearchMessages(
 			hasAttInt    int
 			sendFailCnt  int
 			createdAtStr string
-			snippet      string
+			bodyPrefix   sql.NullString
 		)
 		if err := rows.Scan(
 			&item.ID, &item.FolderID, &messageID, &item.FromAddr, &item.ToAddr,
 			&item.Subject, &dateStr, &readInt, &flaggedInt, &hasAttInt, &sendFailCnt, &createdAtStr,
-			&snippet,
+			&bodyPrefix,
 		); err != nil {
 			return nil, 0, err
 		}
@@ -1283,7 +1403,7 @@ func (r *MessageRepository) SearchMessages(
 			return nil, 0, fmt.Errorf("parse created_at %q: %w", createdAtStr, err)
 		}
 		item.CreatedAt = cat
-		item.Snippet = html.EscapeString(snippet)
+		item.Snippet = html.EscapeString(buildSnippet(bodyPrefix.String, q))
 		items = append(items, item)
 	}
 	if err := rows.Err(); err != nil {

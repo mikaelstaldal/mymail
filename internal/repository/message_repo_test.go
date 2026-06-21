@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -386,6 +387,58 @@ func TestSearchMessages(t *testing.T) {
 	require.NoError(t, err)
 	assert.NotEmpty(t, items)
 	assert.NotZero(t, total)
+	// The matched term is highlighted with ** markers in the snippet.
+	assert.Contains(t, items[0].Snippet, "**quick**")
+}
+
+func TestSearchMessagesSnippetLargeBody(t *testing.T) {
+	// Regression: snippet generation must not re-tokenize the full body. A very
+	// large body that previously made FTS5 snippet() pathologically slow should
+	// now return quickly with a bounded, highlighted excerpt.
+	ctx := context.Background()
+	db := openTestDB(t)
+	r := NewMessageRepository(db)
+
+	msg := makeMsg(1, "big")
+	msg.BodyText = strings.Repeat("filler word here and there ", 200000) + " needle tail"
+	_, err := r.InsertMessage(ctx, msg)
+	require.NoError(t, err)
+
+	start := time.Now()
+	items, total, err := r.SearchMessages(ctx, "filler", nil, nil, nil, 10, 0)
+	require.NoError(t, err)
+	require.Equal(t, 1, total)
+	assert.Less(t, time.Since(start), 2*time.Second, "search over a large body must stay fast")
+
+	snip := items[0].Snippet
+	assert.Contains(t, snip, "**filler**")
+	assert.Less(t, len(snip), 1024, "snippet must be a bounded excerpt, not the whole body")
+}
+
+func TestBuildSnippet(t *testing.T) {
+	cases := []struct {
+		name  string
+		body  string
+		query string
+		want  string
+	}{
+		{"match middle", "alpha beta gamma delta epsilon", "gamma", "alpha beta **gamma** delta epsilon"},
+		{"case insensitive", "Hello World", "world", "Hello **World**"},
+		{"no match returns prefix", "one two three", "zzz", "one two three"},
+		{"empty body", "", "x", ""},
+		{"multi-term phrase", "send the meeting report now", "meeting report", "send the **meeting** **report** now"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			assert.Equal(t, tc.want, buildSnippet(tc.body, tc.query))
+		})
+	}
+
+	// A match far into a long body still produces a bounded, centered excerpt.
+	long := strings.Repeat("pad ", 100) + "needle " + strings.Repeat("pad ", 100)
+	got := buildSnippet(long, "needle")
+	assert.Contains(t, got, "**needle**")
+	assert.True(t, strings.HasPrefix(got, "…") && strings.HasSuffix(got, "…"), "expected ellipses on both sides, got %q", got)
 }
 
 func TestSanitizeFTSQuery(t *testing.T) {

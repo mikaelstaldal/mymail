@@ -67,6 +67,12 @@ func (h *Handler) MessagesSearchGet(ctx context.Context, params api.MessagesSear
 
 	items, total, err := h.messages.SearchMessages(ctx, q, folderID, dateFrom, dateTo, limit, offset)
 	if err != nil {
+		// A search that exceeds the repository's internal timeout returns a
+		// deadline error; surface it as a clean client error rather than a
+		// generic 500. (Caller-cancelled requests use a different context error.)
+		if errors.Is(err, context.DeadlineExceeded) {
+			return &api.Error{Error: "search timed out; please use a more specific query"}, nil
+		}
 		return nil, err
 	}
 	return &api.MessagesSearchGetOK{Total: total, Items: items}, nil
