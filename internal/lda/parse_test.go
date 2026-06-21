@@ -183,9 +183,9 @@ func TestDecodeHeader(t *testing.T) {
 			decoded: "John Doe <sender@example.com>",
 		},
 		{
-			name:    "Strange",
-			raw:     "=?utf-8?b?TWFzc2FnZWtsaW5pa2VuIE5vcnJ0w6RsamUgLSBCYW5nw6VyZHNnYXRhbiAy?= =?utf-8?b?QSwgTm9ycnTDpGxqZQ==?= <noreply@transactional.bokadirekt.se>",
-			decoded: "Massagekliniken Norrtälje - Bangårdsgatan 2A, Norrtälje <noreply@transactional.bokadirekt.se>",
+			name:    "Adjacent encoded-words with non-ASCII and comma",
+			raw:     "=?utf-8?b?QWNtZSBDYWbDqSAtIEhhdXB0c3RyYcOfZSA0?= =?utf-8?b?MiwgWsO8cmljaA==?= <info@example.com>",
+			decoded: "Acme Café - Hauptstraße 42, Zürich <info@example.com>",
 		},
 	}
 

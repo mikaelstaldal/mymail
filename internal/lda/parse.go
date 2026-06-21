@@ -342,9 +342,26 @@ func decodeAddrHeader(dec *mime.WordDecoder, raw string) string {
 	if raw == "" {
 		return ""
 	}
+	// Parse the raw header first: net/mail decodes RFC 2047 encoded-words
+	// itself, and parsing before decoding keeps characters such as a comma
+	// inside an encoded display name from being mistaken for an address
+	// separator. Re-render from the parsed addresses.
+	if addrs, err := mail.ParseAddressList(raw); err == nil {
+		parts := make([]string, 0, len(addrs))
+		for _, a := range addrs {
+			if a.Name != "" {
+				parts = append(parts, a.Name+" <"+a.Address+">")
+			} else {
+				parts = append(parts, a.Address)
+			}
+		}
+		return strings.Join(parts, ", ")
+	}
+	// Fallback: the header could not be parsed as an address list. Decode any
+	// encoded-words and accept the result only if it then parses cleanly.
 	decoded, err := dec.DecodeHeader(raw)
 	if err != nil {
-		decoded = raw
+		return ""
 	}
 	if _, err := mail.ParseAddressList(decoded); err != nil {
 		return ""
