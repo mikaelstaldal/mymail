@@ -187,6 +187,21 @@ func TestDecodeHeader(t *testing.T) {
 			raw:     "=?utf-8?b?QWNtZSBDYWbDqSAtIEhhdXB0c3RyYcOfZSA0?= =?utf-8?b?MiwgWsO8cmljaA==?= <info@example.com>",
 			decoded: "Acme Café - Hauptstraße 42, Zürich <info@example.com>",
 		},
+		{
+			name:    "Encoded-word wrapped in quotes",
+			raw:     `"=?utf-8?B?SsO2aG4gRMO4ZQ==?=" <sender@example.com>`,
+			decoded: "Jöhn Døe <sender@example.com>",
+		},
+		{
+			name:    "Malformed address with space salvages display name",
+			raw:     "Ali_express <summer items@woowstars.shop>",
+			decoded: "Ali_express",
+		},
+		{
+			name:    "Malformed address with no name and no angle brackets",
+			raw:     "summer items@woowstars.shop",
+			decoded: "",
+		},
 	}
 
 	dec := new(mime.WordDecoder)

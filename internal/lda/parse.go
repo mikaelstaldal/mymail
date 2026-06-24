@@ -349,8 +349,15 @@ func decodeAddrHeader(dec *mime.WordDecoder, raw string) string {
 	if addrs, err := mail.ParseAddressList(raw); err == nil {
 		parts := make([]string, 0, len(addrs))
 		for _, a := range addrs {
-			if a.Name != "" {
-				parts = append(parts, a.Name+" <"+a.Address+">")
+			name := a.Name
+			// net/mail only decodes RFC 2047 encoded-words found as bare
+			// atoms; some senders wrap the whole encoded-word in quotes,
+			// which net/mail leaves untouched. Decode any such leftovers.
+			if decodedName, err := dec.DecodeHeader(name); err == nil {
+				name = decodedName
+			}
+			if name != "" {
+				parts = append(parts, name+" <"+a.Address+">")
 			} else {
 				parts = append(parts, a.Address)
 			}
@@ -359,14 +366,34 @@ func decodeAddrHeader(dec *mime.WordDecoder, raw string) string {
 	}
 	// Fallback: the header could not be parsed as an address list. Decode any
 	// encoded-words and accept the result only if it then parses cleanly.
-	decoded, err := dec.DecodeHeader(raw)
-	if err != nil {
+	decoded := raw
+	if d, err := dec.DecodeHeader(raw); err == nil {
+		decoded = d
+		if _, err := mail.ParseAddressList(decoded); err == nil {
+			return decoded
+		}
+	}
+	// The addr-spec itself is malformed (e.g. an unescaped space), so it
+	// can't be salvaged. Still show the sender's display name instead of
+	// dropping the header entirely.
+	if name := displayNameBeforeAngleAddr(decoded); name != "" {
+		if decodedName, err := dec.DecodeHeader(name); err == nil {
+			name = decodedName
+		}
+		return name
+	}
+	return ""
+}
+
+// displayNameBeforeAngleAddr returns the trimmed, unquoted text preceding the
+// final "<...>" addr-spec in s, or "" if s has no such bracketed address.
+func displayNameBeforeAngleAddr(s string) string {
+	idx := strings.LastIndex(s, "<")
+	if idx < 0 {
 		return ""
 	}
-	if _, err := mail.ParseAddressList(decoded); err != nil {
-		return ""
-	}
-	return decoded
+	name := strings.TrimSpace(s[:idx])
+	return strings.TrimSpace(strings.Trim(name, `"`))
 }
 
 // --- Small utilities ---
