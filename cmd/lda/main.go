@@ -16,16 +16,24 @@ package main
 
 import (
 	"flag"
+	"fmt"
 	"io"
 	"log"
 	"net"
 	"os"
+	"runtime/debug"
 	"time"
 )
 
 func main() {
+	version := flag.Bool("version", false, "print version information and exit")
 	socketPath := flag.String("lda-socket", "", "Path to mymail LDA UNIX socket (required)")
 	flag.Parse()
+
+	if *version {
+		printVersion()
+		return
+	}
 
 	if *socketPath == "" {
 		log.Fatal("lda: -lda-socket is required")
@@ -63,5 +71,35 @@ func main() {
 	default:
 		log.Printf("lda: unexpected response %q", string(resp))
 		os.Exit(75)
+	}
+}
+
+func printVersion() {
+	fmt.Println("MyMail LDA")
+	info, ok := debug.ReadBuildInfo()
+	if !ok {
+		return
+	}
+	settings := make(map[string]string, len(info.Settings))
+	for _, s := range info.Settings {
+		settings[s.Key] = s.Value
+	}
+	if vcs, ok := settings["vcs"]; ok {
+		fmt.Printf("%s ", vcs)
+	}
+	modified := settings["vcs.modified"] == "true"
+	if rev, ok := settings["vcs.revision"]; ok {
+		if modified {
+			fmt.Printf("revision: %s (dirty)\n", rev)
+		} else {
+			fmt.Printf("revision: %s\n", rev)
+		}
+	}
+	if t, ok := settings["vcs.time"]; ok {
+		if parsedTime, err := time.Parse(time.RFC3339, t); err == nil {
+			fmt.Printf("updated at: %s\n", parsedTime.Local().Format("2006-01-02 15:04:05"))
+		} else {
+			fmt.Printf("updated at: %s\n", t)
+		}
 	}
 }

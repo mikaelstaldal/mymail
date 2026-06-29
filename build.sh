@@ -17,7 +17,7 @@ done
 openapi-typescript openapi.yaml -o web/ts/api/types.ts
 tsc --project web/ts/tsconfig.json
 go generate ./...
-go build -tags netgo -o "$OUTPUT_DIR/mymail" .
-go build -tags netgo -o "$OUTPUT_DIR/mymail-lda" ./cmd/lda/
+go build -trimpath -buildvcs=true -tags netgo -o "$OUTPUT_DIR/mymail" .
+go build -trimpath -buildvcs=true -tags netgo -o "$OUTPUT_DIR/mymail-lda" ./cmd/lda/
 go test ./...
 golangci-lint run ./...
