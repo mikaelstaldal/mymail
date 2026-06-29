@@ -12,7 +12,7 @@ import (
 // BindSocket creates a UNIX socket listener at socketPath.
 // Any stale socket file from a previous (crashed) run is removed first.
 func BindSocket(socketPath string) (net.Listener, error) {
-	os.Remove(socketPath) //nolint:errcheck
+	_ = os.Remove(socketPath)
 	return net.Listen("unix", socketPath)
 }
 
@@ -25,8 +25,8 @@ func ServeSocket(ctx context.Context, ln net.Listener, db *sql.DB) {
 
 	go func() {
 		<-ctx.Done()
-		ln.Close()            //nolint:errcheck
-		os.Remove(socketPath) //nolint:errcheck
+		_ = ln.Close()
+		_ = os.Remove(socketPath)
 	}()
 
 	for {
@@ -39,19 +39,21 @@ func ServeSocket(ctx context.Context, ln net.Listener, db *sql.DB) {
 }
 
 func handleLDAConn(conn net.Conn, db *sql.DB) {
-	defer conn.Close() //nolint:errcheck
+	defer func(conn net.Conn) {
+		_ = conn.Close()
+	}(conn)
 
 	// Bound the read: a single message must not be able to exhaust memory.
 	// Read one byte past the limit so we can distinguish "at limit" from "over".
 	raw, err := io.ReadAll(io.LimitReader(conn, MaxMessageBytes+1))
 	if err != nil {
 		log.Printf("lda socket: read message: %v", err)
-		conn.Write([]byte("transient_error")) //nolint:errcheck
+		_, _ = conn.Write([]byte("transient_error"))
 		return
 	}
 	if int64(len(raw)) > MaxMessageBytes {
 		log.Printf("lda socket: message exceeds %d bytes, rejecting", MaxMessageBytes)
-		conn.Write([]byte("parse_error")) //nolint:errcheck
+		_, _ = conn.Write([]byte("parse_error"))
 		return
 	}
 
