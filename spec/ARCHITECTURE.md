@@ -1,4 +1,4 @@
-# mymail — Architecture
+# MyMail — Architecture
 
 ## Backend
 

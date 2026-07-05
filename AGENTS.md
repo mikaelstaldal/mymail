@@ -1,4 +1,4 @@
-# mymail
+# MyMail
 
 A self-hosted personal (single-user) email client with backend storage, REST API, and embedded web UI.
 

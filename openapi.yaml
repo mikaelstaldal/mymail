@@ -1,8 +1,8 @@
 openapi: 3.0.3
 info:
-  title: mymail API
+  title: MyMail API
   description: |
-    REST API for mymail — a self-hosted personal email client.
+    REST API for MyMail — a self-hosted personal email client.
 
     **Authentication:** When `-basic-auth-file` is configured, all endpoints 
     require HTTP Basic Auth. Missing or invalid credentials return `401 Unauthorized` with

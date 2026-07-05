@@ -51,7 +51,7 @@ export function Sidebar({ folders, activeSlug }: SidebarProps) {
     <nav class="sidebar">
       <div class="sidebar-header">
         <div class="logo-icon">✉</div>
-        mymail
+        MyMail
         <button
           class="sidebar-reload-btn"
           onClick={() => window.dispatchEvent(new CustomEvent('folder-reload'))}

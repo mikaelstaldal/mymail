@@ -24,7 +24,7 @@ export function startPolling(cb: (folders: Folder[]) => void): { stop: () => voi
       document.title = count > 0 ? `(${count}) mymail` : 'mymail';
 
       if (lastInboxUnread >= 0 && count > lastInboxUnread && Notification.permission === 'granted') {
-        new Notification('mymail', {
+        new Notification('MyMail', {
           body: `${count} unread message${count !== 1 ? 's' : ''}`,
         });
       }

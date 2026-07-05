@@ -1,6 +1,6 @@
-# mymail — Operations Guide
+# MyMail — Operations Guide
 
-This guide covers production installation of mymail on a Linux server, including Postfix integration for incoming mail, TLS termination via a reverse proxy (nginx), and systemd service management.
+This guide covers production installation of MyMail on a Linux server, including Postfix integration for incoming mail, TLS termination via a reverse proxy (nginx), and systemd service management.
 
 ## Table of Contents
 
@@ -37,13 +37,13 @@ cd mymail
 ./build.sh -o /usr/local/bin
 ```
 
-`mymail-lda` is the minimal Local Delivery Agent client (~3 MB). It forwards incoming messages to the running `mymail` server via a UNIX socket, keeping per-delivery memory usage low on memory-constrained servers.
+`mymail-lda` is the minimal Local Delivery Agent client (~3 MB). It forwards incoming messages to the running MyMail server via a UNIX socket, keeping per-delivery memory usage low on memory-constrained servers.
 
 ---
 
 ## Create a System User
 
-Run mymail as a dedicated non-root user. This user must be the same Unix user that Postfix delivers mail to (see [Configure Postfix](#configure-postfix)).
+Run MyMail as a dedicated non-root user. This user must be the same Unix user that Postfix delivers mail to (see [Configure Postfix](#configure-postfix)).
 
 ```bash
 useradd --system --home-dir /var/lib/mymail --shell /usr/sbin/nologin mymail
@@ -70,7 +70,7 @@ This creates `/var/lib/mymail/mymail.sqlite` (mode `0600`) and seeds the built-i
 
 ## Set Up Authentication
 
-mymail uses HTTP Basic Auth backed by an htpasswd file (bcrypt). Create the file as the `mymail` user:
+MyMail uses HTTP Basic Auth backed by an htpasswd file (bcrypt). Create the file as the `mymail` user:
 
 ```bash
 htpasswd -Bc /var/lib/mymail/htpasswd myuser
@@ -83,7 +83,7 @@ chown mymail:mymail /var/lib/mymail/htpasswd
 chmod 0600 /var/lib/mymail/htpasswd
 ```
 
-> **Important:** HTTP Basic Auth must only be used over HTTPS. Never expose mymail on a non-loopback interface without TLS. The reverse proxy (see below) provides TLS termination.
+> **Important:** HTTP Basic Auth must only be used over HTTPS. Never expose MyMail on a non-loopback interface without TLS. The reverse proxy (see below) provides TLS termination.
 
 ---
 
@@ -93,7 +93,7 @@ Create `/etc/systemd/system/mymail.service`:
 
 ```ini
 [Unit]
-Description=mymail email client
+Description=MyMail email client
 After=network.target
 
 [Service]
@@ -147,7 +147,7 @@ journalctl -u mymail -f
 
 ## Configure Postfix
 
-mymail receives mail via `mymail-lda`, a minimal delivery agent that forwards each message to the running server over a UNIX socket. This keeps per-invocation memory at ~3 MB regardless of how many concurrent deliveries Postfix spawns.
+MyMail receives mail via `mymail-lda`, a minimal delivery agent that forwards each message to the running server over a UNIX socket. This keeps per-invocation memory at ~3 MB regardless of how many concurrent deliveries Postfix spawns.
 
 ### Deliver to the mymail user
 
@@ -160,7 +160,7 @@ mailbox_command = /usr/local/bin/mymail-lda -lda-socket /run/mymail/lda.sock
 
 Because Postfix runs `mailbox_command` as the recipient user (`mymail`), the socket — created by the server under `/run/mymail/` — is accessible without any extra permission changes.
 
-If you want to receive mail for multiple local addresses and route them all to mymail, ensure those addresses are aliased to the `mymail` system user in `/etc/aliases`:
+If you want to receive mail for multiple local addresses and route them all to MyMail, ensure those addresses are aliased to the `mymail` system user in `/etc/aliases`:
 
 ```
 you: mymail
@@ -209,7 +209,7 @@ This requires no socket but uses ~14 MB RSS per invocation and opens SQLite dire
 
 ### Spam header integration
 
-mymail reads spam verdict headers set by the MTA pipeline. If you use SpamAssassin or Rspamd, no extra configuration is needed — mymail reads `X-Spam-Flag`, `X-Spam-Status`, and a configurable score header (`X-Spam-Score` by default) and routes detected spam to the Junk folder automatically.
+MyMail reads spam verdict headers set by the MTA pipeline. If you use SpamAssassin or Rspamd, no extra configuration is needed — MyMail reads `X-Spam-Flag`, `X-Spam-Status`, and a configurable score header (`X-Spam-Score` by default) and routes detected spam to the Junk folder automatically.
 
 Spam filter settings (enabled/disabled, score header name, threshold) are managed in the web UI under Settings → Spam Filter.
 
@@ -217,7 +217,7 @@ Spam filter settings (enabled/disabled, score header name, threshold) are manage
 
 ## Configure nginx as a Reverse Proxy
 
-mymail does not terminate TLS itself. Place it behind nginx.
+MyMail does not terminate TLS itself. Place it behind nginx.
 
 Create `/etc/nginx/sites-available/mymail`:
 
@@ -334,12 +334,12 @@ Each argument is `<folder>:<format>:<path>`. Supported formats: `mbox`, `maildir
 
 ## Firewall
 
-mymail binds to `127.0.0.1` by default and is never directly exposed to the internet. Ensure your firewall allows:
+MyMail binds to `127.0.0.1` by default and is never directly exposed to the internet. Ensure your firewall allows:
 
 | Port | Protocol | Purpose                          |
 |------|----------|----------------------------------|
 | 80   | TCP      | HTTP → redirect to HTTPS (nginx) |
-| 443  | TCP      | HTTPS (nginx → mymail)           |
+| 443  | TCP      | HTTPS (nginx → MyMail)           |
 | 25   | TCP      | SMTP (Postfix incoming mail)     |
 
 The mymail process itself (port 8080) must not be reachable from outside the server.

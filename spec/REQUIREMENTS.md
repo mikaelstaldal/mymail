@@ -1,4 +1,4 @@
-# mymail — Functional Requirements
+# MyMail — Functional Requirements
 
 A self-hosted personal (single-user) email client with a backend, storage, REST API, and embedded web UI.
 Designed to run on a Linux server alongside a mail system such as Postfix.

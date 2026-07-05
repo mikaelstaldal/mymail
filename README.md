@@ -1,6 +1,12 @@
-# mymail
+# MyMail
 
 A self-hosted, single-user email client with a REST API and embedded web UI. Designed to run on a Linux server alongside a standard MTA such as Postfix.
+
+## Clients
+
+In addition to the built-in web interface, there is also 
+
+* A [native Android app](https://github.com/mikaelstaldal/mymail-android)
 
 ## Features
 
