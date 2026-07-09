@@ -61,7 +61,7 @@ function BodyIframe({ id, externalImages }: BodyIframeProps) {
       ref={ref}
       class="body-iframe"
       src={src}
-      sandbox="allow-popups"
+      sandbox="allow-popups allow-popups-to-escape-sandbox"
       onLoad={handleLoad}
       title="Message body"
     />
