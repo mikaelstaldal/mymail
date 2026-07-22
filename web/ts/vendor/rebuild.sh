@@ -1,0 +1,127 @@
+#!/usr/bin/env bash
+# Maintainer-only script. Fetches the pinned upstream sources for the vendored
+# browser libraries (Preact, Quill) via npm and copies each into
+# web/static/vendor/, plus Preact's .d.ts type stubs into web/ts/vendor/preact/.
+#
+# Both libraries ship prebuilt, self-contained files — Preact's dist/*.module.js
+# ESM modules and Quill's dist/quill.js UMD global + dist/quill.snow.css — so no
+# bundler is involved: the script only copies (and version-stamps) them. That
+# keeps the maintainer toolchain to npm + node; build.sh and CI need neither.
+#
+# Every browser filename is version-stamped (e.g. preact-10.29.7.module.js,
+# quill-2.0.3.js) from the installed package version, so a file's name records
+# exactly which upstream release it came from. The references in
+# web/static/index.html (the Preact import map + the Quill <script>/<link> tags)
+# are written by hand, so they MUST be updated whenever a version bumps — this
+# script prints the current names at the end as a reminder.
+#
+# NOT invoked by build.sh or CI. Run this by hand only when adding or updating a
+# vendored library, then commit the regenerated files.
+#
+# npm only ever touches a throwaway node_modules here, installed with
+# --ignore-scripts (no install-time lifecycle scripts). That keeps the
+# package-manager install manual, audited, and out of the automated build.
+#
+# Requires on $PATH: npm, node.
+set -euo pipefail
+
+cd "$(dirname "${BASH_SOURCE[0]}")"
+
+VENDOR_DIR="$(pwd)"
+BROWSER_OUT="$VENDOR_DIR/../../static/vendor"
+PREACT_OUT="$BROWSER_OUT/preact"    # runtime ESM modules served to the browser
+QUILL_OUT="$BROWSER_OUT/quill"      # Quill UMD global + snow theme CSS
+PREACT_TYPES="$VENDOR_DIR/preact"   # .d.ts type stubs (compile-time only)
+
+# Read an installed dependency's version from its package.json. Used to stamp the
+# vendored filenames so each file's name records its upstream release.
+pkgver() { node -p "require('$VENDOR_DIR/node_modules/$1/package.json').version"; }
+
+# Reconcile package-lock.json with package.json first (a no-op producing no diff
+# when they're already in sync, so unchanged runs stay deterministic; it adds
+# the missing entries after a dependency is added/bumped). Then do a clean,
+# lock-pinned install. `npm ci` alone aborts on an out-of-sync lock.
+npm install --package-lock-only --ignore-scripts
+npm ci --ignore-scripts
+
+PREACT_VER="$(pkgver preact)"
+QUILL_VER="$(pkgver quill)"
+
+# --- 1. Preact runtime modules + type stubs --------------------------------
+#
+# Preact ships prebuilt self-contained ESM (dist/*.module.js) plus its own .d.ts.
+# The runtime modules go to web/static/vendor/preact/ (served, version-stamped,
+# loaded via the import map); the .d.ts go to web/ts/vendor/preact/ (compile-time
+# only, resolved via the tsconfig `paths` entries, so they are NOT version-stamped).
+
+mkdir -p "$PREACT_OUT" "$PREACT_TYPES/src" "$PREACT_TYPES/hooks/src" "$PREACT_TYPES/jsx-runtime/src"
+
+# Filenames are version-stamped, so a bump changes the name rather than
+# overwriting. Remove any previously-vendored modules first so old versions
+# don't linger in the tree.
+rm -f "$PREACT_OUT"/{preact,hooks,jsx-runtime}-*.module.js
+
+PREACT_SRC="$VENDOR_DIR/node_modules/preact"
+cp "$PREACT_SRC/dist/preact.module.js"                 "$PREACT_OUT/preact-$PREACT_VER.module.js"
+cp "$PREACT_SRC/hooks/dist/hooks.module.js"            "$PREACT_OUT/hooks-$PREACT_VER.module.js"
+cp "$PREACT_SRC/jsx-runtime/dist/jsxRuntime.module.js" "$PREACT_OUT/jsx-runtime-$PREACT_VER.module.js"
+
+cp "$PREACT_SRC/src/index.d.ts"             "$PREACT_TYPES/src/index.d.ts"
+cp "$PREACT_SRC/src/jsx.d.ts"               "$PREACT_TYPES/src/jsx.d.ts"
+cp "$PREACT_SRC/hooks/src/index.d.ts"       "$PREACT_TYPES/hooks/src/index.d.ts"
+cp "$PREACT_SRC/jsx-runtime/src/index.d.ts" "$PREACT_TYPES/jsx-runtime/src/index.d.ts"
+# dom.d.ts exists only in newer Preact releases (the types were split out of
+# jsx.d.ts). Copy it when present so the normalize step below can fix its import.
+[ -f "$PREACT_SRC/src/dom.d.ts" ] && cp "$PREACT_SRC/src/dom.d.ts" "$PREACT_TYPES/src/dom.d.ts"
+
+# Preact's .d.ts use extensionless relative imports; this repo's tsconfig uses
+# Node16 module resolution, which requires explicit .js extensions. Add them.
+WORK_DIR="$(mktemp -d)"
+trap 'rm -rf "$WORK_DIR"' EXIT
+cat > "$WORK_DIR/normalize-preact-dts.mjs" <<'EOF'
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
+const [typesDir] = process.argv.slice(2);
+const edits = [
+  [`${typesDir}/src/index.d.ts`, [["./jsx", "./jsx.js"], ["./dom", "./dom.js"]]],
+  [`${typesDir}/jsx-runtime/src/index.d.ts`, [["../../src/jsx", "../../src/jsx.js"]]],
+];
+for (const [file, subs] of edits) {
+  if (!existsSync(file)) continue;
+  let s = readFileSync(file, "utf8");
+  for (const [from, to] of subs) s = s.split(`from '${from}'`).join(`from '${to}'`);
+  writeFileSync(file, s);
+}
+EOF
+node "$WORK_DIR/normalize-preact-dts.mjs" "$PREACT_TYPES"
+
+echo "Wrote $PREACT_OUT/{preact,hooks,jsx-runtime}-$PREACT_VER.module.js + type stubs"
+
+# --- 2. Quill editor: UMD global + snow theme CSS --------------------------
+#
+# Quill ships a prebuilt production UMD bundle (dist/quill.js) loaded as a global
+# <script> and its snow-theme stylesheet (dist/quill.snow.css). Copy both,
+# version-stamped. ComposeForm.tsx declares the Quill global inline, so no .d.ts
+# is vendored.
+
+mkdir -p "$QUILL_OUT"
+rm -f "$QUILL_OUT"/quill-*.js "$QUILL_OUT"/quill-*.css
+
+QUILL_SRC="$VENDOR_DIR/node_modules/quill"
+cp "$QUILL_SRC/dist/quill.js"       "$QUILL_OUT/quill-$QUILL_VER.js"
+cp "$QUILL_SRC/dist/quill.snow.css" "$QUILL_OUT/quill-$QUILL_VER.snow.css"
+
+echo "Wrote $QUILL_OUT/quill-$QUILL_VER.js + quill-$QUILL_VER.snow.css"
+
+# --- 3. Reminder: keep web/static/index.html in sync -----------------------
+#
+# The filenames are version-stamped, so update index.html by hand whenever a
+# version bumped: the Preact import map and the Quill <script>/<link> tags.
+cat <<EOF
+
+Reminder: update web/static/index.html to reference:
+  import map: preact             -> ./vendor/preact/preact-$PREACT_VER.module.js
+  import map: preact/hooks       -> ./vendor/preact/hooks-$PREACT_VER.module.js
+  import map: preact/jsx-runtime -> ./vendor/preact/jsx-runtime-$PREACT_VER.module.js
+  <link ... href="vendor/quill/quill-$QUILL_VER.snow.css">
+  <script src="vendor/quill/quill-$QUILL_VER.js"></script>
+EOF

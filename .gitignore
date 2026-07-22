@@ -28,4 +28,12 @@ web/static/**/*.js
 /e2e/test-results/
 /e2e/playwright-report/
 
+# Vendor rebuild scratch (web/ts/vendor/rebuild.sh) — throwaway, never committed.
+# jsdom can't be bundled, so its install tree is vendored as the committed
+# deterministic web/ts/vendor/test/jsdom-node_modules.tar.gz; the extracted
+# node_modules/ below is ephemeral (restored by web/ts/vendor/test/unpack.sh at
+# test time) and must stay out of git.
+/web/ts/vendor/node_modules/
+/web/ts/vendor/test/node_modules/
+
 /ignored
