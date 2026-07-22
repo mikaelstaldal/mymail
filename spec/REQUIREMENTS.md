@@ -616,7 +616,7 @@ Simple timestamps have a tooltip with the full form.
 
 The UI polls the REST API every 30 seconds. When the Inbox `unread_count` increases:
 1. Updates the unread badge in the sidebar.
-2. Updates `document.title` (e.g. `(3) mymail`).
+2. Updates `document.title` (e.g. `(3) MyMail`).
 3. If the Notifications API permission is granted, fires a browser notification.
 
 Polling is suspended while the browser tab is hidden.
