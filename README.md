@@ -132,6 +132,11 @@ go generate ./internal
 
 See [OPERATIONS.md](OPERATIONS.md) for production installation, Postfix integration, reverse proxy configuration, systemd service setup, and authentication.
 
+## Credits
+
+See [CREDITS.md](CREDITS.md) for the third-party libraries and other artifacts MyMail is built on,
+with their licenses.
+
 ## License
 
 Copyright 2026 Mikael Ståldal.
