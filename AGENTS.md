@@ -122,6 +122,43 @@ Base path: `/api/v1`. Full contract in `openapi.yaml`. Error format: `{"error": 
 
 Piped to `sendmail -t -oi` (no internal send queue). Path resolved at startup via `exec.LookPath`. 30-second timeout; non-zero exit → HTTP 500 with stderr.
 
+### HTML Sanitization — two policies, one allowlist
+
+`internal/sanitize` exposes **two** policies built by the same `newPolicy`
+helper, so they differ only in their allowlists, never in how they validate:
+
+- `HTML()` / `NewEmailPolicy()` — **inbound**, attacker-controlled. Used by
+  `internal/lda/parse.go` only.
+- `OutgoingHTML()` / `NewOutgoingPolicy()` — mail **we** send. Used by
+  `handler/send_draft.go` (×2) and `service/send.go`.
+
+`outgoingOnlyElements` / `outgoingOnlyCSS` are **empty on purpose**, so the two
+are currently equivalent. The invariant to protect is: **MyMail must render
+everything MyMail will send.** Otherwise a message to another MyMail instance —
+or to yourself — arrives stripped of styling this same instance produced.
+`TestSentHTMLSurvivesBeingReceived` pins `HTML(OutgoingHTML(x)) ==
+OutgoingHTML(x)` and fails the moment either list gains an entry. That failure is
+the point: adding one is a decision to accept that degradation.
+
+Note there is often no lossless fallback for a dropped property. A one-sided
+border rewritten as `border:none;border-top:…` degrades to an **invisible** rule,
+not a plain one — so an allowlist asymmetry is rarely merely cosmetic.
+
+All three send sites must use `OutgoingHTML`. **If one reverts to `HTML`, the
+stricter pass silently wins**, since the send paths sanitize more than once.
+
+Adding a CSS property does *not* reintroduce `url()`: bluemonday binds
+`MatchingHandler` (our `cssValueAllowed`) to every property uniformly, replacing
+per-property defaults. The residual CSS risk is layout/positioning spoofing,
+which is why `position`, `z-index`, `display`, `opacity`, `visibility`, `float`
+and `transform` stay out. `<style>` must never be allowed: bluemonday does not
+validate stylesheet text, so `@import url(…)` would bypass the value handler
+entirely.
+
+`TestOutgoingKeepsEverySecurityGate`, `TestOutgoingIsSupersetOfInbound` and
+`TestSentHTMLSurvivesBeingReceived` are the regression gates — extend them when
+the allowlist grows.
+
 ### Scheduled Sends & Snooze
 
 60-second polling goroutine (background, mutex-guarded). Deferred send threshold: `send_at > now + 60 seconds`. Snooze minimum: `until >= now + 60 seconds`.

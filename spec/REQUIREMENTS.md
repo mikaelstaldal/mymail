@@ -368,9 +368,33 @@ The IMAP internal date from the per-message header is used as the date fallback 
 
 ## HTML Sanitization
 
-Incoming HTML bodies and the HTML part of outgoing messages are sanitized with a strict email-appropriate policy.
+Incoming HTML bodies and the HTML part of outgoing messages are sanitized with a
+strict email-appropriate policy.
 
-**Allowed elements:** `a`, `b`, `blockquote`, `br`, `code`, `del`, `div`, `em`, `h1`–`h6`, `hr`, `i`, `img`, `li`, `ol`, `p`, `pre`, `s`, `span`, `strong`, `table`, `tbody`, `td`, `tfoot`, `th`, `thead`, `tr`, `ul`
+There are **two policy objects** — an inbound one (incoming bodies, delivered via
+the LDA) and an outgoing one (the HTML part of messages this instance sends:
+immediate, scheduled, and via draft send). They share the same attribute rules,
+URL schemes, and CSS value validation, and the outgoing one is by construction a
+superset of the inbound one. **Their allowlists are currently identical**, so
+everything below applies in both directions.
+
+The separation exists as a seam, not for a present-day difference: the two
+directions have genuinely different threat models, so if something ever needs to
+be sendable without being renderable, there is one place to put it. It is left
+empty on purpose. **MyMail must be able to render everything MyMail is willing to
+send** — otherwise a message to another MyMail instance, or to yourself, arrives
+stripped of styling this same instance produced. That round trip is pinned by a
+test.
+
+The allowlist is not the narrowest that could be written, because narrowness is
+only worth paying for where the excluded thing carries risk. Inert elements and
+CSS that cannot reference a resource are permitted; what stays out is what can
+execute, fetch, or spoof. The sanitizer is also not the only gate: message bodies
+are served by `GET /messages/{id}/body` with `default-src 'none'` and no
+`script-src`, inside an iframe sandboxed without `allow-scripts` or
+`allow-same-origin`.
+
+**Allowed elements:** `a`, `abbr`, `b`, `blockquote`, `br`, `caption`, `cite`, `code`, `col`, `colgroup`, `dd`, `del`, `dfn`, `div`, `dl`, `dt`, `em`, `figcaption`, `figure`, `h1`–`h6`, `hr`, `i`, `img`, `ins`, `kbd`, `li`, `mark`, `ol`, `p`, `pre`, `q`, `s`, `samp`, `small`, `span`, `strong`, `sub`, `sup`, `table`, `tbody`, `td`, `tfoot`, `th`, `thead`, `tr`, `tt`, `u`, `ul`, `var`
 
 **Allowed attributes** (per element):
 
@@ -392,11 +416,28 @@ Any attribute not listed above is stripped. Any value not matching the listed ru
 
 `color`, `background-color`, `font-family`, `font-size`, `font-style`, `font-variant`, `font-weight`, `letter-spacing`, `line-height`, `text-align`, `text-decoration`, `text-indent`, `vertical-align`, `white-space`, `word-spacing`, `border`, `border-color`, `border-style`, `border-width`, `border-collapse`, `border-spacing`, `padding`, `margin`, `width`, `max-width`, `height`
 
+…plus the per-side longhands of those box shorthands — `margin-top`/`-right`/`-bottom`/`-left`, `padding-*`, `border-top`/`-right`/`-bottom`/`-left` and their `-width`/`-style`/`-color` forms — and `border-radius`, `list-style`, `list-style-type`, `list-style-position`, `min-width`, `min-height`, `max-height`.
+
+The longhands add no expressive power (the shorthands can already address any single side), but they have no lossless fallback: a one-sided border rewritten as `border: none; border-top: …` degrades to an *invisible* rule rather than a plain one, so dropping them would be more than cosmetic.
+
 **Value validation (regardless of property name):** declaration values are checked against an allowlist, not a blocklist. A value is stripped if it contains a backslash CSS escape (e.g. `u\72l(`), a CSS comment (`/*`, `*/`), or any functional notation other than the color functions `rgb()`/`rgba()`/`hsl()`/`hsla()`. This blocks `url()`, `expression()`, `image-set()`, `-moz-binding`, and similar — including escape- and comment-obfuscated spellings — and also rejects stray/unbalanced parentheses.
 
 **Not allowed:** `background` (shorthand), `position`, `display`, `overflow`, `content`, `z-index`, `opacity`, and all vendor-prefixed properties.
 
 Links inside email bodies have `target="_blank"` and `rel="noopener noreferrer"` added by the sanitizer.
+
+### Send/receive symmetry
+
+A message this instance sends is sanitized on the way out by the outgoing policy
+and, if it is delivered to a MyMail instance (including this one, when sending to
+yourself), again on arrival by the inbound one. Because the two allowlists are
+identical, the second pass is a no-op: **what is sent is exactly what is
+received**, byte for byte.
+
+Adding an entry to the outgoing-only lists breaks that property by definition,
+and is therefore a deliberate decision to accept the resulting degradation on the
+MyMail-to-MyMail path — never an incidental one. The round-trip test fails as
+soon as either list becomes non-empty.
 
 ### Charset Handling
 

@@ -4,6 +4,7 @@ import (
 	"encoding/base64"
 	"fmt"
 	"regexp"
+	"slices"
 	"strings"
 
 	"github.com/microcosm-cc/bluemonday"
@@ -11,6 +12,13 @@ import (
 )
 
 var (
+	// cssAllowlist is applied in both directions. Adding a property here cannot
+	// reintroduce url(), expression(), or -moz-binding: bluemonday binds
+	// cssValueAllowed to every property uniformly (MatchingHandler replaces the
+	// per-property default), so every functional notation but the colour
+	// functions stays blocked no matter which property carries it. The residual
+	// risk in CSS is therefore layout, not resource loading — see the
+	// deliberately-excluded list below.
 	cssAllowlist = []string{
 		"color", "background-color", "font-family", "font-size",
 		"font-style", "font-variant", "font-weight", "letter-spacing",
@@ -19,7 +27,29 @@ var (
 		"border", "border-color", "border-style", "border-width",
 		"border-collapse", "border-spacing",
 		"padding", "margin", "width", "max-width", "height",
+
+		// Per-side longhands of the box shorthands above. These add no
+		// expressive power — `border`/`padding`/`margin` can already address
+		// any single side — so permitting them is risk-neutral, and omitting
+		// them would only mean silently dropping the shorter spelling.
+		"margin-top", "margin-right", "margin-bottom", "margin-left",
+		"padding-top", "padding-right", "padding-bottom", "padding-left",
+		"border-top", "border-right", "border-bottom", "border-left",
+		"border-top-width", "border-right-width", "border-bottom-width", "border-left-width",
+		"border-top-style", "border-right-style", "border-bottom-style", "border-left-style",
+		"border-top-color", "border-right-color", "border-bottom-color", "border-left-color",
+
+		// Decorative and sizing. border-radius and list-style are cosmetic;
+		// min-/max- are the same class as the width/height already allowed.
+		"border-radius", "list-style", "list-style-type", "list-style-position",
+		"min-width", "min-height", "max-height",
 	}
+
+	// Deliberately absent from cssAllowlist: position, z-index, float, display,
+	// visibility, opacity and transform. Unlike the properties above, these
+	// enable visual spoofing — overlaying or hiding content — which is the one
+	// CSS risk the value handler cannot address. They are also poorly supported
+	// by mail clients, so allowing them would cost more than it buys.
 
 	// reAllowedCSSFunc matches a single, well-formed (non-nested) call to one
 	// of the only CSS functional notations permitted in style values — the
@@ -42,12 +72,40 @@ var alignElements = []string{
 	"p", "h1", "h2", "h3", "h4", "h5", "h6", "div",
 }
 
+// allAllowedElements is applied in both directions. The second group is inert:
+// none of those elements can load a resource, carry a URL, or host script, so
+// permitting them costs nothing — and all are in bluemonday's default set of
+// elements allowed without attributes, so a bare tag survives rather than being
+// unwrapped.
 var allAllowedElements = []string{
 	"a", "b", "blockquote", "br", "code", "del", "div", "em",
 	"h1", "h2", "h3", "h4", "h5", "h6", "hr", "i", "img",
 	"li", "ol", "p", "pre", "s", "span", "strong",
 	"table", "tbody", "td", "tfoot", "th", "thead", "tr", "ul",
+
+	"abbr", "caption", "cite", "col", "colgroup", "dd", "dfn", "dl", "dt",
+	"figcaption", "figure", "ins", "kbd", "mark", "q", "samp", "small",
+	"sub", "sup", "tt", "u", "var",
 }
+
+// outgoingOnlyElements and outgoingOnlyCSS are the extension point for anything
+// that should be permitted in mail we send but not in mail we receive.
+//
+// Both are empty, deliberately. Everything currently allowed is either inert or
+// strictly equivalent to what an already-allowed shorthand can express, so
+// withholding it from inbound would buy no safety while costing real fidelity:
+// a MyMail-to-MyMail message (including sending to yourself) would arrive
+// stripped of styling this same instance was willing to send. Note in particular
+// that a one-sided border written as `border-left` has no inbound-compatible
+// fallback — `border: none; border-top: …` degrades to an invisible rule, not to
+// a plain one — so an asymmetry here is not merely cosmetic.
+//
+// The seam is kept so that a future outgoing-only relaxation is a one-line
+// change that cannot reach the untrusted inbound path by accident.
+var (
+	outgoingOnlyElements []string
+	outgoingOnlyCSS      []string
+)
 
 // cssValueAllowed validates a CSS declaration value against an allowlist
 // rather than a substring blocklist. bluemonday decodes hex escapes (\28) and
@@ -71,19 +129,21 @@ func cssValueAllowed(val string) bool {
 	return !strings.ContainsAny(stripped, "()")
 }
 
-// NewEmailPolicy constructs a bluemonday policy appropriate for rendering
-// untrusted email HTML inside a sandboxed iframe.
-func NewEmailPolicy() *bluemonday.Policy {
+// newPolicy builds a bluemonday policy over the given element and CSS-property
+// allowlists. Everything else — the attribute rules, the URL schemes, and the
+// CSS value handler — is identical for both policies below, so the two differ
+// only in what they permit, never in how they validate it.
+func newPolicy(elements, cssProperties []string) *bluemonday.Policy {
 	p := bluemonday.NewPolicy()
 
-	p.AllowElements(allAllowedElements...)
+	p.AllowElements(elements...)
 
 	p.AllowAttrs("href").Matching(reHref).OnElements("a")
 	p.AllowAttrs("src").Matching(reSrc).OnElements("img")
 	p.AllowAttrs("alt").OnElements("img")
 	p.AllowAttrs("colspan", "rowspan").Matching(reNumeric).OnElements("td", "th")
 	p.AllowAttrs("align").Matching(reAlign).OnElements(alignElements...)
-	p.AllowStyles(cssAllowlist...).MatchingHandler(cssValueAllowed).OnElements(allAllowedElements...)
+	p.AllowStyles(cssProperties...).MatchingHandler(cssValueAllowed).OnElements(elements...)
 
 	// AllowURLSchemes is required because AddTargetBlankToFullyQualifiedLinks
 	// enables requireParseableURLs, which rejects any scheme not in the allowlist.
@@ -94,11 +154,60 @@ func NewEmailPolicy() *bluemonday.Policy {
 	return p
 }
 
-var policy = NewEmailPolicy()
+// NewEmailPolicy constructs a bluemonday policy appropriate for rendering
+// untrusted email HTML inside a sandboxed iframe. This is the policy for
+// anything arriving from outside — use it, not the outgoing one, for inbound
+// mail.
+//
+// It is not the narrowest allowlist that could be written, because narrowness
+// is only worth paying for where the excluded thing carries risk. Inert
+// elements and CSS that cannot reference a resource are permitted; what stays
+// out is what can execute, fetch, or spoof. The sanitizer is also not the only
+// gate here — see MessagesIDBodyGet's CSP and iframe sandbox.
+func NewEmailPolicy() *bluemonday.Policy {
+	return newPolicy(allAllowedElements, cssAllowlist)
+}
 
-// HTML sanitizes html using the email policy.
+// NewOutgoingPolicy constructs the policy for mail this instance sends. It is a
+// superset of NewEmailPolicy — same attribute rules, same URL schemes, same CSS
+// value handler, plus outgoingOnlyElements and outgoingOnlyCSS, both of which
+// are currently empty. The two policies are therefore equivalent today, which is
+// what keeps a MyMail-to-MyMail message rendering exactly as it was sent
+// (TestSentHTMLSurvivesBeingReceived).
+//
+// The separation is kept for the seam, not for a present-day difference: the
+// two directions have genuinely different threat models — inbound HTML is
+// attacker-controlled, outgoing is composed by this instance's own user or a
+// same-origin sibling app such as MyNotes — so if something ever needs to be
+// sendable without being renderable, this is where it goes.
+//
+// Widening the outgoing side stays safe for the Sent/Scheduled folders, whose
+// bodies are displayed through the same gates as inbound mail:
+// MessagesIDBodyGet serves them with `default-src 'none'` and no script-src,
+// inside an iframe sandboxed without allow-scripts or allow-same-origin. Those
+// gates do not care which policy produced the stored HTML.
+func NewOutgoingPolicy() *bluemonday.Policy {
+	return newPolicy(
+		slices.Concat(allAllowedElements, outgoingOnlyElements),
+		slices.Concat(cssAllowlist, outgoingOnlyCSS),
+	)
+}
+
+var (
+	policy         = NewEmailPolicy()
+	outgoingPolicy = NewOutgoingPolicy()
+)
+
+// HTML sanitizes untrusted (inbound) email HTML using the email policy.
 func HTML(h string) string {
 	return policy.Sanitize(h)
+}
+
+// OutgoingHTML sanitizes HTML composed by this instance's own user, on its way
+// into a message we send. See NewOutgoingPolicy for why this is a separate,
+// slightly wider allowlist.
+func OutgoingHTML(h string) string {
+	return outgoingPolicy.Sanitize(h)
 }
 
 const (

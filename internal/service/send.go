@@ -49,9 +49,12 @@ type SendFields struct {
 // Returns (rawMessage, hasExternalImages, messageID, error). messageID is the generated
 // Message-ID value without surrounding angle brackets, suitable for DB storage.
 func BuildMIMEMessage(fields SendFields, attachments []model.DBAttachment) ([]byte, bool, string, error) {
-	// Sanitize outgoing HTML and detect external images
+	// Sanitize outgoing HTML and detect external images. The outgoing policy is
+	// the wider of the two (see sanitize.NewOutgoingPolicy); applying the
+	// inbound one here would silently undo it, since callers have already
+	// sanitized with the outgoing policy and the stricter pass would win.
 	if fields.BodyHTML != "" {
-		fields.BodyHTML = sanitize.HTML(fields.BodyHTML)
+		fields.BodyHTML = sanitize.OutgoingHTML(fields.BodyHTML)
 	}
 	hasExternalImages := sanitize.HasExternalImages(fields.BodyHTML)
 
