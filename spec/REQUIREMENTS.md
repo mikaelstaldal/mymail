@@ -539,7 +539,7 @@ On first load the UI reads `localStorage` for the last selected folder and navig
 
 2. **Message detail** — Full headers, sanitized HTML body in a sandboxed iframe (or plain-text fallback), attachment download links. Reply/Reply All/Forward/Move/Delete/Snooze/Mark as junk buttons. An **All headers** toggle button (hidden for drafts) fetches and displays the raw RFC 5322 header block via `GET /messages/{id}/headers`; clicking again collapses the panel. **Draft messages** show **Edit** (opens the compose form) and **Discard** (permanently deletes the draft after confirmation) buttons instead of Reply/Reply-All/Forward. The Snooze button is available only when the message is in Inbox, Snoozed, or a user-created folder. It is not available for messages in Drafts, Sent, Trash, Junk, or Scheduled — each of those folders has its own dedicated lifecycle management that would conflict with snooze behaviour. The snooze `until` time must be at least 1 minute ahead of the current server time; a shorter value is rejected. **Re-snooze / edit snooze:** if the message is already in Snoozed, the Snooze button is labelled "Edit snooze" and pre-fills the datetime picker with the current snooze time; submitting updates the expiry time and preserves the original return folder. Opening an unread message causes the UI to issue an explicit `PATCH /messages/{id}` request (with `{"read": true}`) after a successful GET to mark it as read; `GET /messages/{id}` itself does not alter read state. When the message has both body types, a toggle switches between HTML and plain text; the preference is stored. Thread display: if the message is part of a thread, a collapsed conversation strip is shown below the body; clicking an entry expands it. The thread panel is resizable by dragging the divider between the body and the thread strip. When the thread is truncated at the 1000-message cap (`truncated: true` in the API response), a "thread too long" indicator is shown in place of the missing entries.
 
-3. **Compose / Reply / Reply All / Forward** — Form with From selector, To/Cc/Bcc/Reply-To fields (To/Cc/Bcc offer address autocomplete), Subject, rich-text body editor (Quill), file upload for attachments. A **Send later** toggle reveals a date/time picker. Auto-saves to Drafts every 30 seconds. Navigate-away triggers an immediate draft save.
+3. **Compose / Reply / Reply All / Forward** — Form with From selector, To/Cc/Bcc/Reply-To fields (To/Cc/Bcc offer address autocomplete), Subject, rich-text body editor (Quill), file upload for attachments. For Reply / Reply All / Forward, a read-only quoted-text block sits below the editor (see Body quoting). A **Send later** toggle reveals a date/time picker. Auto-saves to Drafts every 30 seconds. Navigate-away triggers an immediate draft save.
 
    **Sending a draft:** the **Send** button calls `POST /drafts/{id}/send`, which reads all draft fields and attachments from the server, validates, sends or schedules, then deletes the draft. Attachments are never re-uploaded by the client at send time.
 
@@ -565,7 +565,7 @@ On first load the UI reads `localStorage` for the last selected folder and navig
 
    **Body quoting** (Reply / Reply All / Forward):
 
-   The original message body is quoted into the new compose buffer below the cursor position. The exact format is fixed (English-only; localization is out of scope for v1):
+   The original message body is quoted below the user's composition area. The exact format is fixed (English-only; localization is out of scope for v1):
 
    - **Attribution line:** the new body opens with the user's blank composition area (with the identity signature, see below), then a single empty line, then the attribution line:
 
@@ -588,7 +588,15 @@ On first load the UI reads `localStorage` for the last selected folder and navig
 
      followed by a blank line, then the original body (no `> ` prefix and no `<blockquote>` for forwards — the forwarded content is presented as the new message body, with the wrapper acting as the boundary).
 
-   Signatures are pre-populated from the selected identity, with `\n-- \n` delimiter. Changing the From identity swaps the signature block.
+   **Quoted material is not loaded into the editor.** The rich-text editor receives only the editable half — the blank composition area and the signature. The quoted half (attribution line plus quote, or the forward wrapper plus forwarded body) is held outside the editor, displayed read-only below it, and concatenated back on when the draft is saved or the message is sent. Quoted text is therefore not editable in place; it can only be kept or discarded as a whole (see below).
+
+   This is a performance requirement, not a stylistic one. Quill re-derives and diffs the entire document on every DOM mutation, so an editable buffer containing the quote makes each keystroke cost O(entire thread). A long `>` chain re-quotes everything before it on every round, so its size grows quadratically in reply depth: measured on a 3.3 MB chain, opening Reply took 1.4 s and each keystroke blocked the main thread for ~270 ms, which is enough for a browser to report the page as unresponsive. Keeping the quote out of the editor makes both costs independent of thread size.
+
+   - **Storage format:** the two halves are joined as `<editable half><!--mymail-quote--><quoted half>` in `body_html`. The marker lets a reopened draft be split apart again. Drafts are stored verbatim, so the marker survives a save/reopen cycle; the outgoing sanitiser drops comments, so it never reaches a recipient.
+   - **Plain-text alternative:** `body_text` is the editor's text, then a blank line, then a plain-text rendering of the quoted half. That rendering is derived solely from the quoted HTML — `<br>` and block elements end a line, and each `<blockquote>` level adds one `> ` marker to every line it contains — so reopening a draft reconstructs exactly the same text. Line endings in the source `body_text` are normalised to `\n` before quoting, so CRLF-terminated originals do not produce blank lines between quoted lines.
+   - **Quoted-text control:** the read-only block shows the quote's size and can be expanded to review it as plain text, or removed entirely, in which case neither half of the quote is sent.
+
+   Signatures are pre-populated from the selected identity, with `\n-- \n` delimiter. Changing the From identity swaps the signature block; this affects the editable half only, since the quoted half never contains a signature.
 
    **Signature HTML conversion:** The signature is stored as plain text but must be inserted into Quill's HTML content model. Convert it as follows: the standard email signature delimiter line (`-- ` — two hyphens followed by a space) is rendered as `<hr>`; all other lines have `&`, `<`, and `>` escaped to `&amp;`, `&lt;`, and `&gt;` respectively, and line breaks become `<br>`.
 

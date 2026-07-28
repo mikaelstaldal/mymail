@@ -60,9 +60,15 @@ function addrSpec(addr: string): string {
   return m ? m[1].trim() : addr.trim();
 }
 
+// body_text is stored with the CRLF line endings it arrived with; a stray CR
+// left inside quoted HTML reappears as a blank line once that HTML is converted
+// back to text for the text/plain alternative.
+function normalizeNewlines(s: string): string {
+  return s.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+}
+
 function signatureToHtml(sig: string): string {
-  const normalized = sig.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
-  const lines = normalized.split('\n');
+  const lines = normalizeNewlines(sig).split('\n');
   const parts: string[] = [];
   for (const line of lines) {
     if (line === '-- ') {
@@ -74,19 +80,42 @@ function signatureToHtml(sig: string): string {
   return parts.join('<br>');
 }
 
-function buildInitialHtml(
+// Quoted material is deliberately kept *out* of the Quill document. Quill 2
+// re-derives and diffs the whole document on every DOM mutation, so an editable
+// buffer containing the quote makes each keystroke cost O(entire thread) — a
+// long `>` chain (which re-quotes everything before it on every round, so it
+// grows quadratically in reply depth) freezes the browser. The quote therefore
+// lives in a ref, is shown read-only below the editor, and is concatenated back
+// on at save/send time, separated by QUOTE_MARKER so a reopened draft can be
+// split apart again. bluemonday drops comments, so the marker never reaches a
+// recipient (drafts are stored verbatim; sanitization happens at send).
+const QUOTE_MARKER = '<!--mymail-quote-->';
+
+interface ComposeParts {
+  /** Goes into the Quill editor — only what the user is expected to type into. */
+  editorHtml: string;
+  /** Held aside, read-only, and appended after QUOTE_MARKER on save/send. */
+  quoteHtml: string;
+}
+
+function buildComposeParts(
   mode: 'new' | 'reply' | 'replyall' | 'forward',
   msg: MessageDetail | null,
   identity: Identity | null,
-): string {
+): ComposeParts {
   const sigHtml = identity?.signature ? signatureToHtml(identity.signature) : '';
 
   if (!msg || mode === 'new') {
-    return sigHtml ? `<p><br></p><p>${sigHtml}</p>` : '<p><br></p>';
+    return {
+      editorHtml: sigHtml ? `<p><br></p><p>${sigHtml}</p>` : '<p><br></p>',
+      quoteHtml: '',
+    };
   }
 
   const date = new Date(msg.date).toUTCString();
   const sender = displayName(msg.from_addr) || msg.from_addr;
+  const sigPart = sigHtml ? `<p>${sigHtml}</p><p><br></p>` : '';
+  const editorHtml = `<p><br></p>${sigPart}`;
 
   if (mode === 'forward') {
     const fwdBlock = [
@@ -98,19 +127,122 @@ function buildInitialHtml(
       '<p><br></p>',
     ].join('');
 
-    const body = msg.body_html || `<pre>${esc(msg.body_text)}</pre>`;
-    const sigPart = sigHtml ? `<p>${sigHtml}</p><p><br></p>` : '';
-    return `<p><br></p>${sigPart}${fwdBlock}${body}`;
+    const body = msg.body_html || `<pre>${esc(normalizeNewlines(msg.body_text))}</pre>`;
+    return { editorHtml, quoteHtml: `${fwdBlock}${body}` };
   }
 
   // reply / replyall
   const attribution = `<p>On ${esc(date)}, ${esc(sender)} wrote:</p>`;
   const body = msg.body_html
     ? `<blockquote style="margin:0 0 0 0.8ex;border-left:1px solid #ccc;padding-left:1ex">${msg.body_html}</blockquote>`
-    : `<p>${msg.body_text.split('\n').map(l => '&gt; ' + esc(l)).join('<br>')}</p>`;
+    : `<p>${normalizeNewlines(msg.body_text).split('\n').map(l => '&gt; ' + esc(l)).join('<br>')}</p>`;
 
-  const sigPart = sigHtml ? `<p>${sigHtml}</p><p><br></p>` : '';
-  return `<p><br></p>${sigPart}${attribution}${body}`;
+  return { editorHtml, quoteHtml: `${attribution}${body}` };
+}
+
+/** Split a stored body_html back into its editable and quoted halves. */
+function splitQuotedHtml(html: string): ComposeParts {
+  const i = html.indexOf(QUOTE_MARKER);
+  if (i === -1) return { editorHtml: html, quoteHtml: '' };
+  return { editorHtml: html.slice(0, i), quoteHtml: html.slice(i + QUOTE_MARKER.length) };
+}
+
+/** Recombine the two halves for storage and sending. */
+function joinQuotedHtml(editorHtml: string, quoteHtml: string): string {
+  return quoteHtml ? editorHtml + QUOTE_MARKER + quoteHtml : editorHtml;
+}
+
+function joinQuotedText(editorText: string, quoteText: string): string {
+  if (!quoteText) return editorText;
+  return editorText.replace(/\n+$/, '') + '\n\n' + quoteText + '\n';
+}
+
+/** Inverse of joinQuotedText, for the rare path where Quill is unavailable. */
+function stripQuotedText(text: string, quoteText: string): string {
+  if (!quoteText) return text;
+  const tail = '\n\n' + quoteText + '\n';
+  return text.endsWith(tail) ? text.slice(0, -tail.length) : text;
+}
+
+// Elements after which a line break is emitted when serialising quoted HTML to
+// the plain-text alternative.
+const BLOCK_TAGS = new Set([
+  'P', 'DIV', 'BLOCKQUOTE', 'LI', 'TR', 'PRE', 'HR', 'TABLE', 'UL', 'OL',
+  'H1', 'H2', 'H3', 'H4', 'H5', 'H6', 'FIGURE', 'DL', 'DT', 'DD',
+]);
+
+// Guards against a stack overflow on pathologically nested quote chains.
+const MAX_QUOTE_DEPTH = 400;
+
+// Line-oriented accumulator. The `> ` markers are emitted once, as each line is
+// opened, from the blockquote nesting depth at that point. Prefixing a whole
+// subtree on the way back up instead would re-scan the accumulated text at
+// every level — quadratic in nesting depth, which is exactly the shape of a
+// long reply chain.
+interface QuoteTextAcc {
+  chunks: string[];
+  atLineStart: boolean;
+}
+
+function openLine(acc: QuoteTextAcc, quoteDepth: number): void {
+  if (!acc.atLineStart) return;
+  if (quoteDepth > 0) acc.chunks.push('> '.repeat(quoteDepth));
+  acc.atLineStart = false;
+}
+
+function endLine(acc: QuoteTextAcc, quoteDepth: number): void {
+  openLine(acc, quoteDepth); // an empty line still carries its quote markers
+  acc.chunks.push('\n');
+  acc.atLineStart = true;
+}
+
+function emitText(acc: QuoteTextAcc, s: string, quoteDepth: number): void {
+  const lines = s.split('\n');
+  for (let i = 0; i < lines.length; i++) {
+    if (i > 0) endLine(acc, quoteDepth);
+    if (lines[i]) {
+      openLine(acc, quoteDepth);
+      acc.chunks.push(lines[i]);
+    }
+  }
+}
+
+function nodeToText(node: Node, depth: number, quoteDepth: number, acc: QuoteTextAcc): void {
+  if (node.nodeType === Node.TEXT_NODE) {
+    emitText(acc, node.nodeValue ?? '', quoteDepth);
+    return;
+  }
+  if (node.nodeType !== Node.ELEMENT_NODE) return;
+  const el = node as Element;
+  if (el.tagName === 'BR') {
+    endLine(acc, quoteDepth);
+    return;
+  }
+  if (depth >= MAX_QUOTE_DEPTH) {
+    emitText(acc, el.textContent ?? '', quoteDepth);
+    return;
+  }
+
+  // Quote depth grows with each round, matching the plain-text convention.
+  const childQuoteDepth = el.tagName === 'BLOCKQUOTE' ? quoteDepth + 1 : quoteDepth;
+  for (const child of Array.from(el.childNodes)) {
+    nodeToText(child, depth + 1, childQuoteDepth, acc);
+  }
+  if (BLOCK_TAGS.has(el.tagName) && !acc.atLineStart) endLine(acc, childQuoteDepth);
+}
+
+/**
+ * Plain-text rendering of the quoted block, for the text/plain alternative.
+ * Derived purely from quoteHtml so that a reopened draft reconstructs exactly
+ * the same text as the original compose did.
+ */
+function quoteHtmlToText(html: string): string {
+  if (!html) return '';
+  // DOMParser yields an inert document: no scripts run and no resources load.
+  const doc = new DOMParser().parseFromString(html, 'text/html');
+  const acc: QuoteTextAcc = { chunks: [], atLineStart: true };
+  nodeToText(doc.body, 0, 0, acc);
+  return acc.chunks.join('').replace(/\n{3,}/g, '\n\n').trim();
 }
 
 function esc(s: string): string {
@@ -374,6 +506,48 @@ export function ComposeForm({ replyId, replyAllId, forwardId, draftId }: Compose
   const bodyHtmlRef = useRef('');
   const bodyTextRef = useRef('');
 
+  // Quoted material, held outside the editor (see QUOTE_MARKER)
+  const quoteHtmlRef = useRef('');
+  // null = not derived yet. Deriving it costs O(quote), so it is kept off the
+  // path that opens the form; the first save or preview pays for it instead.
+  const quoteTextRef = useRef<string | null>(null);
+  const [quoteSize, setQuoteSize] = useState(0);
+  const [quoteOpen, setQuoteOpen] = useState(false);
+
+  function quoteText(): string {
+    if (quoteTextRef.current === null) {
+      quoteTextRef.current = quoteHtmlToText(quoteHtmlRef.current);
+    }
+    return quoteTextRef.current;
+  }
+
+  function setQuote(html: string) {
+    quoteHtmlRef.current = html;
+    quoteTextRef.current = html ? null : '';
+    setQuoteSize(html.length);
+  }
+
+  function dropQuote() {
+    quoteHtmlRef.current = '';
+    quoteTextRef.current = '';
+    setQuoteSize(0);
+    setQuoteOpen(false);
+  }
+
+  /** Restore a stored draft body, keeping its quoted half out of the editor. */
+  function loadStoredBody(bodyHtml: string, fallbackText: string) {
+    const { editorHtml, quoteHtml } = splitQuotedHtml(bodyHtml);
+    setQuote(quoteHtml);
+    if (editorRef.current && quillRef.current && editorHtml) {
+      quillRef.current.clipboard.dangerouslyPasteHTML(editorHtml);
+      bodyHtmlRef.current = quillRef.current.root.innerHTML;
+      bodyTextRef.current = quillRef.current.getText();
+    } else {
+      bodyHtmlRef.current = editorHtml;
+      bodyTextRef.current = stripQuotedText(fallbackText, quoteHtmlToText(quoteHtml));
+    }
+  }
+
   // For cleanup: snapshot of current form state via refs
   const stateRef = useRef({ identityId, to, cc, bcc, subject, sendAt });
   stateRef.current = { identityId, to, cc, bcc, subject, sendAt };
@@ -386,8 +560,8 @@ export function ComposeForm({ replyId, replyAllId, forwardId, draftId }: Compose
       cc_addr: stateRef.current.cc.join(', '),
       bcc_addr: stateRef.current.bcc.join(', '),
       subject: stateRef.current.subject,
-      body_html: bodyHtmlRef.current,
-      body_text: bodyTextRef.current,
+      body_html: joinQuotedHtml(bodyHtmlRef.current, quoteHtmlRef.current),
+      body_text: joinQuotedText(bodyTextRef.current, quoteText()),
       in_reply_to: inReplyToRef.current || undefined,
       references: refsRef.current.length > 0 ? refsRef.current : undefined,
       send_at: stateRef.current.sendAt ? new Date(stateRef.current.sendAt).toISOString() : null,
@@ -405,7 +579,7 @@ export function ComposeForm({ replyId, replyAllId, forwardId, draftId }: Compose
       cc: stateRef.current.cc,
       bcc: stateRef.current.bcc,
       subject: stateRef.current.subject,
-      bodyHtml: bodyHtmlRef.current,
+      bodyHtml: joinQuotedHtml(bodyHtmlRef.current, quoteHtmlRef.current),
       sendAt: stateRef.current.sendAt,
     });
   }, [mode]);
@@ -499,14 +673,7 @@ export function ComposeForm({ replyId, replyAllId, forwardId, draftId }: Compose
         setSubject(fields.subject);
         if (fields.sendAt) { setSendAt(fields.sendAt); setSendLater(true); }
 
-        if (editorRef.current && quillRef.current && fields.bodyHtml) {
-          quillRef.current.clipboard.dangerouslyPasteHTML(fields.bodyHtml);
-          bodyHtmlRef.current = quillRef.current.root.innerHTML;
-          bodyTextRef.current = quillRef.current.getText();
-        } else {
-          bodyHtmlRef.current = fields.bodyHtml;
-          bodyTextRef.current = fields.bodyText;
-        }
+        loadStoredBody(fields.bodyHtml, fields.bodyText);
 
         setLoading(false);
         return;
@@ -567,14 +734,7 @@ export function ComposeForm({ replyId, replyAllId, forwardId, draftId }: Compose
           setSubject(f.subject);
           if (f.sendAt) { setSendAt(f.sendAt); setSendLater(true); }
 
-          if (editorRef.current && quillRef.current && f.bodyHtml) {
-            quillRef.current.clipboard.dangerouslyPasteHTML(f.bodyHtml);
-            bodyHtmlRef.current = quillRef.current.root.innerHTML;
-            bodyTextRef.current = quillRef.current.getText();
-          } else {
-            bodyHtmlRef.current = f.bodyHtml;
-            bodyTextRef.current = f.bodyText;
-          }
+          loadStoredBody(f.bodyHtml, f.bodyText);
 
           setLoading(false);
           return;
@@ -585,8 +745,8 @@ export function ComposeForm({ replyId, replyAllId, forwardId, draftId }: Compose
         setIdentityId(sel?.id);
         currentIdentityRef.current = sel ?? null;
         if (editorRef.current && quillRef.current) {
-          const html = buildInitialHtml('new', null, sel ?? null);
-          quillRef.current.clipboard.dangerouslyPasteHTML(html);
+          const { editorHtml } = buildComposeParts('new', null, sel ?? null);
+          quillRef.current.clipboard.dangerouslyPasteHTML(editorHtml);
           bodyHtmlRef.current = quillRef.current.root.innerHTML;
           bodyTextRef.current = quillRef.current.getText();
         }
@@ -652,10 +812,12 @@ export function ComposeForm({ replyId, replyAllId, forwardId, draftId }: Compose
         }
       }
 
-      // Initialize Quill content
+      // Initialize Quill content. Only the editable half is pasted in; the
+      // quoted half is held aside so typing stays O(reply), not O(thread).
+      const parts = buildComposeParts(mode as 'new' | 'reply' | 'replyall' | 'forward', msg, selectedIdent ?? null);
+      setQuote(parts.quoteHtml);
       if (editorRef.current && quillRef.current) {
-        const html = buildInitialHtml(mode as 'new' | 'reply' | 'replyall' | 'forward', msg, selectedIdent ?? null);
-        quillRef.current.clipboard.dangerouslyPasteHTML(html);
+        quillRef.current.clipboard.dangerouslyPasteHTML(parts.editorHtml);
         bodyHtmlRef.current = quillRef.current.root.innerHTML;
         bodyTextRef.current = quillRef.current.getText();
       }
@@ -751,7 +913,8 @@ export function ComposeForm({ replyId, replyAllId, forwardId, draftId }: Compose
     // For simplicity, only swap if we can access Quill
     const q = quillRef.current;
     if (!q) return;
-    // Re-build the full content with new signature (preserves quoting block)
+    // Operates on the editable half only — the quoted block is held outside the
+    // editor and never contains a signature, so it is unaffected.
     // This is a simplification: we just swap the sig by re-building initial HTML
     // and re-inserting. In practice, swap logic requires finding the sig delimiter.
     // The spec says "swap signature block" - we implement this by rebuilding.
@@ -907,6 +1070,27 @@ export function ComposeForm({ replyId, replyAllId, forwardId, draftId }: Compose
       <div class="compose-editor-wrap" style={loading ? 'visibility:hidden' : ''}>
         <div ref={editorRef} />
       </div>
+
+      {/* Quoted material — read-only, kept out of the editor for performance */}
+      {!loading && quoteSize > 0 && (
+        <div class="compose-quote">
+          <div class="compose-quote-bar">
+            <button
+              type="button"
+              class="btn btn-ghost btn-sm compose-quote-toggle"
+              aria-expanded={quoteOpen}
+              onClick={() => setQuoteOpen(o => !o)}
+            >
+              {quoteOpen ? '▾' : '▸'} Quoted text ({formatBytes(quoteSize)})
+            </button>
+            <span class="compose-quote-note">included when you send</span>
+            <button type="button" class="btn btn-ghost btn-sm" onClick={dropQuote}>
+              Remove
+            </button>
+          </div>
+          {quoteOpen && <pre class="compose-quote-preview">{quoteText()}</pre>}
+        </div>
+      )}
 
       {/* Attachments */}
       {!loading && (existingAttachments.length > 0 || files.length > 0) && (
