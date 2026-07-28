@@ -441,7 +441,7 @@ soon as either list becomes non-empty.
 
 ### Charset Handling
 
-Body parts can declare any charset in `Content-Type` (`charset=ISO-8859-1`, `windows-1252`, `gb2312`, …). Each body part is decoded to UTF-8 using the charset declared in its `Content-Type` header before being stored in `body_text` or `body_html`. If the declared charset is unknown to the decoder, or the part contains bytes that cannot be decoded under the declared charset, the part is decoded as UTF-8 with invalid byte sequences replaced by the Unicode replacement character (U+FFFD). The original encoded bytes remain accessible via the raw RFC 5322 blob.
+Body parts and email headers (From, To, Subject, etc.) can declare any charset in `Content-Type` or RFC 2047 encoded words (`charset=ISO-8859-1`, `windows-1252`, `gb2312`, …). Each body part and header is decoded to UTF-8 using the declared charset before being stored in the database. If the declared charset is unknown to the decoder, or the content contains bytes that cannot be decoded under the declared charset, the content is decoded as UTF-8 with invalid byte sequences replaced by the Unicode replacement character (U+FFFD). The original encoded bytes remain accessible via the raw RFC 5322 blob.
 
 ### `cid:` Inline Image Resolution
 

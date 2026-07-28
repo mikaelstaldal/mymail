@@ -9,7 +9,6 @@ import (
 	"mime"
 	"mime/multipart"
 	"mime/quotedprintable"
-	"net/mail"
 	"net/textproto"
 	"os/exec"
 	"strings"
@@ -72,7 +71,7 @@ func BuildMIMEMessage(fields SendFields, attachments []model.DBAttachment) ([]by
 
 	// Derive Message-ID domain from sender address
 	domain := "localhost"
-	if addr, err := mail.ParseAddress(fields.FromAddr); err == nil {
+	if addr, err := ParseAddress(fields.FromAddr); err == nil {
 		if at := strings.LastIndex(addr.Address, "@"); at >= 0 {
 			domain = addr.Address[at+1:]
 		}
@@ -292,7 +291,7 @@ func encodeAddrList(s string) string {
 	if s == "" {
 		return s
 	}
-	addrs, err := mail.ParseAddressList(s)
+	addrs, err := ParseAddressList(s)
 	if err != nil {
 		return mime.QEncoding.Encode("utf-8", s)
 	}

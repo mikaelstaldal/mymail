@@ -1,9 +1,9 @@
 package lda
 
 import (
-	"mime"
 	"testing"
 
+	"github.com/mikaelstaldal/mymail/internal/service"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -202,13 +202,16 @@ func TestDecodeHeader(t *testing.T) {
 			raw:     "summer items@woowstars.shop",
 			decoded: "",
 		},
+		{
+			name:    "Windows-1252 charset in header",
+			raw:     "=?Windows-1252?Q?Max_G=E4rdet_=28gardet=40max=2Ese=29?= <gardet@max.se>",
+			decoded: "Max Gärdet <gardet@max.se>",
+		},
 	}
-
-	dec := new(mime.WordDecoder)
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			decoded := decodeAddrHeader(dec, tc.raw)
+			decoded := service.DecodeAddressHeader(tc.raw)
 			assert.Equal(t, tc.decoded, decoded)
 		})
 	}

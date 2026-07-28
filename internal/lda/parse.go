@@ -13,7 +13,7 @@ import (
 	"time"
 
 	"github.com/jaytaylor/html2text"
-	"golang.org/x/net/html/charset"
+	"github.com/mikaelstaldal/mymail/internal/service"
 
 	"github.com/mikaelstaldal/mymail/internal/model"
 	"github.com/mikaelstaldal/mymail/internal/sanitize"
@@ -29,7 +29,7 @@ func ParseMessage(raw []byte) (*model.ParsedMessage, error) {
 		return nil, err
 	}
 
-	dec := new(mime.WordDecoder)
+	dec := service.NewWordDecoder()
 
 	var date *time.Time
 	if ds := msg.Header.Get("Date"); ds != "" {
@@ -62,11 +62,11 @@ func ParseMessage(raw []byte) (*model.ParsedMessage, error) {
 	}
 	refs = truncateRefs(refs)
 
-	fromAddr := decodeAddrHeader(dec, msg.Header.Get("From"))
-	toAddr := decodeAddrHeader(dec, msg.Header.Get("To"))
-	ccAddr := decodeAddrHeader(dec, msg.Header.Get("Cc"))
-	bccAddr := decodeAddrHeader(dec, msg.Header.Get("Bcc"))
-	replyToAddr := decodeAddrHeader(dec, msg.Header.Get("Reply-To"))
+	fromAddr := service.DecodeAddressHeader(msg.Header.Get("From"))
+	toAddr := service.DecodeAddressHeader(msg.Header.Get("To"))
+	ccAddr := service.DecodeAddressHeader(msg.Header.Get("Cc"))
+	bccAddr := service.DecodeAddressHeader(msg.Header.Get("Bcc"))
+	replyToAddr := service.DecodeAddressHeader(msg.Header.Get("Reply-To"))
 
 	subject, _ := dec.DecodeHeader(msg.Header.Get("Subject"))
 
@@ -208,7 +208,7 @@ func traversePart(rawCT, rawCTE string, headers headerGetter, rawBody []byte, st
 	switch mediaType {
 	case "text/plain":
 		if disposition != "attachment" && state.bodyText == nil {
-			s := decodeCharset(body, rawCT)
+			s := service.DecodeCharset(body, rawCT)
 			state.bodyText = &s
 		} else {
 			state.pending = append(state.pending, pendingPart{
@@ -218,7 +218,7 @@ func traversePart(rawCT, rawCTE string, headers headerGetter, rawBody []byte, st
 		}
 	case "text/html":
 		if disposition != "attachment" && state.bodyHTML == nil {
-			s := decodeCharset(body, rawCT)
+			s := service.DecodeCharset(body, rawCT)
 			state.bodyHTML = &s
 		} else {
 			state.pending = append(state.pending, pendingPart{
@@ -324,76 +324,6 @@ func decodeCTE(data []byte, cte string) []byte {
 	default:
 		return data
 	}
-}
-
-func decodeCharset(data []byte, contentType string) string {
-	r, err := charset.NewReader(bytes.NewReader(data), contentType)
-	if err != nil {
-		return strings.ToValidUTF8(string(data), "�")
-	}
-	decoded, err := io.ReadAll(r)
-	if err != nil {
-		return strings.ToValidUTF8(string(data), "�")
-	}
-	return string(decoded)
-}
-
-func decodeAddrHeader(dec *mime.WordDecoder, raw string) string {
-	if raw == "" {
-		return ""
-	}
-	// Parse the raw header first: net/mail decodes RFC 2047 encoded-words
-	// itself, and parsing before decoding keeps characters such as a comma
-	// inside an encoded display name from being mistaken for an address
-	// separator. Re-render from the parsed addresses.
-	if addrs, err := mail.ParseAddressList(raw); err == nil {
-		parts := make([]string, 0, len(addrs))
-		for _, a := range addrs {
-			name := a.Name
-			// net/mail only decodes RFC 2047 encoded-words found as bare
-			// atoms; some senders wrap the whole encoded-word in quotes,
-			// which net/mail leaves untouched. Decode any such leftovers.
-			if decodedName, err := dec.DecodeHeader(name); err == nil {
-				name = decodedName
-			}
-			if name != "" {
-				parts = append(parts, name+" <"+a.Address+">")
-			} else {
-				parts = append(parts, a.Address)
-			}
-		}
-		return strings.Join(parts, ", ")
-	}
-	// Fallback: the header could not be parsed as an address list. Decode any
-	// encoded-words and accept the result only if it then parses cleanly.
-	decoded := raw
-	if d, err := dec.DecodeHeader(raw); err == nil {
-		decoded = d
-		if _, err := mail.ParseAddressList(decoded); err == nil {
-			return decoded
-		}
-	}
-	// The addr-spec itself is malformed (e.g. an unescaped space), so it
-	// can't be salvaged. Still show the sender's display name instead of
-	// dropping the header entirely.
-	if name := displayNameBeforeAngleAddr(decoded); name != "" {
-		if decodedName, err := dec.DecodeHeader(name); err == nil {
-			name = decodedName
-		}
-		return name
-	}
-	return ""
-}
-
-// displayNameBeforeAngleAddr returns the trimmed, unquoted text preceding the
-// final "<...>" addr-spec in s, or "" if s has no such bracketed address.
-func displayNameBeforeAngleAddr(s string) string {
-	idx := strings.LastIndex(s, "<")
-	if idx < 0 {
-		return ""
-	}
-	name := strings.TrimSpace(s[:idx])
-	return strings.TrimSpace(strings.Trim(name, `"`))
 }
 
 // --- Small utilities ---

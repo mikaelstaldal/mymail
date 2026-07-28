@@ -33,7 +33,7 @@ func validateAndStripAddrList(raw, field string) (string, error) {
 	if clean == "" {
 		return "", nil
 	}
-	addrs, err := mail.ParseAddressList(clean)
+	addrs, err := service.ParseAddressList(clean)
 	if err != nil {
 		return "", fmt.Errorf("invalid %s: %v", field, err)
 	}
