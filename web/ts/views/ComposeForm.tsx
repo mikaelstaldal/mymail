@@ -428,8 +428,9 @@ export function ComposeForm({ replyId, replyAllId, forwardId, draftId }: Compose
 
   // Quoted material, held outside the editor (see QUOTE_MARKER)
   const quoteHtmlRef = useRef('');
-  // null = not derived yet. Deriving it costs O(quote), so it is kept off the
-  // path that opens the form; the first save or preview pays for it instead.
+  // null = not derived yet. Deriving it costs O(quote), so it is done lazily and
+  // cached: whichever comes first of the initial preview, a save, or a send pays
+  // for it. That is one pass over the quote, not one per keystroke.
   const quoteTextRef = useRef<string | null>(null);
   const [quoteSize, setQuoteSize] = useState(0);
   const [quoteOpen, setQuoteOpen] = useState(false);
@@ -736,6 +737,9 @@ export function ComposeForm({ replyId, replyAllId, forwardId, draftId }: Compose
       // quoted half is held aside so typing stays O(reply), not O(thread).
       const parts = buildComposeParts(mode as 'new' | 'reply' | 'replyall' | 'forward', msg, selectedIdent ?? null);
       setQuote(parts.quoteHtml);
+      // A reply is written against what it answers, so start with the quote
+      // showing. Forwards and reopened drafts stay collapsed.
+      if (mode === 'reply' || mode === 'replyall') setQuoteOpen(true);
       if (editorRef.current && quillRef.current) {
         quillRef.current.clipboard.dangerouslyPasteHTML(parts.editorHtml);
         bodyHtmlRef.current = quillRef.current.root.innerHTML;

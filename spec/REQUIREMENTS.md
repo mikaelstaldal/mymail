@@ -594,7 +594,7 @@ On first load the UI reads `localStorage` for the last selected folder and navig
 
    - **Storage format:** the two halves are joined as `<editable half><!--mymail-quote--><quoted half>` in `body_html`. The marker lets a reopened draft be split apart again. Drafts are stored verbatim, so the marker survives a save/reopen cycle; the outgoing sanitiser drops comments, so it never reaches a recipient.
    - **Plain-text alternative:** `body_text` is the editor's text, then a blank line, then a plain-text rendering of the quoted half. That rendering is derived solely from the quoted HTML — `<br>` and block elements end a line, and each `<blockquote>` level adds one `> ` marker to every line it contains — so reopening a draft reconstructs exactly the same text. Line endings in the source `body_text` are normalised to `\n` before quoting, so CRLF-terminated originals do not produce blank lines between quoted lines.
-   - **Quoted-text control:** the read-only block shows the quote's size and can be expanded to review it as plain text, or removed entirely, in which case neither half of the quote is sent.
+   - **Quoted-text control:** the read-only block shows the quote's size and can be expanded to review it as plain text, or removed entirely, in which case neither half of the quote is sent. Reply and Reply All open with the block already expanded, so the message being answered is visible while writing; Forward and reopened drafts open collapsed.
 
    Signatures are pre-populated from the selected identity, with `\n-- \n` delimiter. Changing the From identity swaps the signature block; this affects the editable half only, since the quoted half never contains a signature.
 
