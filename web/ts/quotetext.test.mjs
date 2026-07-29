@@ -27,7 +27,7 @@ globalThis.document = window.document;
 globalThis.DOMParser = window.DOMParser;
 globalThis.Node = window.Node;
 
-const { quoteHtmlToText } = await import(
+const { quoteHtmlToText, stripLeadingBlankHtml, stripLeadingBlankLines } = await import(
   path.resolve(__dirname, '../static/util/quotetext.js')
 );
 
@@ -95,6 +95,52 @@ test('runs of blank lines collapse to a single one', () => {
 });
 
 // ---------------------------------------------------------------------------
+// Whitespace between tags is layout, not text
+// ---------------------------------------------------------------------------
+//
+// A pretty-printed body_html carries a newline and a run of indentation between
+// every pair of tags. Reading those as line breaks turned a nested-table
+// message into a screenful of bare "> " lines with the indentation preserved.
+
+test('indentation between blocks does not become blank lines', () => {
+  assert.equal(quoteHtmlToText('<div>\n  <p>one</p>\n  <p>two</p>\n</div>'), 'one\ntwo');
+});
+
+test('indentation before the text of a block is dropped', () => {
+  assert.equal(quoteHtmlToText('<p>\n      body\n</p>'), 'body');
+});
+
+test('a newline inside a paragraph is a word gap, not a line break', () => {
+  // This is how a browser renders it, and <br> remains the way to break a line.
+  assert.equal(quoteHtmlToText('<p>one\ntwo</p>'), 'one two');
+});
+
+test('whitespace between two inline runs survives as a single space', () => {
+  assert.equal(quoteHtmlToText('<p><b>one</b>\n  <i>two</i></p>'), 'one two');
+});
+
+test('a non-breaking space is content and is never collapsed', () => {
+  assert.equal(quoteHtmlToText('<p>a&nbsp;&nbsp;b</p>'), 'a  b');
+  // A spacer paragraph keeps its line — only the surrounding indentation goes.
+  assert.equal(quoteHtmlToText('<p>a</p>\n<p>&nbsp;</p>\n<p>b</p>'), 'a\n\u00a0\nb');
+});
+
+test('a pretty-printed nested-table message reads as its text', () => {
+  // The shape of a typical marketing mail: layout tables, one line of copy.
+  const body = [
+    '<div>', '  <table>', '    <tr>', '      <td>',
+    '        <table>', '          <tr>', '            <td>',
+    '              <p>Review the new publishing limits.</p>',
+    '            </td>', '          </tr>', '        </table>',
+    '      </td>', '    </tr>', '  </table>', '</div>',
+  ].join('\n');
+  assert.equal(
+    quoteHtmlToText(`<p>On Tue, Alice wrote:</p><blockquote>${body}</blockquote>`),
+    'On Tue, Alice wrote:\n> Review the new publishing limits.',
+  );
+});
+
+// ---------------------------------------------------------------------------
 // Text content
 // ---------------------------------------------------------------------------
 
@@ -102,9 +148,10 @@ test('character references are decoded to the characters they name', () => {
   assert.equal(quoteHtmlToText('<p>&amp; &lt; &gt; &quot; &nbsp;x</p>'), '& < > "  x');
 });
 
-test('newlines inside the source markup start new lines', () => {
-  // A pretty-printed body_html carries real newlines in its text nodes.
+test('newlines inside a <pre> start new lines', () => {
+  // Whitespace is text there, so it survives the collapsing done everywhere else.
   assert.equal(quoteHtmlToText('<pre>one\ntwo</pre>'), 'one\ntwo');
+  assert.equal(quoteHtmlToText('<pre>a\n\n  b</pre>'), 'a\n\n  b');
 });
 
 test('comments are dropped', () => {
@@ -236,4 +283,77 @@ test('nesting past the depth cap flattens instead of overflowing the stack', () 
   // 400th blockquote sits at depth 400 and is flattened to its text. The 399
   // above it each contributed a marker.
   assert.equal((text.match(/> /g) ?? []).length, 399);
+});
+
+// ---------------------------------------------------------------------------
+// Trimming the top of the quoted body
+// ---------------------------------------------------------------------------
+//
+// buildComposeParts runs the replied-to body through these before wrapping it,
+// so the attribution is followed by the first quoted word rather than by a run
+// of bare "> " lines — a run that would otherwise be re-quoted on every round.
+
+test('an empty body stays empty', () => {
+  assert.equal(stripLeadingBlankHtml(''), '');
+  assert.equal(stripLeadingBlankHtml('<p><br></p>'), '');
+});
+
+test('leading empty blocks are dropped', () => {
+  assert.equal(stripLeadingBlankHtml('<p><br></p><p>body</p>'), '<p>body</p>');
+  assert.equal(stripLeadingBlankHtml('<div><br></div><div>body</div>'), '<div>body</div>');
+  assert.equal(stripLeadingBlankHtml('<br><br>body'), 'body');
+  assert.equal(stripLeadingBlankHtml('<p>&nbsp;</p><p>body</p>'), '<p>body</p>');
+  assert.equal(stripLeadingBlankHtml('  \n <p>body</p>'), '<p>body</p>');
+});
+
+test('blank lines further down are left alone', () => {
+  assert.equal(
+    stripLeadingBlankHtml('<p><br></p><p>a</p><p><br></p><p>b</p><p><br></p>'),
+    '<p>a</p><p><br></p><p>b</p><p><br></p>',
+  );
+});
+
+test('a wrapped body is trimmed inside its wrapper', () => {
+  // Mailers routinely wrap the whole body in one or more <div>s.
+  assert.equal(
+    stripLeadingBlankHtml('<div><div><p><br></p><p>body</p></div></div>'),
+    '<div><div><p>body</p></div></div>',
+  );
+  // Including a previous round's quote, which is what nests deepest.
+  assert.equal(
+    stripLeadingBlankHtml('<blockquote><p><br></p><p>older</p></blockquote>'),
+    '<blockquote><p>older</p></blockquote>',
+  );
+});
+
+test('a text-free block that is still content survives', () => {
+  // Dropping these would silently lose the top of the message.
+  assert.equal(stripLeadingBlankHtml('<p><img src="cid:x"></p>'), '<p><img src="cid:x"></p>');
+  assert.equal(stripLeadingBlankHtml('<hr><p>body</p>'), '<hr><p>body</p>');
+  assert.equal(
+    stripLeadingBlankHtml('<table><tr><td></td></tr></table>'),
+    '<table><tbody><tr><td></td></tr></tbody></table>',
+  );
+});
+
+test('whitespace inside a <pre> is not trimmed', () => {
+  // It is part of the text there, not layout, so we never descend into a <pre>.
+  // (The one newline the HTML parser itself eats right after the open tag is
+  // outside our control and was never in the document to begin with.)
+  assert.equal(stripLeadingBlankHtml('<pre>  indented\n\n  more</pre>'), '<pre>  indented\n\n  more</pre>');
+  assert.equal(stripLeadingBlankHtml('<p><br></p><pre>  x</pre>'), '<pre>  x</pre>');
+});
+
+test('trimming leaves nothing for the text alternative to quote', () => {
+  const quoted = `<p>On Tue, Alice wrote:</p><blockquote>${stripLeadingBlankHtml(
+    '<div><p><br></p><p><br></p><p>First line.</p></div>',
+  )}</blockquote>`;
+  assert.equal(quoteHtmlToText(quoted), 'On Tue, Alice wrote:\n> First line.');
+});
+
+test('leading blank lines are dropped from a text-only body', () => {
+  assert.equal(stripLeadingBlankLines('\n\n  \nbody\n\nmore\n'), 'body\n\nmore\n');
+  assert.equal(stripLeadingBlankLines('body'), 'body');
+  assert.equal(stripLeadingBlankLines('   body'), '   body'); // indentation is not a blank line
+  assert.equal(stripLeadingBlankLines(''), '');
 });

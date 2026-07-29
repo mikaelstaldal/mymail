@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, useCallback } from 'preact/hooks';
 import { api, NotFoundError } from '../api/client.js';
 import { navigate } from '../router.js';
 import { showToast } from '../util/toast.js';
-import { quoteHtmlToText } from '../util/quotetext.js';
+import { quoteHtmlToText, stripLeadingBlankHtml, stripLeadingBlankLines } from '../util/quotetext.js';
 import type { components } from '../api/types.js';
 
 type Identity = components['schemas']['Identity'];
@@ -133,10 +133,13 @@ function buildComposeParts(
   }
 
   // reply / replyall
+  // The quoted body is trimmed at the top so the first quoted line follows the
+  // attribution directly; otherwise the blank lines a mailer left above its own
+  // body become bare `> ` lines that pile up on every further round.
   const attribution = `<p>On ${esc(date)}, ${esc(sender)} wrote:</p>`;
   const body = msg.body_html
-    ? `<blockquote style="margin:0 0 0 0.8ex;border-left:1px solid #ccc;padding-left:1ex">${msg.body_html}</blockquote>`
-    : `<p>${normalizeNewlines(msg.body_text).split('\n').map(l => '&gt; ' + esc(l)).join('<br>')}</p>`;
+    ? `<blockquote style="margin:0 0 0 0.8ex;border-left:1px solid #ccc;padding-left:1ex">${stripLeadingBlankHtml(msg.body_html)}</blockquote>`
+    : `<p>${stripLeadingBlankLines(normalizeNewlines(msg.body_text)).split('\n').map(l => '&gt; ' + esc(l)).join('<br>')}</p>`;
 
   return { editorHtml, quoteHtml: `${attribution}${body}` };
 }
