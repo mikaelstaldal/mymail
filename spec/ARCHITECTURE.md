@@ -40,6 +40,9 @@ Web UI assets embedded in the binary via `//go:embed`.
 - Preact + JSX for reactive components (vendored, no CDN dependency).
 - Quill rich-text editor (vendored, no CDN dependency).
 - Plain CSS for styling.
+- `node --test` for frontend unit tests, run against the compiled output in
+  `web/static/` with jsdom supplying the DOM (vendored, no package-manager
+  install at build time).
 
 
 ## Key Architectural Decisions

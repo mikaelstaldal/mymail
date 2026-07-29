@@ -30,6 +30,13 @@ run() {
 
 run openapi-typescript openapi.yaml -o web/ts/api/types.ts
 run tsc --project web/ts/tsconfig.json
+
+# Unpack the committed jsdom install tree (idempotent — a no-op once unpacked),
+# then run the frontend tests against the compiled output in web/static/.
+# tar only; no npm/npx/yarn — see web/ts/vendor/test/unpack.sh.
+run web/ts/vendor/test/unpack.sh
+run node --test web/ts/quotetext.test.mjs
+
 run go generate ./...
 run go build -trimpath -buildvcs=true -tags netgo -o "$OUTPUT_DIR/mymail" .
 run go build -trimpath -buildvcs=true -tags netgo -o "$OUTPUT_DIR/mymail-lda" ./cmd/lda/

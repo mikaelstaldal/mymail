@@ -2,6 +2,7 @@
 # Maintainer-only script. Fetches the pinned upstream sources for the vendored
 # browser libraries (Preact, Quill) via npm and copies each into
 # web/static/vendor/, plus Preact's .d.ts type stubs into web/ts/vendor/preact/.
+# It also vendors the test-only jsdom install tree under web/ts/vendor/test/.
 #
 # Both libraries ship prebuilt, self-contained files — Preact's dist/*.module.js
 # ESM modules and Quill's dist/quill.js UMD global + dist/quill.snow.css — so no
@@ -32,6 +33,7 @@ BROWSER_OUT="$VENDOR_DIR/../../static/vendor"
 PREACT_OUT="$BROWSER_OUT/preact"    # runtime ESM modules served to the browser
 QUILL_OUT="$BROWSER_OUT/quill"      # Quill UMD global + snow theme CSS
 PREACT_TYPES="$VENDOR_DIR/preact"   # .d.ts type stubs (compile-time only)
+TEST_DIR="$VENDOR_DIR/test"         # jsdom install tree for the node --test suite
 
 # Read an installed dependency's version from its package.json. Used to stamp the
 # vendored filenames so each file's name records its upstream release.
@@ -112,7 +114,32 @@ cp "$QUILL_SRC/dist/quill.snow.css" "$QUILL_OUT/quill-$QUILL_VER.snow.css"
 
 echo "Wrote $QUILL_OUT/quill-$QUILL_VER.js + quill-$QUILL_VER.snow.css"
 
-# --- 3. Reminder: keep web/static/index.html in sync -----------------------
+# --- 3. Test-only jsdom install tree (never shipped to the browser) ---------
+#
+# The `node --test` frontend tests need a DOM. jsdom cannot be reduced to a
+# single self-contained file — it does dynamic require() of Node builtins and
+# reads data files (its default stylesheet, the HTML entity table) from its own
+# package dir at runtime — so its dependency closure is vendored instead. It
+# gets its own throwaway install under test/, isolated from the browser deps
+# above, so nothing but jsdom's own closure ends up in the tarball.
+
+(
+  cd "$TEST_DIR"
+  npm install --package-lock-only --ignore-scripts
+  npm ci --ignore-scripts
+
+  # ONE deterministic tarball rather than ~1800 loose files. --sort/--mtime/
+  # --numeric-owner plus `gzip -n` make the archive byte-identical across
+  # rebuilds, so an unchanged tree is a no-diff in git. unpack.sh restores it at
+  # test time using tar alone, keeping npm out of build.sh and CI.
+  tar --sort=name --owner=0 --group=0 --numeric-owner --mtime='UTC 2020-01-01' \
+      -cf - node_modules | gzip -n -9 > jsdom-node_modules.tar.gz
+  rm -rf node_modules
+)
+
+echo "Wrote $TEST_DIR/jsdom-node_modules.tar.gz (jsdom $(node -p "require('$TEST_DIR/package.json').dependencies.jsdom"))"
+
+# --- 4. Reminder: keep web/static/index.html in sync -----------------------
 #
 # The filenames are version-stamped, so update index.html by hand whenever a
 # version bumped: the Preact import map and the Quill <script>/<link> tags.
