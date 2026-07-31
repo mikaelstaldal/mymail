@@ -19,7 +19,7 @@ In addition to the built-in web interface, there is also
 - **Threading** — messages are grouped by conversation.
 - **Deferred send** — schedule messages for future delivery; the background scheduler retries on failure.
 - **Snooze** — temporarily hide messages and have them reappear later.
-- **Search** — full-text search powered by SQLite FTS5.
+- **Search** — full-text search powered by SQLite FTS5, refinable by folder, date range, and From/To address.
 - **Filters** — rule-based delivery routing (move, trash, mark-read, drop) evaluated at delivery time.
 - **Spam detection** — reads spam verdict headers set by the MTA pipeline (SpamAssassin, Rspamd, etc.).
 - **Contacts** — auto-populated from incoming and outgoing mail.

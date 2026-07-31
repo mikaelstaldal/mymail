@@ -639,6 +639,55 @@ test('search rejects an empty query', async () => {
   assert.equal((await call(newState(), 'GET', '/messages/search?q=%20%20')).status, 400);
 });
 
+test('search refines on from_addr and to_addr the way repository.SearchMessages does', async () => {
+  const state = newState([
+    message({
+      id: 1, fromAddr: '"Alice Andersson" <alice@example.com>', toAddr: 'demo@example.com',
+      bodyText: 'the needle is here',
+    }),
+    message({
+      id: 2, fromAddr: 'bob@other.example', toAddr: 'team@example.com',
+      ccAddr: 'demo@example.com', bodyText: 'the needle is here',
+    }),
+  ]);
+  const ids = async (query) =>
+    (await call(state, 'GET', '/messages/search?q=needle' + query)).body.items.map((m) => m.id);
+
+  assert.deepEqual(await ids(''), [1, 2], 'unfiltered');
+  assert.deepEqual(await ids('&from_addr=alice%40example.com'), [1]);
+  assert.deepEqual(await ids('&from_addr=ALICE'), [1], 'case-insensitive');
+  assert.deepEqual(await ids('&from_addr=Andersson'), [1], 'the display name is part of from_addr');
+  assert.deepEqual(await ids('&to_addr=team%40'), [2], 'matches the To header');
+  assert.deepEqual(await ids('&to_addr=demo%40example.com'), [1, 2], 'and the Cc header');
+  assert.deepEqual(await ids('&from_addr=bob&to_addr=demo%40example.com'), [2], 'ANDed');
+  assert.deepEqual(await ids('&from_addr=carol'), [], 'no match');
+  assert.deepEqual(await ids('&from_addr='), [1, 2], 'a blank value is no filter');
+  assert.deepEqual(await ids('&to_addr=%20%20'), [1, 2], 'and so is whitespace only');
+  assert.deepEqual(await ids('&to_addr=t%25m%40'), [], 'LIKE wildcards are literals');
+
+  const tooLong = await call(state, 'GET', `/messages/search?q=needle&from_addr=${'a'.repeat(201)}`);
+  assert.equal(tooLong.status, 400, 'over the maxLength the server rejects with 400');
+});
+
+// The server folds with unicode_lower() (see repository/sqlfunc.go) precisely so
+// it agrees with toLowerCase() here; SQLite's built-in lower() is ASCII-only and
+// would have made these two disagree.
+test('search folds non-ASCII addresses the way the server does', async () => {
+  const state = newState([
+    message({
+      id: 1, fromAddr: '"Åsa Öberg" <asa@example.com>', toAddr: '"Émile Ünger" <emile@example.com>',
+      bodyText: 'the needle is here',
+    }),
+  ]);
+  const ids = async (query) =>
+    (await call(state, 'GET', '/messages/search?q=needle' + query)).body.items.map((m) => m.id);
+
+  assert.deepEqual(await ids('&from_addr=' + encodeURIComponent('Åsa')), [1], 'as stored');
+  assert.deepEqual(await ids('&from_addr=' + encodeURIComponent('åsa')), [1], 'lowercased');
+  assert.deepEqual(await ids('&from_addr=' + encodeURIComponent('ÅSA ÖBERG')), [1], 'uppercased');
+  assert.deepEqual(await ids('&to_addr=' + encodeURIComponent('émile ünger')), [1], 'to lowercased');
+});
+
 test('the message body is served as a document with its own CSP', async () => {
   const state = newState([message({ id: 1, bodyHtml: '<p>hi</p>' })]);
   const res = await call(state, 'GET', '/messages/1/body');

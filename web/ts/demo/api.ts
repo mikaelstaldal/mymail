@@ -967,6 +967,10 @@ async function moveMessages(state: DemoState, body: Record<string, unknown>): Pr
  * phraseMatches). What it cannot reproduce is `ORDER BY rank`: bm25 needs
  * corpus statistics FTS5 maintains and this does not, so results are ordered
  * by a match-count score and then by date — the one search divergence.
+ *
+ * The from_addr/to_addr refinements narrow that result set the way
+ * repository.SearchMessages does: a case-insensitive substring, with to_addr
+ * matching either the To or the Cc header.
  */
 function searchMessages(state: DemoState, url: URL): Response {
   const q = (url.searchParams.get('q') ?? '').trim();
@@ -979,6 +983,8 @@ function searchMessages(state: DemoState, url: URL): Response {
   const folderId = rawFolder === null ? null : Number(rawFolder);
   const dateFrom = parseDateParam(url, 'date_from');
   const dateTo = parseDateParam(url, 'date_to');
+  const fromAddr = addressFilterParam(url, 'from_addr');
+  const toAddr = addressFilterParam(url, 'to_addr');
   const { limit, offset } = pagination(url);
   const queryTokens = tokenizeText(q).map((t) => t.lower);
 
@@ -992,6 +998,10 @@ function searchMessages(state: DemoState, url: URL): Response {
     }
     if (dateFrom !== null && msg.date < dateFrom) continue;
     if (dateTo !== null && msg.date >= dateTo) continue;
+    if (fromAddr !== null && !containsFold(msg.fromAddr, fromAddr)) continue;
+    if (toAddr !== null && !containsFold(msg.toAddr, toAddr) && !containsFold(msg.ccAddr, toAddr)) {
+      continue;
+    }
 
     const score = searchScore(msg, queryTokens);
     if (score > 0) scored.push({ msg, score });
@@ -1013,6 +1023,21 @@ function parseDateParam(url: URL, name: string): string | null {
   if (raw === null || raw === '') return null;
   const at = Date.parse(raw);
   return Number.isNaN(at) ? null : toTimestamp(new Date(at));
+}
+
+/**
+ * An optional address refinement. Mirrors handler.optAddressFilter: absent,
+ * empty and whitespace-only all mean "no filter"; over the cap is a 400, which
+ * on the server ogen raises from the schema's maxLength.
+ */
+function addressFilterParam(url: URL, name: string): string | null {
+  const raw = url.searchParams.get(name);
+  if (raw === null) return null;
+  if (runeLength(raw) > MAX_ADDR_FILTER_LEN) {
+    throw validationError(`${name} must not exceed ${MAX_ADDR_FILTER_LEN} characters`);
+  }
+  const trimmed = raw.trim();
+  return trimmed === '' ? null : trimmed;
 }
 
 /** Weighted so a subject hit outranks a body hit, standing in for bm25. */

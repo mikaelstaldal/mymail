@@ -14,6 +14,27 @@ interface SearchViewProps {
   folders: Folder[];
 }
 
+/**
+ * Everything that narrows a query beyond the query text itself. Kept as one
+ * value so the form state and the last-submitted state stay in step, and so
+ * pagination re-runs exactly what was submitted.
+ */
+interface Refinements {
+  folderId: number | undefined;
+  dateFrom: string;
+  dateTo: string;
+  fromAddr: string;
+  toAddr: string;
+}
+
+const NO_REFINEMENTS: Refinements = {
+  folderId: undefined,
+  dateFrom: '',
+  dateTo: '',
+  fromAddr: '',
+  toAddr: '',
+};
+
 function dateInputToISO(dateStr: string, addDays = 0): string {
   const [y, m, d] = dateStr.split('-').map(Number);
   const date = new Date(y, m - 1, d + addDays, 0, 0, 0);
@@ -28,15 +49,11 @@ function dateInputToISO(dateStr: string, addDays = 0): string {
 
 export function SearchView({ query, folders }: SearchViewProps) {
   const [inputQ, setInputQ] = useState(query);
-  const [folderId, setFolderId] = useState<number | undefined>(undefined);
-  const [dateFrom, setDateFrom] = useState('');
-  const [dateTo, setDateTo] = useState('');
+  const [refine, setRefine] = useState<Refinements>(NO_REFINEMENTS);
 
   // Last-submitted params — used for pagination so live form edits don't affect prev/next
   const [activeQ, setActiveQ] = useState(query);
-  const [activeFolderId, setActiveFolderId] = useState<number | undefined>(undefined);
-  const [activeDateFrom, setActiveDateFrom] = useState('');
-  const [activeDateTo, setActiveDateTo] = useState('');
+  const [active, setActive] = useState<Refinements>(NO_REFINEMENTS);
 
   const [items, setItems] = useState<MessageSummary[]>([]);
   const [snippets, setSnippets] = useState<Record<number, string>>({});
@@ -46,16 +63,17 @@ export function SearchView({ query, folders }: SearchViewProps) {
   const [error, setError] = useState<string | null>(null);
   const [hasSearched, setHasSearched] = useState(false);
 
-  // Prevents useEffect from double-firing when we navigate internally on submit
-  const skipQueryEffect = useRef(false);
+  // The query text the view has already searched for, so the effect below can
+  // tell an external navigation apart from the one handleSubmit just made.
+  //
+  // A "skip the next effect" boolean cannot do that job: submitting a
+  // refinement without editing the query text assigns the identical hash, which
+  // fires no hashchange, so the query prop never changes, the effect never
+  // runs, and the flag stays set — swallowing the next query that does arrive
+  // from the toolbar.
+  const handledQuery = useRef<string | null>(null);
 
-  const runSearch = useCallback(async (
-    q: string,
-    fId: number | undefined,
-    df: string,
-    dt: string,
-    off: number,
-  ) => {
+  const runSearch = useCallback(async (q: string, r: Refinements, off: number) => {
     setLoading(true);
     setError(null);
     try {
@@ -63,9 +81,13 @@ export function SearchView({ query, folders }: SearchViewProps) {
         limit: PAGE_SIZE,
         offset: off,
       };
-      if (fId != null) opts.folder_id = fId;
-      if (df) opts.date_from = dateInputToISO(df);
-      if (dt) opts.date_to = dateInputToISO(dt, 1);
+      if (r.folderId != null) opts.folder_id = r.folderId;
+      if (r.dateFrom) opts.date_from = dateInputToISO(r.dateFrom);
+      if (r.dateTo) opts.date_to = dateInputToISO(r.dateTo, 1);
+      const fromAddr = r.fromAddr.trim();
+      const toAddr = r.toAddr.trim();
+      if (fromAddr) opts.from_addr = fromAddr;
+      if (toAddr) opts.to_addr = toAddr;
       const result = await api.messages.search(q, opts);
       setItems(result.items);
       const map: Record<number, string> = {};
@@ -85,21 +107,15 @@ export function SearchView({ query, folders }: SearchViewProps) {
 
   // Run initial search when query prop changes (e.g. toolbar navigation)
   useEffect(() => {
-    if (skipQueryEffect.current) {
-      skipQueryEffect.current = false;
-      return;
-    }
     const q = query.trim();
+    if (handledQuery.current === q) return;
+    handledQuery.current = q;
     setInputQ(query);
-    setFolderId(undefined);
-    setDateFrom('');
-    setDateTo('');
+    setRefine(NO_REFINEMENTS);
     setActiveQ(q);
-    setActiveFolderId(undefined);
-    setActiveDateFrom('');
-    setActiveDateTo('');
+    setActive(NO_REFINEMENTS);
     if (q) {
-      void runSearch(q, undefined, '', '', 0);
+      void runSearch(q, NO_REFINEMENTS, 0);
     }
   }, [query, runSearch]);
 
@@ -108,12 +124,14 @@ export function SearchView({ query, folders }: SearchViewProps) {
     const q = inputQ.trim();
     if (!q) return;
     setActiveQ(q);
-    setActiveFolderId(folderId);
-    setActiveDateFrom(dateFrom);
-    setActiveDateTo(dateTo);
-    skipQueryEffect.current = true;
-    navigate(`#/search?q=${encodeURIComponent(q)}`);
-    void runSearch(q, folderId, dateFrom, dateTo, 0);
+    setActive(refine);
+    handledQuery.current = q;
+    // URLSearchParams, not encodeURIComponent: the route parser reads q back
+    // with URLSearchParams, which decodes "+" as a space. Encoding the two the
+    // same way keeps the round-trip exact, so a query containing "+" still
+    // compares equal to handledQuery above.
+    navigate(`#/search?${new URLSearchParams({ q }).toString()}`);
+    void runSearch(q, refine, 0);
   }
 
   const hasPrev = offset > 0;
@@ -134,10 +152,10 @@ export function SearchView({ query, folders }: SearchViewProps) {
         />
         <select
           class="search-folder-select"
-          value={folderId ?? ''}
+          value={refine.folderId ?? ''}
           onChange={(e) => {
             const v = (e.target as HTMLSelectElement).value;
-            setFolderId(v === '' ? undefined : Number(v));
+            setRefine(r => ({ ...r, folderId: v === '' ? undefined : Number(v) }));
           }}
           aria-label="Search in folder"
         >
@@ -146,24 +164,54 @@ export function SearchView({ query, folders }: SearchViewProps) {
             <option key={f.id} value={String(f.id)}>{f.name}</option>
           ))}
         </select>
-        <label class="search-date-label" htmlFor="search-date-from">From</label>
-        <input
-          id="search-date-from"
-          class="search-date-input"
-          type="date"
-          value={dateFrom}
-          onChange={(e) => setDateFrom((e.target as HTMLInputElement).value)}
-          aria-label="Date from"
-        />
-        <label class="search-date-label" htmlFor="search-date-to">To</label>
-        <input
-          id="search-date-to"
-          class="search-date-input"
-          type="date"
-          value={dateTo}
-          onChange={(e) => setDateTo((e.target as HTMLInputElement).value)}
-          aria-label="Date to"
-        />
+        {/* Each label stays glued to its own control: the row wraps, and a pair
+            split across two lines reads as belonging to the wrong neighbour. */}
+        <div class="search-field">
+          <label class="search-field-label" htmlFor="search-from-addr">From</label>
+          <input
+            id="search-from-addr"
+            class="search-addr-input"
+            type="search"
+            placeholder="sender@example.com"
+            value={refine.fromAddr}
+            onInput={(e) => setRefine(r => ({ ...r, fromAddr: (e.target as HTMLInputElement).value }))}
+            aria-label="From address"
+          />
+        </div>
+        <div class="search-field">
+          <label class="search-field-label" htmlFor="search-to-addr">To</label>
+          <input
+            id="search-to-addr"
+            class="search-addr-input"
+            type="search"
+            placeholder="recipient@example.com"
+            value={refine.toAddr}
+            onInput={(e) => setRefine(r => ({ ...r, toAddr: (e.target as HTMLInputElement).value }))}
+            aria-label="To address"
+          />
+        </div>
+        <div class="search-field">
+          <label class="search-field-label" htmlFor="search-date-from">From date</label>
+          <input
+            id="search-date-from"
+            class="search-date-input"
+            type="date"
+            value={refine.dateFrom}
+            onChange={(e) => setRefine(r => ({ ...r, dateFrom: (e.target as HTMLInputElement).value }))}
+            aria-label="From date"
+          />
+        </div>
+        <div class="search-field">
+          <label class="search-field-label" htmlFor="search-date-to">To date</label>
+          <input
+            id="search-date-to"
+            class="search-date-input"
+            type="date"
+            value={refine.dateTo}
+            onChange={(e) => setRefine(r => ({ ...r, dateTo: (e.target as HTMLInputElement).value }))}
+            aria-label="To date"
+          />
+        </div>
         <button class="btn btn-primary btn-sm" type="submit">Search</button>
       </form>
 
@@ -183,7 +231,7 @@ export function SearchView({ query, folders }: SearchViewProps) {
             <button
               class="btn btn-ghost btn-sm btn-icon"
               disabled={!hasPrev}
-              onClick={() => void runSearch(activeQ, activeFolderId, activeDateFrom, activeDateTo, offset - PAGE_SIZE)}
+              onClick={() => void runSearch(activeQ, active, offset - PAGE_SIZE)}
               aria-label="Previous page"
             >
               ‹
@@ -191,7 +239,7 @@ export function SearchView({ query, folders }: SearchViewProps) {
             <button
               class="btn btn-ghost btn-sm btn-icon"
               disabled={!hasNext}
-              onClick={() => void runSearch(activeQ, activeFolderId, activeDateFrom, activeDateTo, offset + PAGE_SIZE)}
+              onClick={() => void runSearch(activeQ, active, offset + PAGE_SIZE)}
               aria-label="Next page"
             >
               ›
@@ -205,7 +253,7 @@ export function SearchView({ query, folders }: SearchViewProps) {
               onToggleSelectAll={() => undefined}
               onRowClick={(id) => navigate(`#/message/${id}`)}
               snippets={snippets}
-              folders={activeFolderId == null ? folders : undefined}
+              folders={active.folderId == null ? folders : undefined}
             />
           </div>
         </>

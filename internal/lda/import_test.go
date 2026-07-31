@@ -266,6 +266,24 @@ func TestResolveFolder(t *testing.T) {
 		require.NoError(t, err)
 		assert.Equal(t, id1, id2, "case-insensitive lookup should find existing")
 	})
+
+	// The lookup folds with unicode_lower, as the nameCache key does. With
+	// SQLite's ASCII-only lower() this would miss and create a second folder
+	// differing from the first only in case.
+	t.Run("case-insensitive lookup folds non-ASCII names", func(t *testing.T) {
+		db := openImportTestDB(t)
+		// The two spellings must differ in a non-ASCII letter (Ä/ä, Ö/ö), or
+		// ASCII-only folding would happen to agree and prove nothing.
+		id1, err := resolveFolder(ctx, db, "RÄKNINGAR ÖVRIGT", make(map[string]int64))
+		require.NoError(t, err)
+		id2, err := resolveFolder(ctx, db, "räkningar övrigt", make(map[string]int64))
+		require.NoError(t, err)
+		assert.Equal(t, id1, id2, "non-ASCII lookup should find existing")
+
+		var folders int
+		require.NoError(t, db.QueryRow(`SELECT COUNT(*) FROM folders WHERE id >= 100`).Scan(&folders))
+		assert.Equal(t, 1, folders, "no duplicate folder created")
+	})
 }
 
 // --- importMaildir tests ---

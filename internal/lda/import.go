@@ -108,8 +108,12 @@ func resolveFolder(ctx context.Context, db *sql.DB, name string, nameCache map[s
 	if id, ok := nameCache[lower]; ok {
 		return id, nil
 	}
+	// unicode_lower (see repository/sqlfunc.go), matched against the same folded
+	// name the cache is keyed on. SQLite's built-in lower() folds ASCII only, so
+	// an existing "Räkningar" would not be found for an import into "räkningar"
+	// and a second folder differing from it only in case would be created.
 	var id int64
-	err := db.QueryRowContext(ctx, `SELECT id FROM folders WHERE LOWER(name) = LOWER(?)`, name).Scan(&id)
+	err := db.QueryRowContext(ctx, `SELECT id FROM folders WHERE unicode_lower(name) = ?`, lower).Scan(&id)
 	if err == nil {
 		nameCache[lower] = id
 		return id, nil

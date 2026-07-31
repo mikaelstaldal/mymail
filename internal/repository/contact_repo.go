@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	oas "github.com/mikaelstaldal/mymail/internal/api"
@@ -44,7 +45,11 @@ func scanContact(scan func(dest ...any) error) (oas.Contact, error) {
 }
 
 const contactSelectSQL = `SELECT id, address, name, created_at, updated_at FROM contacts`
-const contactOrderSQL = ` ORDER BY CASE WHEN name = '' THEN 1 ELSE 0 END, LOWER(name), LOWER(address)`
+
+// unicode_lower rather than SQLite's built-in lower(), which folds ASCII only —
+// see sqlfunc.go. In the ordering that would file "Åsa" apart from "åsa"; in
+// the filter below it would make the search miss them.
+const contactOrderSQL = ` ORDER BY CASE WHEN name = '' THEN 1 ELSE 0 END, unicode_lower(name), unicode_lower(address)`
 
 // ListContacts returns contacts with an optional substring filter on name+address, plus the total count.
 func (r *ContactRepository) ListContacts(ctx context.Context, q *string, limit, offset int) ([]oas.Contact, int, error) {
@@ -53,8 +58,13 @@ func (r *ContactRepository) ListContacts(ctx context.Context, q *string, limit, 
 		args  []any
 	)
 	if q != nil {
-		where = ` WHERE LOWER(name) LIKE '%' || LOWER(?) || '%' OR LOWER(address) LIKE '%' || LOWER(?) || '%'`
-		args = []any{*q, *q}
+		// instr() rather than LIKE, as in SearchMessages: under LIKE the % and _
+		// a user types are wildcards, so searching for "50%" or "a_b" quietly
+		// means something else. An empty needle still matches every row —
+		// instr(x, '') is 1 — so a blank filter behaves as it did.
+		where = ` WHERE instr(unicode_lower(name), ?) > 0 OR instr(unicode_lower(address), ?) > 0`
+		lo := strings.ToLower(*q)
+		args = []any{lo, lo}
 	}
 
 	var total int

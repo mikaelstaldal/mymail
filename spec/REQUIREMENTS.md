@@ -622,7 +622,7 @@ On first load the UI reads `localStorage` for the last selected folder and navig
 
 4. **Scheduled folder message detail** — Shows scheduled send time; **Edit schedule** button opens an inline datetime picker to update `send_at` (same > 60 s threshold as initial scheduling); **Send now** button immediately sends the message (on sendmail failure it is moved to Drafts and an error is shown); **Cancel schedule** button moves message to Drafts without sending.
 
-5. **Search** — Full-text search results as a message list. A folder selector (dropdown) allows limiting results to a single folder; when no folder is selected the search is global (all folders except Junk, Drafts, and Scheduled). Two native HTML date pickers (From date, To date) allow limiting results to a date range; when set they are passed as `date_from` and `date_to` to `GET /messages/search` (the From date is sent as the start of the selected day in the user's local timezone, the To date as the start of the day after). The search bar, folder selector, and date pickers are shown together in the search view.
+5. **Search** — Full-text search results as a message list. A folder selector (dropdown) allows limiting results to a single folder; when no folder is selected the search is global (all folders except Junk, Drafts, and Scheduled). Two native HTML date pickers (From date, To date) allow limiting results to a date range; when set they are passed as `date_from` and `date_to` to `GET /messages/search` (the From date is sent as the start of the selected day in the user's local timezone, the To date as the start of the day after). Two text fields (From, To) allow refining results by sender and recipient address; when non-blank they are trimmed and passed as `from_addr` and `to_addr`. `from_addr` matches the `From` header, `to_addr` matches the `To` **or** the `Cc` header, both as a case-insensitive substring — the same rule as a filter's `match_from`/`match_to`, and with `%` and `_` treated as literals rather than wildcards. All refinements are ANDed with each other and with the full-text query. The search bar, folder selector, address fields, and date pickers are shown together in the search view; the refinements reset whenever a new query arrives from the toolbar, and pagination re-runs the last submitted set rather than the current form contents.
 
 6. **Filter management** — CRUD UI with drag-to-reorder. The `match_to` field is labelled "To / Cc".
 
@@ -769,6 +769,12 @@ bug.
   since response headers are lost on that path.
 - **No MyCal integration.** Demo mode has no server to relay an import through,
   so the "Import to Calendar" action is never offered.
+- **Schema-violation messages are worded differently.** Where a request breaks a
+  constraint declared in `openapi.yaml` rather than one a handler checks — an
+  over-long `q` or `from_addr`, a non-numeric `limit` — the server relays the
+  generated decoder's wording (`query parameter "from_addr": string: len 201
+  greater than maximum 200`) and the demo writes its own. The status is 400 and
+  the body is `{"error": …}` either way, which is what the UI depends on.
 
 ### Requirements
 

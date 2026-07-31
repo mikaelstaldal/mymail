@@ -63,9 +63,14 @@ func (h *Handler) MessagesSearchGet(ctx context.Context, params api.MessagesSear
 		dateTo = &v
 	}
 
+	// Address refinements: a blank value is "no filter" rather than "match
+	// nothing", so the UI can send the fields unconditionally.
+	fromAddr := optAddressFilter(params.FromAddr)
+	toAddr := optAddressFilter(params.ToAddr)
+
 	limit, offset := parsePagination(params.Limit, params.Offset)
 
-	items, total, err := h.messages.SearchMessages(ctx, q, folderID, dateFrom, dateTo, limit, offset)
+	items, total, err := h.messages.SearchMessages(ctx, q, folderID, dateFrom, dateTo, fromAddr, toAddr, limit, offset)
 	if err != nil {
 		// A search that exceeds the repository's internal timeout returns a
 		// deadline error; surface it as a clean client error rather than a
@@ -379,6 +384,26 @@ func (h *Handler) AttachmentsIDGet(ctx context.Context, params api.AttachmentsID
 		ContentDisposition: api.NewOptString(disp),
 		Response:           api.AttachmentsIDGetOK{Data: bytes.NewReader(att.Data)},
 	}, nil
+}
+
+// optAddressFilter normalizes an optional address-refinement query parameter.
+// An absent, empty or whitespace-only value means "no filter" — returning nil
+// rather than an empty substring, which would match every message anyway but
+// would needlessly widen the WHERE clause.
+//
+// There is no length check here: the maxLength in openapi.yaml makes ogen
+// reject an over-long value while decoding the parameters, before this handler
+// runs, so a check here could never fire.
+func optAddressFilter(param api.OptString) *string {
+	v, ok := param.Get()
+	if !ok {
+		return nil
+	}
+	trimmed := strings.TrimSpace(v)
+	if trimmed == "" {
+		return nil
+	}
+	return &trimmed
 }
 
 // parsePagination extracts limit (default 50, max 200) and offset from optional query params.

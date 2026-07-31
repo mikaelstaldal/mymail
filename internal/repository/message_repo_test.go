@@ -383,12 +383,104 @@ func TestSearchMessages(t *testing.T) {
 	_, err := r.InsertMessage(ctx, msg)
 	require.NoError(t, err)
 
-	items, total, err := r.SearchMessages(ctx, "quick", nil, nil, nil, 10, 0)
+	items, total, err := r.SearchMessages(ctx, "quick", nil, nil, nil, nil, nil, 10, 0)
 	require.NoError(t, err)
 	assert.NotEmpty(t, items)
 	assert.NotZero(t, total)
 	// The matched term is highlighted with ** markers in the snippet.
 	assert.Contains(t, items[0].Snippet, "**quick**")
+}
+
+func TestSearchMessagesAddressFilters(t *testing.T) {
+	ctx := context.Background()
+	db := openTestDB(t)
+	r := NewMessageRepository(db)
+
+	alice := makeMsg(1, "Address filter A")
+	alice.FromAddr = `"Alice Andersson" <alice@example.com>`
+	alice.ToAddr = "me@example.com"
+	alice.BodyText = "shared needle text"
+	_, err := r.InsertMessage(ctx, alice)
+	require.NoError(t, err)
+
+	bob := makeMsg(1, "Address filter B")
+	bob.FromAddr = "bob@other.example"
+	bob.ToAddr = "team@example.com"
+	bob.CcAddr = "me@example.com"
+	bob.BodyText = "shared needle text"
+	_, err = r.InsertMessage(ctx, bob)
+	require.NoError(t, err)
+
+	strPtr := func(s string) *string { return &s }
+
+	cases := []struct {
+		name      string
+		fromAddr  *string
+		toAddr    *string
+		wantTotal int
+		wantFrom  string
+	}{
+		{"no filter", nil, nil, 2, ""},
+		{"from substring", strPtr("alice@"), nil, 1, `"Alice Andersson" <alice@example.com>`},
+		{"from case-insensitive", strPtr("ALICE@EXAMPLE.COM"), nil, 1, `"Alice Andersson" <alice@example.com>`},
+		{"from matches display name", strPtr("andersson"), nil, 1, `"Alice Andersson" <alice@example.com>`},
+		{"from no match", strPtr("carol@"), nil, 0, ""},
+		{"to matches To header", nil, strPtr("team@example.com"), 1, "bob@other.example"},
+		{"to matches Cc header", nil, strPtr("me@example.com"), 2, ""},
+		{"from and to are ANDed", strPtr("bob@"), strPtr("me@example.com"), 1, "bob@other.example"},
+		{"from and to disagree", strPtr("alice@"), strPtr("team@"), 0, ""},
+		{"LIKE wildcards are literal", nil, strPtr("t%m@"), 0, ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			items, total, err := r.SearchMessages(ctx, "needle", nil, nil, nil, tc.fromAddr, tc.toAddr, 10, 0)
+			require.NoError(t, err)
+			assert.Equal(t, tc.wantTotal, total)
+			assert.Len(t, items, tc.wantTotal)
+			if tc.wantFrom != "" {
+				assert.Equal(t, tc.wantFrom, items[0].FromAddr)
+			}
+		})
+	}
+}
+
+// The address filters claim to be case-insensitive, and the filter engine
+// (internal/lda) and the demo backend both fold with a Unicode-aware ToLower.
+// SQLite's built-in lower() does not, which is why the query uses
+// unicode_lower() — without it every lowercase probe below finds nothing.
+func TestSearchMessagesAddressFiltersNonASCII(t *testing.T) {
+	ctx := context.Background()
+	db := openTestDB(t)
+	r := NewMessageRepository(db)
+
+	msg := makeMsg(1, "Non-ASCII address filter")
+	msg.FromAddr = `"Åsa Öberg" <asa@example.com>`
+	msg.ToAddr = `"Émile Ünger" <emile@example.com>`
+	msg.BodyText = "shared needle text"
+	_, err := r.InsertMessage(ctx, msg)
+	require.NoError(t, err)
+
+	strPtr := func(s string) *string { return &s }
+
+	cases := []struct {
+		name     string
+		fromAddr *string
+		toAddr   *string
+	}{
+		{"from as stored", strPtr("Åsa"), nil},
+		{"from lowercased", strPtr("åsa"), nil},
+		{"from uppercased", strPtr("ÅSA ÖBERG"), nil},
+		{"from non-ASCII mid-word", strPtr("öberg"), nil},
+		{"to lowercased", nil, strPtr("émile ünger")},
+		{"to uppercased", nil, strPtr("ÉMILE")},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, total, err := r.SearchMessages(ctx, "needle", nil, nil, nil, tc.fromAddr, tc.toAddr, 10, 0)
+			require.NoError(t, err)
+			assert.Equal(t, 1, total)
+		})
+	}
 }
 
 func TestSearchMessagesSnippetLargeBody(t *testing.T) {
@@ -405,7 +497,7 @@ func TestSearchMessagesSnippetLargeBody(t *testing.T) {
 	require.NoError(t, err)
 
 	start := time.Now()
-	items, total, err := r.SearchMessages(ctx, "filler", nil, nil, nil, 10, 0)
+	items, total, err := r.SearchMessages(ctx, "filler", nil, nil, nil, nil, nil, 10, 0)
 	require.NoError(t, err)
 	require.Equal(t, 1, total)
 	assert.Less(t, time.Since(start), 2*time.Second, "search over a large body must stay fast")
@@ -473,7 +565,7 @@ func TestSearchMessagesFTSSanitization(t *testing.T) {
 		`café résumé`,
 	}
 	for _, q := range cases {
-		_, _, err := r.SearchMessages(ctx, q, nil, nil, nil, 10, 0)
+		_, _, err := r.SearchMessages(ctx, q, nil, nil, nil, nil, nil, 10, 0)
 		assert.NoError(t, err, "SearchMessages(%q)", q)
 	}
 }

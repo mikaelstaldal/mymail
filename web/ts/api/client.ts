@@ -151,11 +151,13 @@ export const api = {
         'DELETE', '/messages', { ids }
       ),
 
-    search: (q: string, opts: { folder_id?: number; date_from?: string; date_to?: string; limit?: number; offset?: number } = {}) => {
+    search: (q: string, opts: { folder_id?: number; date_from?: string; date_to?: string; from_addr?: string; to_addr?: string; limit?: number; offset?: number } = {}) => {
       const p = new URLSearchParams({ q });
       if (opts.folder_id != null) p.set('folder_id', String(opts.folder_id));
       if (opts.date_from) p.set('date_from', opts.date_from);
       if (opts.date_to) p.set('date_to', opts.date_to);
+      if (opts.from_addr) p.set('from_addr', opts.from_addr);
+      if (opts.to_addr) p.set('to_addr', opts.to_addr);
       if (opts.limit != null) p.set('limit', String(opts.limit));
       if (opts.offset != null) p.set('offset', String(opts.offset));
       return request<{ total: number; items: (MessageSummary & { snippet?: string })[] }>('GET', `/messages/search?${p}`);

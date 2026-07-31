@@ -1298,12 +1298,20 @@ func buildSnippet(body, query string) string {
 	return sb.String()
 }
 
-// SearchMessages performs FTS5 phrase-match search with optional folder and date filters.
+// SearchMessages performs FTS5 phrase-match search with optional folder, date
+// and address filters.
+//
+// fromAddr and toAddr refine the result set by sender/recipient using the same
+// rule as a filter's match_from/match_to (case-insensitive substring, toAddr
+// matching either the To or the Cc header). instr() is used rather than LIKE so
+// that % and _ stay literals, and unicode_lower() rather than SQLite's built-in
+// lower() so that the folding covers non-ASCII too — see sqlfunc.go.
 func (r *MessageRepository) SearchMessages(
 	ctx context.Context,
 	q string,
 	folderID *int64,
 	dateFrom, dateTo *time.Time,
+	fromAddr, toAddr *string,
 	limit, offset int,
 ) ([]oas.MessagesSearchGetOKItemsItem, int, error) {
 	// Bound the query so a pathologically slow search fails fast with a clean
@@ -1335,6 +1343,19 @@ func (r *MessageRepository) SearchMessages(
 	if dateTo != nil {
 		conditions = append(conditions, "m.date < ?")
 		filterArgs = append(filterArgs, dateTo.UTC().Format(time.RFC3339))
+	}
+	// The needle is folded here rather than in SQL: one strings.ToLower instead
+	// of a per-row call, and it makes the equivalence with the Go filter rule
+	// (strings.Contains of one ToLower in another) plain.
+	if fromAddr != nil {
+		conditions = append(conditions, "instr(unicode_lower(m.from_addr), ?) > 0")
+		filterArgs = append(filterArgs, strings.ToLower(*fromAddr))
+	}
+	if toAddr != nil {
+		conditions = append(conditions,
+			"(instr(unicode_lower(m.to_addr), ?) > 0 OR instr(unicode_lower(m.cc_addr), ?) > 0)")
+		lo := strings.ToLower(*toAddr)
+		filterArgs = append(filterArgs, lo, lo)
 	}
 
 	whereClause := strings.Join(conditions, " AND ")

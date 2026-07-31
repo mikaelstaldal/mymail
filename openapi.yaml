@@ -807,9 +807,9 @@ paths:
         Full-text search using FTS5 phrase-match. Results are ordered by relevance using
         `ORDER BY rank` (SQLite FTS5 BM25 score — lower/more-negative rank means higher relevance).
         No custom column weighting is applied.
-        Optionally filtered by date range. The FTS5 `unicode61` tokenizer is used, so searches
-        are case-insensitive. Search results include a `snippet` field (present only in search
-        results, not in `GET /messages/{id}`).
+        Optionally filtered by date range and by sender/recipient address. The FTS5 `unicode61`
+        tokenizer is used, so searches are case-insensitive. Search results include a `snippet`
+        field (present only in search results, not in `GET /messages/{id}`).
 
         When `folder_id` is not specified, the search covers all folders **except Junk** (id=7),
         **Drafts** (id=3), and **Scheduled** (id=5). To search within those folders explicitly,
@@ -849,6 +849,26 @@ paths:
           schema:
             type: string
             format: date-time
+        - name: from_addr
+          in: query
+          description: |
+            Case-insensitive substring match against the message's `From` header (display name
+            included, exactly as stored in `from_addr`), narrowing the full-text result set. Uses
+            the same matching rule as a filter's `match_from`; `%` and `_` are literals, not
+            wildcards. Whitespace-only values are ignored, as is an empty value (`from_addr=`).
+          schema:
+            type: string
+            maxLength: 200
+        - name: to_addr
+          in: query
+          description: |
+            Case-insensitive substring match against the message's recipients, narrowing the
+            full-text result set. Like a filter's `match_to` it matches the `To` **or** the `Cc`
+            header (`to_addr` or `cc_addr`); `%` and `_` are literals, not wildcards.
+            Whitespace-only values are ignored, as is an empty value (`to_addr=`).
+          schema:
+            type: string
+            maxLength: 200
         - name: limit
           in: query
           schema:

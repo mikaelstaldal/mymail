@@ -38,6 +38,8 @@ const MAX_SUBJECT_LEN = 998;
 const MAX_NAME_LEN = 200;
 const MAX_ADDRESS_LEN = 254;
 const MAX_QUERY_LEN = 500;
+/** Cap on the search from_addr/to_addr refinements (openapi.yaml maxLength). */
+const MAX_ADDR_FILTER_LEN = 200;
 const MAX_SIGNATURE_LEN = 51_200;
 const MAX_SCORE_HEADER_LEN = 200;
 /** References header budget; oldest entries are dropped first. */

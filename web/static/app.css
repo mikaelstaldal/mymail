@@ -1147,13 +1147,21 @@ html, body {
 }
 .search-folder-select:focus { outline: none; box-shadow: var(--focus-ring); }
 
-.search-date-label {
+/* Label + control, kept on one line so .search-form's wrap never separates them. */
+.search-field {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.search-field-label {
   font-size: 12px;
   color: var(--text-muted);
   white-space: nowrap;
 }
 
-.search-date-input {
+.search-date-input,
+.search-addr-input {
   padding: 5px 8px;
   border: 1px solid var(--field-border);
   border-radius: var(--border-radius);
@@ -1161,7 +1169,14 @@ html, body {
   background: var(--surface-bg);
   color: var(--text-primary);
 }
-.search-date-input:focus { outline: none; box-shadow: var(--focus-ring); }
+.search-date-input:focus,
+.search-addr-input:focus { outline: none; box-shadow: var(--focus-ring); }
+
+/* Narrower than the query box, and allowed to shrink first when the row wraps. */
+.search-addr-input {
+  flex: 0 1 150px;
+  min-width: 110px;
+}
 
 .search-blank { flex: 1; }
 

@@ -3,7 +3,12 @@ package handler
 import (
 	"context"
 	"errors"
+	"fmt"
+	"net/http"
 	"strings"
+
+	"github.com/go-faster/jx"
+	"github.com/ogen-go/ogen/ogenerrors"
 
 	"github.com/mikaelstaldal/mymail/internal/api"
 	"github.com/mikaelstaldal/mymail/internal/repository"
@@ -55,6 +60,34 @@ func (h *Handler) NewError(_ context.Context, err error) *api.DefaultStatusCode 
 // badRequest wraps a 400 message as *DefaultStatusCode so ogen's error path encodes it correctly.
 func badRequest(msg string) error {
 	return &api.DefaultStatusCode{StatusCode: 400, Response: api.Error{Error: msg}}
+}
+
+// WriteError renders the errors ogen raises around a handler — parameter and
+// request-body decoding, schema validation, unsupported content types — in the
+// {"error": …} shape openapi.yaml documents for every other error. ogen's
+// DefaultErrorHandler writes {"error_message": …} instead, which
+// web/ts/api/client.ts does not read, so a 400 from a maxLength or type
+// violation reached the user as a bare "Bad Request".
+//
+// Pass it to api.NewServer via api.WithErrorHandler at every construction site,
+// tests included, or those requests answer in the undocumented shape again.
+func WriteError(_ context.Context, w http.ResponseWriter, _ *http.Request, err error) {
+	// The whole chain reads `operation X: decode params: query: "p": string:
+	// len 201 greater than maximum 200`. Only the tail names something the
+	// caller sent, so unwrap to the offending parameter when there is one.
+	msg := err.Error()
+	var paramErr *ogenerrors.DecodeParamError
+	if errors.As(err, &paramErr) {
+		msg = fmt.Sprintf("%s parameter %q: %s", paramErr.In, paramErr.Name, paramErr.Err)
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(ogenerrors.ErrorCode(err))
+
+	e := jx.GetEncoder()
+	defer jx.PutEncoder(e)
+	(&api.Error{Error: msg}).Encode(e)
+	_, _ = w.Write(e.Bytes())
 }
 
 func (h *Handler) FoldersGet(ctx context.Context) (*api.FoldersGetOK, error) {

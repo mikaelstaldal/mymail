@@ -44,7 +44,7 @@ func newServer(t *testing.T, db *sql.DB) http.Handler {
 		repository.NewSpamFilterRepository(db),
 		"",
 	)
-	srv, err := api.NewServer(h)
+	srv, err := api.NewServer(h, api.WithErrorHandler(handler.WriteError))
 	require.NoError(t, err, "NewServer")
 	return srv
 }
@@ -297,4 +297,70 @@ func TestMarkAllRead(t *testing.T) {
 
 	resp = do(srv, http.MethodPost, "/folders/9999/mark-all-read", "")
 	assert.Equal(t, http.StatusNotFound, resp.StatusCode)
+}
+
+func TestSearchAddressRefinement(t *testing.T) {
+	db := openTestDB(t)
+	srv := newServer(t, db)
+
+	insert := func(from, to, cc string) {
+		t.Helper()
+		_, err := db.Exec(
+			`INSERT INTO messages(folder_id,from_addr,to_addr,cc_addr,subject,body_text,date,created_at,updated_at)
+			 VALUES(1,?,?,?,'Refine me','the needle is here',?,?,?)`,
+			from, to, cc,
+			"2024-01-01T00:00:00Z", "2024-01-01T00:00:00Z", "2024-01-01T00:00:00Z")
+		require.NoError(t, err)
+	}
+	insert(`"Alice Andersson" <alice@example.com>`, "me@example.com", "")
+	insert("bob@other.example", "team@example.com", "me@example.com")
+
+	type result struct {
+		Total int `json:"total"`
+		Items []struct {
+			FromAddr string `json:"from_addr"`
+		} `json:"items"`
+	}
+
+	cases := []struct {
+		name      string
+		query     string
+		wantTotal int
+	}{
+		{"unfiltered", "?q=needle", 2},
+		{"from address", "?q=needle&from_addr=alice%40example.com", 1},
+		{"from address is case-insensitive", "?q=needle&from_addr=ALICE", 1},
+		{"to address matches Cc", "?q=needle&to_addr=me%40example.com", 2},
+		{"to address matches To only", "?q=needle&to_addr=team%40", 1},
+		{"from and to are ANDed", "?q=needle&from_addr=bob&to_addr=me%40example.com", 1},
+		{"blank from_addr is no filter", "?q=needle&from_addr=", 2},
+		{"whitespace-only to_addr is no filter", "?q=needle&to_addr=%20%20", 2},
+		{"no match", "?q=needle&from_addr=carol", 0},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			resp := do(srv, http.MethodGet, "/messages/search"+tc.query, "")
+			require.Equal(t, http.StatusOK, resp.StatusCode)
+			var body result
+			decodeJSON(t, resp, &body)
+			assert.Equal(t, tc.wantTotal, body.Total)
+			assert.Len(t, body.Items, tc.wantTotal)
+		})
+	}
+
+	// Over the declared maxLength ogen rejects the request while decoding the
+	// parameters, before it reaches the handler or the DB. That path still has
+	// to answer in the documented {"error": …} shape and name the parameter —
+	// ogen's own error handler would write {"error_message": …}, which the web
+	// UI does not read, leaving the user with a bare "Bad Request".
+	resp := do(srv, http.MethodGet, "/messages/search?q=needle&from_addr="+strings.Repeat("a", 201), "")
+	assert.Equal(t, http.StatusBadRequest, resp.StatusCode)
+	var errBody struct {
+		Error        string `json:"error"`
+		ErrorMessage string `json:"error_message"`
+	}
+	decodeJSON(t, resp, &errBody)
+	assert.Empty(t, errBody.ErrorMessage, "the undocumented field must not appear")
+	assert.Contains(t, errBody.Error, "from_addr")
+	assert.Contains(t, errBody.Error, "200")
 }

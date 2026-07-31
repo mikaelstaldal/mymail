@@ -340,7 +340,10 @@ func runServer(dataDir, addr string, port int, publicURL, basicAuthFile, basicAu
 			sendmailPath,
 		)
 
-		ogenServer, err := api.NewServer(h, api.WithPathPrefix("/api/v1"))
+		ogenServer, err := api.NewServer(h,
+			api.WithPathPrefix("/api/v1"),
+			api.WithErrorHandler(handler.WriteError),
+		)
 		if err != nil {
 			log.Fatalf("error: create API server: %v", err)
 		}
