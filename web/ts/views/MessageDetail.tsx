@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from 'preact/hooks';
 import { api, NotFoundError } from '../api/client.js';
 import { navigate } from '../router.js';
 import { showToast } from '../util/toast.js';
-import { getMycalUrl } from '../util/config.js';
+import { getMycalUrl, isDemo } from '../util/config.js';
 import { formatDateFull, formatDateAdaptive } from '../util/date.js';
 import type { components } from '../api/types.js';
 
@@ -52,15 +52,45 @@ interface BodyIframeProps {
   externalImages: boolean;
 }
 
+/**
+ * The body document, fetched rather than linked, for demo mode only.
+ *
+ * A sandboxed iframe has an opaque origin, and a browser does not consult a
+ * service worker for a navigation out of one — so the demo's in-browser backend
+ * never sees an `<iframe src>` and the request escapes to a server that is not
+ * there. A plain fetch from this (controlled) page does reach the worker, and
+ * the document it returns carries its own <meta> CSP because the response
+ * headers are lost on the way into srcdoc.
+ *
+ * Returns null against the real server, where the src attribute is used as-is.
+ */
+function useDemoBodyDocument(url: string): string | null {
+  const [document, setDocument] = useState<string | null>(null);
+  useEffect(() => {
+    if (!isDemo()) return;
+    let cancelled = false;
+    setDocument(null);
+    void fetch(url)
+      .then(res => res.text())
+      .then(text => { if (!cancelled) setDocument(text); })
+      .catch(() => { if (!cancelled) setDocument('<!DOCTYPE html><html><body></body></html>'); });
+    return () => { cancelled = true; };
+  }, [url]);
+  return document;
+}
+
 function BodyIframe({ id, externalImages }: BodyIframeProps) {
   const ref = useRef<HTMLIFrameElement>(null);
   const handleLoad = () => autoResizeIframe(ref.current);
-  const src = `api/v1/messages/${id}/body${externalImages ? '?external=1' : ''}`;
+  const url = `api/v1/messages/${id}/body${externalImages ? '?external=1' : ''}`;
+  const demoDocument = useDemoBodyDocument(url);
+  // The sandbox is identical either way; only where the document comes from differs.
+  const source = isDemo() ? { srcdoc: demoDocument ?? '' } : { src: url };
   return (
     <iframe
       ref={ref}
       class="body-iframe"
-      src={src}
+      {...source}
       sandbox="allow-popups allow-popups-to-escape-sandbox allow-downloads"
       onLoad={handleLoad}
       title="Message body"

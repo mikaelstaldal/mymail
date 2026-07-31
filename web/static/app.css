@@ -1647,3 +1647,69 @@ html, body {
   min-width: 0;
   width: 90px;
 }
+
+/* ── Demo mode ── */
+/* Shown only in a backend-less demo build (mymail -demo-server / -demo-bundle),
+   so that nothing here can be mistaken for a real mailbox. */
+.demo-badge {
+  margin-left: auto;
+  font-size: 12px;
+  color: var(--text-secondary);
+  background: var(--list-item-active-bg);
+  border: 1px solid var(--list-item-active-border);
+  border-radius: var(--border-radius);
+  padding: 3px 8px;
+  white-space: nowrap;
+}
+
+.demo-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  background: rgba(15, 23, 42, 0.55);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+}
+
+.demo-dialog {
+  background: var(--topbar-bg);
+  border: 1px solid var(--topbar-border);
+  border-radius: var(--border-radius);
+  box-shadow: 0 10px 30px rgba(15, 23, 42, 0.35);
+  max-width: 460px;
+  padding: 20px;
+}
+
+.demo-title {
+  font-size: 16px;
+  color: var(--text-primary);
+  margin-bottom: 12px;
+}
+
+.demo-body p {
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--text-secondary);
+  margin-bottom: 10px;
+}
+
+.demo-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 8px;
+}
+
+.demo-actions button {
+  background: var(--btn-primary);
+  color: #fff;
+  border: none;
+  border-radius: var(--border-radius);
+  padding: 7px 18px;
+  font-size: 13px;
+  font-family: inherit;
+  cursor: pointer;
+}
+.demo-actions button:hover { background: var(--btn-primary-hover); }
+.demo-actions button:focus-visible { outline: none; box-shadow: var(--focus-ring); }

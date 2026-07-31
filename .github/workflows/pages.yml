@@ -1,0 +1,92 @@
+# Builds the project and publishes the browser-only demo to GitHub Pages.
+#
+# The demo needs no backend (see README § Demo mode), so the whole site is the
+# static bundle `-demo-bundle` writes. It is published only from main, and only
+# after ./build.sh has passed — which includes the frontend tests, the Go tests,
+# and the linter — so a broken commit never reaches the published demo.
+name: Demo
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# One deployment at a time, and never cancel one midway: a cancelled deploy can
+# leave the site half-updated.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: go.sum
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+
+      # build.sh expects these on $PATH and never installs anything itself (see
+      # AGENTS.md). Every version is pinned, and --ignore-scripts keeps npm from
+      # running install hooks. ogen's version is read from go.mod so the
+      # generator always matches the runtime library the generated code links
+      # against.
+      - name: Install build tools
+        run: |
+          go install "github.com/ogen-go/ogen/cmd/ogen@$(go list -m -f '{{.Version}}' github.com/ogen-go/ogen)"
+          go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.12.2
+          npm install -g --ignore-scripts typescript@7.0.2 openapi-typescript@7.13.0
+
+      # Resolves where the site will be served from, so the demo can be built
+      # for that path. Requires Pages to be enabled with "GitHub Actions" as its
+      # source — see README § Demo mode.
+      - name: Configure Pages
+        id: pages
+        uses: actions/configure-pages@v6
+
+      # Silent on success; on failure it prints the failing step and exits
+      # non-zero, which fails the job before anything is published.
+      - name: Build
+        run: ./build.sh
+
+      # base_url carries the full public URL, including a custom domain if one
+      # is configured, so the bundle's <base href> matches wherever Pages
+      # actually serves it.
+      - name: Build the demo bundle
+        env:
+          # Via the environment rather than spliced into the command line, so
+          # the value can never be read as shell syntax.
+          PAGES_URL: ${{ steps.pages.outputs.base_url }}
+        run: |
+          # An empty value would silently build for the origin root, which is
+          # the wrong base path for a project site and would publish a demo
+          # that cannot load its own scripts. Fail loudly instead.
+          if [ -z "$PAGES_URL" ]; then
+            echo "Pages base URL is empty — is Pages enabled with GitHub Actions as its source?" >&2
+            exit 1
+          fi
+          ./mymail -demo-bundle site -public-url "$PAGES_URL"
+
+      - uses: actions/upload-pages-artifact@v5
+        with:
+          path: site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v5

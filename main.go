@@ -28,6 +28,7 @@ import (
 	"github.com/mikaelstaldal/go-server-common/httputil"
 	commonweb "github.com/mikaelstaldal/go-server-common/web"
 	"github.com/mikaelstaldal/mymail/internal/api"
+	"github.com/mikaelstaldal/mymail/internal/demo"
 	"github.com/mikaelstaldal/mymail/internal/handler"
 	"github.com/mikaelstaldal/mymail/internal/lda"
 	"github.com/mikaelstaldal/mymail/internal/repository"
@@ -41,6 +42,8 @@ func main() {
 	ldaMode := flag.Bool("lda", false, "LDA mode: read RFC 5322 from stdin and store in DB")
 	importMode := flag.Bool("import", false, "Import messages from mbox/Maildir and exit")
 	demoMode := flag.Bool("demo", false, "Populate database with demo data and exit")
+	demoServer := flag.Bool("demo-server", false, "Serve the web UI in demo mode: no database, no REST API — the browser stores everything locally (takes no -data)")
+	demoBundle := flag.String("demo-bundle", "", "Write a self-contained static demo bundle to this new directory and exit (takes no -data)")
 	port := flag.Int("port", 8080, "HTTP listen port")
 	addr := flag.String("addr", "127.0.0.1", "Bind address")
 	publicURL := flag.String("public-url", "", "Public-facing base URL for CSRF validation, e.g. https://example.com (defaults to http://<addr>:<port>)")
@@ -53,6 +56,19 @@ func main() {
 	identityName := flag.String("identity-name", "", "Initial identity display name (used with -init)")
 	flag.Parse()
 
+	// The two browser-demo modes never open a database and never send mail, so
+	// the flags that only make sense with one are refused rather than silently
+	// ignored — a demo started with -data would otherwise look like it was
+	// serving that mailbox.
+	if *demoBundle != "" || *demoServer {
+		if flagWasSet("data") {
+			log.Fatalf("-data cannot be combined with -demo-server or -demo-bundle: demo mode has no database")
+		}
+		if *ldaSocket != "" {
+			log.Fatalf("-lda-socket cannot be combined with -demo-server or -demo-bundle: demo mode has no database")
+		}
+	}
+
 	switch {
 	case *version:
 		printVersion()
@@ -64,9 +80,27 @@ func main() {
 		runImport(*dataDir, flag.Args())
 	case *demoMode:
 		runDemo(*dataDir)
+	case *demoBundle != "":
+		if err := writeDemoBundle(context.Background(), *demoBundle); err != nil {
+			log.Fatalf("error: %v", err)
+		}
+	case *demoServer:
+		runServer(*dataDir, *addr, *port, *publicURL, *basicAuthFile, *basicAuthRealm, *sendmailBin, "", true)
 	default:
-		runServer(*dataDir, *addr, *port, *publicURL, *basicAuthFile, *basicAuthRealm, *sendmailBin, *ldaSocket)
+		runServer(*dataDir, *addr, *port, *publicURL, *basicAuthFile, *basicAuthRealm, *sendmailBin, *ldaSocket, false)
 	}
+}
+
+// flagWasSet reports whether the named flag was given on the command line, as
+// opposed to left at its default.
+func flagWasSet(name string) bool {
+	set := false
+	flag.Visit(func(f *flag.Flag) {
+		if f.Name == name {
+			set = true
+		}
+	})
+	return set
 }
 
 func printVersion() {
@@ -168,10 +202,30 @@ func deriveMycalURL(publicURL string) string {
 	return u.String()
 }
 
-// serverConfigScript returns an inline JS snippet that sets window.__serverConfig.
-func serverConfigScript(mycalURL string) string {
-	b, _ := json.Marshal(mycalURL)
-	return "window.__serverConfig={mycalUrl:" + string(b) + "};"
+// serverConfig is the deployment configuration handed to the web UI through an
+// injected inline <script> (see web/ts/util/config.ts). Both fields are omitted
+// when unset, so a plain deployment injects nothing at all.
+type serverConfig struct {
+	// MycalURL is the base URL of the sibling MyCal instance, or "" when the
+	// integration is not configured.
+	MycalURL string `json:"mycalUrl,omitempty"`
+	// Demo marks the backend-less demo build, where a service worker emulates
+	// the REST API against browser-local storage.
+	Demo bool `json:"demo,omitempty"`
+}
+
+// script returns an inline JS snippet that sets window.__serverConfig, or ""
+// when there is nothing to configure. The snippet is spliced into index.html
+// verbatim, so the values must not be able to terminate the surrounding
+// <script> element. json.Marshal emits <, > and & as Unicode escapes (HTML
+// escaping is on by default), which makes that impossible — do not replace it
+// with an encoder that has SetEscapeHTML(false).
+func (c serverConfig) script() string {
+	if c == (serverConfig{}) {
+		return ""
+	}
+	b, _ := json.Marshal(c)
+	return "window.__serverConfig=" + string(b) + ";"
 }
 
 // inlineScriptCSPHash returns the CSP sha256 hash token for an inline script.
@@ -195,7 +249,11 @@ func buildIndexHTML(staticFS fs.FS, configScript string) ([]byte, error) {
 	return []byte(modified), nil
 }
 
-func runServer(dataDir, addr string, port int, publicURL, basicAuthFile, basicAuthRealm, sendmailBin, ldaSocket string) {
+// runServer starts the HTTP server. In demo mode there is no database, no
+// sendmail, and no REST API: a service worker in the browser answers /api/v1
+// from local storage (see web/ts/demo/), and this process only serves the
+// static assets and the demo seed.
+func runServer(dataDir, addr string, port int, publicURL, basicAuthFile, basicAuthRealm, sendmailBin, ldaSocket string, demoMode bool) {
 	if port < 1 || port > 65535 {
 		log.Fatalf("invalid port: %d", port)
 	}
@@ -210,61 +268,95 @@ func runServer(dataDir, addr string, port int, publicURL, basicAuthFile, basicAu
 		log.Printf("basic authentication enabled")
 	}
 
-	dbPath := filepath.Join(dataDir, "mymail.sqlite")
-	if err := repository.CheckDBExists(dbPath); err != nil {
-		log.Fatalf("error: %v", err)
-	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 
-	db, err := repository.OpenDB(dbPath, 5000,
-		"mmap_size=134217728",
-		"synchronous=NORMAL",
-	)
-	if err != nil {
-		log.Fatalf("error: open database: %v", err)
-	}
-	defer db.Close()
+	mux := http.NewServeMux()
 
-	// Allow concurrent reads under WAL mode; writes still serialize at the SQLite level.
-	numConns := runtime.GOMAXPROCS(0)
-	db.SetMaxOpenConns(numConns)
-	db.SetMaxIdleConns(numConns)
+	if demoMode {
+		// The demo's initial content, produced by the same seeding pipeline the
+		// -demo flag runs. The service worker fetches it once, on first load.
+		seed, err := demo.BuildSeedJSON(ctx)
+		if err != nil {
+			log.Fatalf("error: build demo seed: %v", err)
+		}
+		mux.Handle("GET /"+demo.SeedFileName, seedHandler(seed))
+		// Nothing here answers the REST API — the service worker does. Claiming
+		// the prefix anyway means a request that escapes the worker fails as an
+		// API error rather than falling through to the SPA shell, where the
+		// client would try to parse a page of HTML as JSON.
+		mux.HandleFunc("/api/v1/", demoAPIUnavailable)
+		log.Printf("demo mode: no database; the browser stores all data locally")
+	} else {
+		dbPath := filepath.Join(dataDir, "mymail.sqlite")
+		if err := repository.CheckDBExists(dbPath); err != nil {
+			log.Fatalf("error: %v", err)
+		}
 
-	// One-shot: update query planner statistics for all connections.
-	if _, err := db.Exec("PRAGMA optimize"); err != nil {
-		log.Fatalf("error: PRAGMA optimize: %v", err)
-	}
+		db, err := repository.OpenDB(dbPath, 5000,
+			"mmap_size=134217728",
+			"synchronous=NORMAL",
+		)
+		if err != nil {
+			log.Fatalf("error: open database: %v", err)
+		}
+		defer db.Close()
 
-	sendmailPath, err := exec.LookPath(sendmailBin)
-	if err != nil {
-		log.Fatalf("error: resolve sendmail %q: %v", sendmailBin, err)
-	}
+		// Allow concurrent reads under WAL mode; writes still serialize at the SQLite level.
+		numConns := runtime.GOMAXPROCS(0)
+		db.SetMaxOpenConns(numConns)
+		db.SetMaxIdleConns(numConns)
 
-	lockFile, err := lda.AcquireImportLock(dataDir)
-	if err != nil {
-		log.Printf("error: acquire server lock (import running?): %v", err)
-		os.Exit(1)
-	}
-	defer lockFile.Close()
+		// One-shot: update query planner statistics for all connections.
+		if _, err := db.Exec("PRAGMA optimize"); err != nil {
+			log.Fatalf("error: PRAGMA optimize: %v", err)
+		}
 
-	// Repositories.
-	folderRepo := repository.NewFolderRepository(db)
-	messageRepo := repository.NewMessageRepository(db)
-	attachmentRepo := repository.NewAttachmentRepository(db)
-	draftRepo := repository.NewDraftRepository(db)
-	contactRepo := repository.NewContactRepository(db)
-	identityRepo := repository.NewIdentityRepository(db)
-	filterRepo := repository.NewFilterRepository(db)
-	spamFilterRepo := repository.NewSpamFilterRepository(db)
+		sendmailPath, err := exec.LookPath(sendmailBin)
+		if err != nil {
+			log.Fatalf("error: resolve sendmail %q: %v", sendmailBin, err)
+		}
 
-	h := handler.New(
-		folderRepo, messageRepo, attachmentRepo, draftRepo,
-		contactRepo, identityRepo, filterRepo, spamFilterRepo,
-		sendmailPath,
-	)
+		lockFile, err := lda.AcquireImportLock(dataDir)
+		if err != nil {
+			log.Printf("error: acquire server lock (import running?): %v", err)
+			os.Exit(1)
+		}
+		defer lockFile.Close()
 
-	ogenServer, err := api.NewServer(h, api.WithPathPrefix("/api/v1"))
-	if err != nil {
-		log.Fatalf("error: create API server: %v", err)
+		// Repositories.
+		folderRepo := repository.NewFolderRepository(db)
+		messageRepo := repository.NewMessageRepository(db)
+		attachmentRepo := repository.NewAttachmentRepository(db)
+		draftRepo := repository.NewDraftRepository(db)
+		contactRepo := repository.NewContactRepository(db)
+		identityRepo := repository.NewIdentityRepository(db)
+		filterRepo := repository.NewFilterRepository(db)
+		spamFilterRepo := repository.NewSpamFilterRepository(db)
+
+		h := handler.New(
+			folderRepo, messageRepo, attachmentRepo, draftRepo,
+			contactRepo, identityRepo, filterRepo, spamFilterRepo,
+			sendmailPath,
+		)
+
+		ogenServer, err := api.NewServer(h, api.WithPathPrefix("/api/v1"))
+		if err != nil {
+			log.Fatalf("error: create API server: %v", err)
+		}
+		mux.Handle("/api/v1/", ogenServer)
+
+		if ldaSocket != "" {
+			ln, err := lda.BindSocket(ldaSocket)
+			if err != nil {
+				log.Fatalf("error: lda socket: %v", err)
+			}
+			go lda.ServeSocket(ctx, ln, db)
+			log.Printf("mymail lda socket listening on %s", ldaSocket)
+		}
+
+		scheduler := service.NewScheduler(db, sendmailPath, contactRepo)
+		scheduler.Start(ctx)
 	}
 
 	importMapHash, err := commonweb.ImportMapCSPHash(web.Static)
@@ -272,18 +364,21 @@ func runServer(dataDir, addr string, port int, publicURL, basicAuthFile, basicAu
 		log.Fatalf("error: compute importmap CSP hash: %v", err)
 	}
 
-	var configScript string
-	if mycalURL := deriveMycalURL(publicURL); mycalURL != "" {
-		configScript = serverConfigScript(mycalURL)
-		log.Printf("mymail: MyCal URL auto-configured as %s", mycalURL)
+	// MyCal integration: demo mode has no server to relay an import through, so
+	// it is never offered there.
+	cfg := serverConfig{Demo: demoMode}
+	if !demoMode {
+		cfg.MycalURL = deriveMycalURL(publicURL)
+		if cfg.MycalURL != "" {
+			log.Printf("mymail: MyCal URL auto-configured as %s", cfg.MycalURL)
+		}
 	}
+	configScript := cfg.script()
 	indexHTML, err := buildIndexHTML(web.Static, configScript)
 	if err != nil {
 		log.Fatalf("error: build index.html: %v", err)
 	}
 
-	mux := http.NewServeMux()
-	mux.Handle("/api/v1/", ogenServer)
 	mux.HandleFunc("/", indexFallbackHandler(indexHTML))
 
 	serverOrigin, err := csrf.ResolveServerOrigin(publicURL, addr, port)
@@ -306,21 +401,6 @@ func runServer(dataDir, addr string, port int, publicURL, basicAuthFile, basicAu
 		httpHandler = authMiddleware(httpHandler)
 	}
 	httpHandler = http.MaxBytesHandler(httpHandler, maxRequestBody)
-
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	if ldaSocket != "" {
-		ln, err := lda.BindSocket(ldaSocket)
-		if err != nil {
-			log.Fatalf("error: lda socket: %v", err)
-		}
-		go lda.ServeSocket(ctx, ln, db)
-		log.Printf("mymail lda socket listening on %s", ldaSocket)
-	}
-
-	scheduler := service.NewScheduler(db, sendmailPath, contactRepo)
-	scheduler.Start(ctx)
 
 	serverAddr := fmt.Sprintf("%s:%d", addr, port)
 	srv := &http.Server{

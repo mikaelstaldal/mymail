@@ -1,5 +1,5 @@
 import { render } from 'preact';
-import { useState, useEffect, useRef } from 'preact/hooks';
+import { useState, useEffect, useRef, useCallback } from 'preact/hooks';
 import { Sidebar } from './layout/Sidebar.js';
 import { Toolbar } from './layout/Toolbar.js';
 import { Toast } from './components/Toast.js';
@@ -10,6 +10,8 @@ import { SearchView } from './views/SearchView.js';
 import { SettingsPage } from './views/SettingsPage.js';
 import { initRouter, onRouteChange, type Route } from './router.js';
 import { startPolling } from './poll.js';
+import { isDemo } from './util/config.js';
+import { DemoDialog, demoNoticeSeen, markDemoNoticeSeen } from './components/DemoDialog.js';
 import type { components } from './api/types.js';
 
 // Apply persisted preferences on startup
@@ -48,9 +50,16 @@ function App() {
   // Tracks the last inbox/folder slug so the sidebar stays highlighted when
   // the user opens a message (which has no folder context of its own).
   const [lastFolderSlug, setLastFolderSlug] = useState<string>('inbox');
+  // The one-time "this is a demo" notice, shown before anything is typed.
+  const [showDemoNotice, setShowDemoNotice] = useState(() => isDemo() && !demoNoticeSeen());
 
   useEffect(() => {
     return onRouteChange(setRoute);
+  }, []);
+
+  const dismissDemoNotice = useCallback(() => {
+    markDemoNoticeSeen();
+    setShowDemoNotice(false);
   }, []);
 
   const pollRefreshRef = useRef<() => void>(() => {});
@@ -148,17 +157,39 @@ function App() {
       <Sidebar folders={folders} activeSlug={activeSlug} />
       <header class="topbar">
         <span class="topbar-title">{label}</span>
+        {isDemo() && (
+          <span class="demo-badge" role="status">
+            Demo — mail is stored in this browser only
+          </span>
+        )}
       </header>
       <main class="content">
         {renderContent()}
       </main>
       <Toolbar />
       <Toast />
+      {showDemoNotice && <DemoDialog onClose={dismissDemoNotice} />}
     </div>
   );
 }
 
+// In demo mode the backend is a service worker that has to be installed and in
+// control before the app makes its first request, so rendering waits for it.
+// The import is dynamic so a normal build never fetches the demo code at all.
+async function start(root: HTMLElement): Promise<void> {
+  if (isDemo()) {
+    try {
+      const { startDemoBackend } = await import('./demo-client.js');
+      await startDemoBackend();
+    } catch (e) {
+      root.textContent = e instanceof Error ? e.message : 'The demo backend failed to start.';
+      return;
+    }
+  }
+  render(<App />, root);
+}
+
 const root = document.getElementById('app');
 if (root) {
-  render(<App />, root);
+  void start(root);
 }

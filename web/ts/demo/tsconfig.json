@@ -1,0 +1,35 @@
+{
+  "//": [
+    "The demo service worker is built separately from the app (web/ts/tsconfig.json",
+    "excludes these sources: they are worker code, not DOM code, and would not",
+    "type-check against the DOM lib).",
+    "",
+    "None of these files imports or exports anything, so TypeScript treats each as a",
+    "global script and the worker loads them with importScripts — a classic worker,",
+    "which every browser that supports service workers at all can run. Module",
+    "workers would be tidier but are a needless compatibility risk for a bundle",
+    "someone else hosts.",
+    "",
+    "rootDir is web/ts so demo-sw.ts lands at web/static/demo-sw.js, i.e. at the",
+    "deployment root: a worker's default scope is its own directory, and the demo",
+    "has to intercept the whole app, not just one subdirectory."
+  ],
+  "compilerOptions": {
+    "target": "ES2020",
+    "module": "esnext",
+    "moduleResolution": "bundler",
+    "lib": ["ES2020", "WebWorker"],
+    "strict": true,
+    "noEmitOnError": true,
+    "rootDir": "..",
+    "outDir": "../../static"
+  },
+  "files": [
+    "model.ts",
+    "text.ts",
+    "reply.ts",
+    "store.ts",
+    "api.ts",
+    "../demo-sw.ts"
+  ]
+}

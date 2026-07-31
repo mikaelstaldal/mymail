@@ -19,6 +19,7 @@ mymail/
 ├── internal/
 │   ├── api/                  # Code generated from OpenAPI specification (do not edit)
 │   ├── auth/                 # HTTP Basic Auth middleware (htpasswd)
+│   ├── demo/                 # Demo dataset; seeds SQLite and exports demo-data.json
 │   ├── handler/              # HTTP handlers (REST API)
 │   ├── lda/                  # Local delivery agent (parse & store incoming mail + socket server)
 │   ├── model/                # Data types
@@ -94,6 +95,23 @@ HTTP Basic Auth via htpasswd file (bcrypt). CSRF protection via Origin/Referer v
 
 ### `send_failure_count` Exposed as Boolean Only
 API exposes only `send_failed` (true when count > 0). Raw count is an implementation detail without UI value.
+
+### Demo Mode Runs the Backend in the Browser
+
+`-demo-server` and `-demo-bundle` serve the web UI with no database and no REST
+API: a service worker (`web/ts/demo-sw.ts` + `web/ts/demo/`) intercepts
+`/api/v1` and answers it from IndexedDB.
+
+Intercepting at the network layer, rather than swapping the API client for a
+mock, keeps the frontend the same in both modes — including the requests that do
+not go through `api/client.ts` at all. The cost is that `web/ts/demo/`
+re-implements the handler and repository layers in TypeScript and has to be kept
+in step with them; the accepted divergences are listed in REQUIREMENTS.md §
+Demo Mode.
+
+The demo content is not written twice: `internal/demo` defines it once, seeds
+SQLite with it for `-demo`, and exports the same rows as `demo-data.json` for the
+browser.
 
 ### Snooze Restores Unread State
 `read` reset to 0 when a snoozed message returns — it should behave like a new arrival.

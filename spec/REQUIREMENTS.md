@@ -697,9 +697,90 @@ Permission is requested only when the user explicitly enables browser notificati
 - Notification permission state (cached)
 - Preferred body view (`"html"` or `"text"`)
 - Compose line width (`wrapColumn`; `0` disables wrapping, absent means the default of 80)
+- Demo notice dismissed (`mymail-demo-notice-seen`; demo builds only — kept out of the demo's own IndexedDB store so clearing the mailbox does not bring the notice back)
 
 **Draft recovery on page reload:** compares `savedAt` in localStorage against the server draft's `updated_at`; whichever is newer is loaded. If the timestamps are identical, the server version is loaded. If the server returns 404, the localStorage state is used and the stale id is cleared.
 
+
+## Demo Mode
+
+`-demo-server` serves the web UI, and `-demo-bundle DIR` writes it out as a
+static site, with **no backend**: a service worker answers every `/api/v1`
+request from browser-local storage (IndexedDB). Neither opens a database, so
+neither accepts `-data` or `-lda-socket`. The store starts out holding the same
+content `-demo` seeds into SQLite, and clearing the site's data resets it to
+that. A one-time modal on first visit says so.
+
+The demo must behave as the real server does. `web/ts/demo/` re-implements
+`internal/handler` and `internal/repository`, and every function names the Go
+original it mirrors. The following divergences are accepted; anything else is a
+bug.
+
+### Behaviour that has no server counterpart
+
+- **Sending produces a reply.** There is no MTA, so a sent message would
+  otherwise vanish. Each message sent in demo mode is answered once, by its
+  first `To` recipient, 20 seconds later (`AUTO_REPLY_DELAY_MS`). Which of a
+  fixed set of replies is used is a pure function of the outgoing subject and
+  body, so it is reproducible. The reply arrives through the filter chain like
+  any inbound message.
+- **Sending cannot fail.** `send_failure_count` and `send_error` therefore stay
+  at zero/null forever, and the `send_failed` badge and the "moved back to
+  Drafts after exhausted retries" path are unreachable.
+- **Storage can be full.** A write that exceeds the origin's quota returns
+  `507`, a status the real server never produces. Attachments are additionally
+  capped at 8 MiB each, where the server caps only the whole request at 32 MiB.
+
+### Behaviour that differs
+
+- **The scheduler runs on request, not on a timer.** A service worker is stopped
+  whenever it is idle, so deferred sends, snooze expiry, and reply delivery are
+  processed at the start of each API request instead of by a 60-second
+  goroutine. The 60-second thresholds themselves are unchanged. In practice the
+  UI's 30-second folder poll makes this indistinguishable.
+- **Sending a draft reuses its row.** The server creates a new message and
+  deletes the draft; the demo moves the draft itself to Sent, so the resulting
+  message keeps the draft's id. Nothing in the UI depends on that id. An
+  immediate send restamps `date` and `created_at` to now, as the row the server
+  inserts would carry, so the reuse is not otherwise observable; the deferred
+  and scheduled paths leave `date` alone, matching `MarkSent` and the scheduler.
+- **Search ranking is not bm25.** Matching is identical — the server passes the
+  query to FTS5 as one quoted phrase, so operators are literals and a multi-word
+  query only matches consecutive words — but `ORDER BY rank` needs index
+  statistics the demo does not keep, so results are ordered by a weighted
+  match count (subject above body) and then by date.
+- **Outgoing HTML is not sanitised.** `bluemonday` has no in-worker equivalent.
+  Nothing is transmitted and the body is rendered in a sandboxed iframe with no
+  `allow-scripts` under a `default-src 'none'` CSP, so the sanitiser's job is
+  already done by the iframe; `has_external_images` is still computed.
+- **The stored RFC 5322 source is simplified.** `raw` is assembled with the same
+  MIME structure (`multipart/alternative` inside `multipart/mixed`), but text
+  parts are written as UTF-8 with `Content-Transfer-Encoding: 8bit` rather than
+  quoted-printable, and display names and subjects are written literally rather
+  than as RFC 2047 encoded words. `raw` is only ever shown in the headers view
+  or downloaded as `.eml`.
+- **Spam detection never runs.** `spam_filter_settings` is stored and editable,
+  but it reads headers that a generated reply does not have.
+- **The message body reaches the iframe as `srcdoc`.** A sandboxed iframe has an
+  opaque origin, and a browser does not consult a service worker for a
+  navigation out of one, so `<iframe src="api/v1/…/body">` would escape to a
+  server that is not there. In demo mode the page fetches the document and
+  passes it as `srcdoc`; the demo's response repeats its CSP in a `<meta>`,
+  since response headers are lost on that path.
+- **No MyCal integration.** Demo mode has no server to relay an import through,
+  so the "Import to Calendar" action is never offered.
+
+### Requirements
+
+- Service workers need a secure context: the bundle must be served over HTTPS or
+  from `localhost`.
+- The seed content is deliberately fresh per build: dates are relative to build
+  time and the extra messages are picked at random, so two builds of the same
+  commit produce different `demo-data.json`. A bundle pinned to fixed dates
+  would show a mailbox that visibly ages the longer it stays published.
+- Every URL the app builds is relative and routing is on the fragment, so a
+  bundle works at the origin root or under any path with no configuration.
+- `-demo-bundle` refuses a directory that already has content.
 
 ## Production Deployment
 

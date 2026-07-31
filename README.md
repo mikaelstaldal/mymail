@@ -76,6 +76,7 @@ mymail [flags]
 | `-basic-auth-file`  | _(none)_    | Path to htpasswd file; enables HTTP Basic Auth when set                     |
 | `-basic-auth-realm` | `mymail`    | Auth realm shown to browsers                                                |
 | `-sendmail`         | `sendmail`  | Path or name of the sendmail binary                                         |
+| `-demo-server`      | _(off)_     | Serve the web UI in demo mode: no database, no REST API (see below)         |
 
 ### LDA mode
 
@@ -103,6 +104,38 @@ mymail -import -data /var/lib/mymail \
   sent:mbox:/home/user/Sent \
   work:maildir:/home/user/Maildir/.Work
 ```
+
+## Demo mode
+
+Demo mode runs the full web UI with no backend at all. A service worker
+intercepts every `/api/v1` request and answers it from storage in the browser,
+so messages, folders, drafts, contacts, and settings are created, searched,
+edited, and deleted exactly as they are against the real server — they just
+never leave the machine. The mailbox starts out holding the same content `-demo`
+seeds, and clearing the site's data resets it to that. A modal on the first
+visit says as much, so nobody writes anything they care about into it.
+
+```bash
+./mymail -demo-server                    # serve the demo on http://127.0.0.1:8080
+./mymail -demo-bundle /tmp/mymail-demo   # or write it out as a static site
+```
+
+Neither mode opens a database, so neither takes `-data`.
+
+Mail you send in the demo does not go anywhere: it lands in Sent, and a
+generated reply from the recipient arrives in the Inbox 20 seconds later, so a
+thread can be seen forming. Scheduled sends and snoozes work too, resolved on
+the next request rather than by a background timer.
+
+`-demo-bundle` writes plain files that any web server can host — no backend, no
+build step, no configuration. Everything the app requests is a relative URL and
+routing is on the fragment, so the same bundle works at the origin root or under
+any path. One caveat comes with the browser being the backend: **service workers
+need a secure context**, so serve the bundle over HTTPS or from `localhost`.
+
+There is no MyCal integration in demo mode, and nothing is sent anywhere.
+Attachments are capped at 8 MiB each, since browser storage is a modest shared
+quota rather than a disk.
 
 ## Building from Source
 

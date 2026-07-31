@@ -24,6 +24,9 @@ go build -tags netgo ./cmd/lda/
 # Compile TypeScript → web/static/*.js (sources in web/ts/)
 tsc --project web/ts/tsconfig.json
 
+# Compile the demo-mode service worker (separate project — worker code, not DOM code)
+tsc --project web/ts/demo/tsconfig.json
+
 # Type-check TypeScript without emitting files
 tsc --project web/ts/tsconfig.json --noEmit
 
@@ -42,7 +45,7 @@ go test ./internal/handler/... -run TestFolderCreate
 # Run the frontend tests (needs web/static/*.js compiled first; unpack.sh is a
 # no-op once web/ts/vendor/test/node_modules/ exists)
 web/ts/vendor/test/unpack.sh
-node --test web/ts/quotetext.test.mjs web/ts/wrap.test.mjs
+node --test web/ts/quotetext.test.mjs web/ts/wrap.test.mjs web/ts/demo.test.mjs
 
 # Run a single frontend test
 node --test --test-name-pattern 'depth cap' web/ts/quotetext.test.mjs
@@ -61,6 +64,7 @@ main.go                  # Entry point: CLI flags, HTTP routing, server startup
 internal/
   api/                   # Generated ogen server stubs — DO NOT EDIT
   auth/                  # HTTP Basic Auth middleware (htpasswd/bcrypt)
+  demo/                  # The demo dataset, for both -demo and the browser demo
   handler/               # REST API endpoint handlers
   lda/                   # Local Delivery Agent: parse RFC 5322 from stdin → SQLite
   model/                 # Shared data types
@@ -68,13 +72,16 @@ internal/
   sanitize/              # HTML sanitization (bluemonday) + cid: resolution
   service/               # Business logic, orchestration
 web/ts/                  # TypeScript sources (compiled to web/static/)
+  demo/                  # The demo backend (worker code — see "Demo mode")
+  demo-sw.ts             # The demo service worker's entry point
+  demo-client.ts         # The page half of demo mode
 web/static/              # Embedded web UI assets (HTML/CSS/compiled JS/favicons)
 openapi.yaml             # REST API contract — source of truth for code generation
 ```
 
 Web UI assets are embedded in the binary via `//go:embed`. The deployed artifact is a single `mymail` binary + one SQLite file.
 
-### Four Operating Modes
+### Operating Modes
 
 | Flag | Mode | Purpose |
 |------|------|---------|
@@ -82,8 +89,13 @@ Web UI assets are embedded in the binary via `//go:embed`. The deployed artifact
 | `-init` | Init | Create SQLite DB with schema; seed built-in folders and optional initial identity |
 | `-lda` | LDA | Read RFC 5322 from stdin, store in DB, apply filters; exit 0/1/75 |
 | `-import` | Import | Batch import from mbox/Maildir with duplicate detection |
+| `-demo` | Demo seed | Add the demo dataset (internal/demo) to an existing database |
+| `-demo-server` | Demo server | Serve the web UI with no database and no REST API (see "Demo mode") |
+| `-demo-bundle DIR` | Demo bundle | Write that same demo out as a static site, then exit |
 
-The database must be created by `-init` before any other mode will start.
+The database must be created by `-init` before any other mode will start. The
+two browser-demo modes are the exception — they never open one, and refuse
+`-data` and `-lda-socket` rather than ignoring them.
 
 ### Database
 
@@ -172,6 +184,48 @@ the allowlist grows.
 
 60-second polling goroutine (background, mutex-guarded). Deferred send threshold: `send_at > now + 60 seconds`. Snooze minimum: `until >= now + 60 seconds`.
 
+### Demo mode
+
+`-demo-server` and `-demo-bundle DIR` build the web UI with **no backend**: a
+service worker (`web/ts/demo-sw.ts` + `web/ts/demo/`) intercepts `/api/v1` and
+answers it from IndexedDB. `main.go` injects `window.__serverConfig={demo:true}`
+(the same mechanism as the MyCal URL); `app.tsx` then waits for the worker to be
+installed and in control before rendering, so the first request cannot escape it.
+
+- **Intercepting at the network layer is the point**: the frontend is otherwise
+  unchanged between demo and real, including the `<a href>` that downloads an
+  attachment, which never goes through `api/client.ts`.
+- **Parity with the Go server is the contract.** `web/ts/demo/` re-implements
+  `internal/handler` + `internal/repository` + the scheduler; every function
+  names the Go original it mirrors. When you change folder rules, threading,
+  search, draft semantics, address validation, or filter evaluation on the
+  server, change it there too. The accepted divergences are listed in
+  spec/REQUIREMENTS.md § Demo Mode — don't add more silently.
+- **Not localStorage**: a service worker cannot reach it (it is synchronous and
+  absent from worker scopes), so the store is IndexedDB. Attachment bytes live
+  in their own object store so editing a draft does not rewrite them.
+- These sources are **worker code**: excluded from `web/ts/tsconfig.json` and
+  built by `web/ts/demo/tsconfig.json` against the WebWorker lib. They are
+  classic scripts sharing one global scope via `importScripts`, so they use no
+  `import`/`export` — adding one silently turns a file into a module and its
+  declarations vanish from the shared scope.
+- **The message-body iframe is the one thing the worker cannot serve.** A
+  sandboxed iframe has an opaque origin, and a browser does not consult a
+  service worker for a navigation out of one, so `<iframe src="api/v1/…/body">`
+  escapes to the network. `BodyIframe` therefore fetches the document (a
+  subresource request, which the worker does see) and passes it as `srcdoc` in
+  demo mode only; the demo's response repeats its CSP in a `<meta>` because
+  response headers do not survive that.
+- **There is no scheduler goroutine.** A worker is stopped whenever it is idle,
+  so deferred sends, snooze expiry, and auto-reply delivery all run at the start
+  of each request instead (`runScheduler` in `demo/api.ts`).
+- The seed content is not duplicated in JavaScript: `internal/demo/bundle.go`
+  runs the real `-demo` seeding against an in-memory database and exports the
+  result as `demo-data.json`.
+- **Sending produces a reply** (`web/ts/demo/reply.ts`) — demo-only behaviour,
+  with no counterpart on the server. Which reply is a pure function of the
+  outgoing message, so it is testable; the delay is `AUTO_REPLY_DELAY_MS`.
+
 ## Testing
 
 Each layer has its own test scope:
@@ -214,6 +268,17 @@ so it skips the jsdom install entirely. It is deliberately the whole of the
 wrapping logic: `ComposeForm` only turns its edits into a Quill delta and
 decides which breaks are the editor's own. Anything about *where* a line breaks
 belongs in `wrap.ts`, where it can be tested; the Quill wiring cannot be.
+
+`demo.test.mjs` needs no DOM either, but it does something the other two do not:
+the demo backend is a set of classic worker scripts sharing one global scope, so
+the test evaluates them into *this* realm with `vm.runInThisContext`, exactly as
+`importScripts` would, and reads the declarations back out. `store.js` is the
+one file left out — it is nothing but IndexedDB — and a stub for its five entry
+points is evaluated in its place. That is what makes `api.js` testable here:
+everything above the store is real code answering real `Request` objects, so the
+parity rules (which folders refuse a move, what deleting does where, how threads
+close over References) are asserted against the code that implements them rather
+than a paraphrase of it.
 
 ## Important Implementation Notes
 

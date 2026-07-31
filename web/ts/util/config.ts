@@ -2,7 +2,7 @@ import { normalizeWrapColumn } from './wrap.js';
 
 declare global {
   interface Window {
-    __serverConfig?: { mycalUrl?: string };
+    __serverConfig?: { mycalUrl?: string; demo?: boolean };
   }
 }
 
@@ -19,4 +19,11 @@ export function getWrapColumn(): number {
 // then the server-injected default (derived from --public-url), then empty string.
 export function getMycalUrl(): string {
   return localStorage.getItem('mycalUrl') || window.__serverConfig?.mycalUrl || '';
+}
+
+// Whether this is the backend-less demo build (mymail -demo-server, or a bundle
+// written by -demo-bundle). The app then starts a service worker that answers
+// the REST API from browser-local storage; see web/ts/demo-client.ts.
+export function isDemo(): boolean {
+  return window.__serverConfig?.demo === true;
 }
