@@ -1642,3 +1642,8 @@ html, body {
   box-shadow: var(--focus-ring);
   border-color: var(--btn-primary);
 }
+/* A column number needs three digits, not the width of a URL. */
+.pref-number-input {
+  min-width: 0;
+  width: 90px;
+}

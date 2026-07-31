@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'preact/hooks';
-import { getMycalUrl } from '../../util/config.js';
+import { getMycalUrl, getWrapColumn, WRAP_COLUMN_KEY } from '../../util/config.js';
+import { normalizeWrapColumn, WRAP_COLUMN, WRAP_OFF, MAX_WRAP_COLUMN } from '../../util/wrap.js';
 
 type Density = 'compact' | 'normal' | 'relaxed';
 type BodyView = 'html' | 'text';
@@ -26,6 +27,9 @@ export function Preferences() {
   const [notifMessage, setNotifMessage] = useState<string | null>(null);
   const serverMycalUrl = window.__serverConfig?.mycalUrl ?? '';
   const [mycalUrl, setMycalUrl] = useState(() => getMycalUrl());
+  // Kept as the raw string so the field shows what is being typed; only what is
+  // stored is normalised. Blur then snaps the field to the column in effect.
+  const [wrapColumn, setWrapColumn] = useState(() => String(getWrapColumn()));
 
   useEffect(() => {
     // Auto-disable if notification permission was revoked since last visit
@@ -63,6 +67,15 @@ export function Preferences() {
       localStorage.setItem('mycalUrl', trimmed);
     } else {
       localStorage.removeItem('mycalUrl');
+    }
+  }
+
+  function changeWrapColumn(value: string) {
+    setWrapColumn(value);
+    if (value.trim()) {
+      localStorage.setItem(WRAP_COLUMN_KEY, String(normalizeWrapColumn(value)));
+    } else {
+      localStorage.removeItem(WRAP_COLUMN_KEY);
     }
   }
 
@@ -153,6 +166,26 @@ export function Preferences() {
             Plain Text
           </button>
         </div>
+      </div>
+
+      <div class="pref-row">
+        <div class="pref-row-info">
+          <div class="pref-label">Compose Line Width</div>
+          <div class="pref-description">
+            Column at which lines are broken while composing. Set to {WRAP_OFF} to
+            wrap nothing; leave empty for the default of {WRAP_COLUMN}.
+          </div>
+        </div>
+        <input
+          type="number"
+          class="pref-text-input pref-number-input"
+          min={WRAP_OFF}
+          max={MAX_WRAP_COLUMN}
+          value={wrapColumn}
+          placeholder={String(WRAP_COLUMN)}
+          onInput={e => changeWrapColumn((e.target as HTMLInputElement).value)}
+          onBlur={() => setWrapColumn(String(getWrapColumn()))}
+        />
       </div>
 
       <div class="pref-row">

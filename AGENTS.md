@@ -42,7 +42,7 @@ go test ./internal/handler/... -run TestFolderCreate
 # Run the frontend tests (needs web/static/*.js compiled first; unpack.sh is a
 # no-op once web/ts/vendor/test/node_modules/ exists)
 web/ts/vendor/test/unpack.sh
-node --test web/ts/quotetext.test.mjs
+node --test web/ts/quotetext.test.mjs web/ts/wrap.test.mjs
 
 # Run a single frontend test
 node --test --test-name-pattern 'depth cap' web/ts/quotetext.test.mjs
@@ -209,6 +209,12 @@ testing generally belongs in `web/ts/util/`, exported, rather than kept private
 inside a `.tsx` view (this is why `quoteHtmlToText` lives in
 `web/ts/util/quotetext.ts` and not in `ComposeForm.tsx`).
 
+`wrap.test.mjs` needs no DOM — `web/ts/util/wrap.ts` is pure string handling —
+so it skips the jsdom install entirely. It is deliberately the whole of the
+wrapping logic: `ComposeForm` only turns its edits into a Quill delta and
+decides which breaks are the editor's own. Anything about *where* a line breaks
+belongs in `wrap.ts`, where it can be tested; the Quill wiring cannot be.
+
 ## Important Implementation Notes
 
 - **`references` quoting:** always use `"references"` (quoted) in SQL, never bare.
@@ -221,3 +227,4 @@ inside a `.tsx` view (this is why `quoteHtmlToText` lives in
 - **HTML display:** render in `<iframe srcdoc="...">` with `sandbox` (no tokens); per-message opt-in for external images via `<meta>` CSP inside the iframe.
 - **LDA exit codes:** 0 = success or duplicate, 1 = parse failure, 75 = transient error.
 - **`send_failed` badge:** suppress in Trash (`folder_id = 4`) even when `send_failure_count > 0`.
+- **Compose soft-break mark:** the editor wraps at the `wrapColumn` preference (default 80, `0` off) and marks its own breaks with a Quill block format rendered as `class="ql-softwrap-y"`, so a paragraph can be re-filled rather than only broken further. Two things keep it working: the sanitiser must never allow `class` (or the mark ships to recipients), and the format's attribute name must stay equal to the class prefix (or Quill's clipboard cannot map the class back when a draft is reopened). Enter inside a wrapped paragraph must clear the mark explicitly — splitting a paragraph copies it to both halves, and a marked break is one the wrapper may dissolve.

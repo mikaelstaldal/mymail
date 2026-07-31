@@ -3,6 +3,8 @@ import { api, NotFoundError } from '../api/client.js';
 import { navigate } from '../router.js';
 import { showToast } from '../util/toast.js';
 import { quoteHtmlToText, stripLeadingBlankHtml, stripLeadingBlankLines } from '../util/quotetext.js';
+import { reflowEdits, wrapText, isQuotedLine } from '../util/wrap.js';
+import { getWrapColumn } from '../util/config.js';
 import type { components } from '../api/types.js';
 
 type Identity = components['schemas']['Identity'];
@@ -13,13 +15,46 @@ type AttachmentMeta = components['schemas']['AttachmentMeta'];
 // Quill is loaded as a global script.
 declare const Quill: {
   new(el: HTMLElement, opts: unknown): QuillEditor;
+  import(name: string): unknown;
+  register(format: unknown, suppressWarning?: boolean): void;
 };
 interface QuillEditor {
   root: HTMLElement;
   getText(): string;
+  getLength(): number;
+  getContents(): { ops: DeltaOp[] };
+  updateContents(delta: DeltaBuilder): void;
+  insertText(index: number, text: string, formats: Record<string, unknown>, source: string): void;
+  deleteText(index: number, length: number, source: string): void;
+  setSelection(index: number, source: string): void;
+  format(name: string, value: unknown, source: string): void;
+  focus(): void;
   clipboard: { dangerouslyPasteHTML(html: string): void };
+  keyboard: {
+    addBinding(key: Record<string, unknown>, handler: KeyHandler): void;
+    bindings: Record<string, KeyBinding[]>;
+  };
   enable(enabled: boolean): void;
   on(event: string, handler: () => void): void;
+}
+interface QuillRange { index: number; length: number }
+interface KeyContext { format: Record<string, unknown> }
+type KeyHandler = (this: { quill: QuillEditor }, range: QuillRange, context: KeyContext) => boolean;
+interface KeyBinding { key: string; handler: KeyHandler }
+interface DeltaOp {
+  insert?: string | Record<string, unknown>;
+  attributes?: Record<string, unknown>;
+}
+/** The subset of Quill's Delta used to describe a batch of wrap edits. */
+interface DeltaBuilder {
+  retain(length: number): DeltaBuilder;
+  delete(length: number): DeltaBuilder;
+  insert(text: string, attributes?: Record<string, unknown>): DeltaBuilder;
+}
+/** The subset of Parchment used to declare the soft-break format. */
+interface ParchmentLike {
+  ClassAttributor: new(attrName: string, keyName: string, options: { scope: number }) => unknown;
+  Scope: { BLOCK: number };
 }
 
 // ── Helpers ────────────────────────────────────────────────────────────────
@@ -156,20 +191,150 @@ function joinQuotedHtml(editorHtml: string, quoteHtml: string): string {
   return quoteHtml ? editorHtml + QUOTE_MARKER + quoteHtml : editorHtml;
 }
 
+// Both halves are wrapped by the caller before they get here. Wrapping is
+// line-based and the halves are separated by a blank line, so wrapping them
+// separately gives the same result as wrapping the joined text.
 function joinQuotedText(editorText: string, quoteText: string): string {
   if (!quoteText) return editorText;
   return editorText.replace(/\n+$/, '') + '\n\n' + quoteText + '\n';
 }
 
-/** Inverse of joinQuotedText, for the rare path where Quill is unavailable. */
-function stripQuotedText(text: string, quoteText: string): string {
-  if (!quoteText) return text;
-  const tail = '\n\n' + quoteText + '\n';
-  return text.endsWith(tail) ? text.slice(0, -tail.length) : text;
-}
-
 function esc(s: string): string {
   return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+// ── Wrapping the editor at column 80 ───────────────────────────────────────
+
+// The break the wrapper inserts is an ordinary paragraph break carrying one
+// extra block format, which is what lets a later edit tell its own breaks from
+// the ones the author typed and re-fill the paragraph around them. It is a
+// class rather than an inline style so the sanitiser drops it on the way out —
+// `class` is on no allowlist — leaving it a fact about the draft, never about
+// the message. The attribute name must match the class prefix, or Quill's
+// clipboard cannot map the class back to the format when a draft is reopened.
+const SOFT_BREAK = 'ql-softwrap';
+const SOFT_BREAK_FORMAT = { [SOFT_BREAK]: 'y' };
+
+// Formats that belong to the line they sit on. In Quill's model the newline
+// carries the block's attributes, so splitting such a line either duplicates it
+// (a wrapped bullet becomes two bullets) or leaves the first half unformatted.
+// Those lines are left long here; the save-time wrap still bounds body_text.
+// A soft break that has acquired one of these — the author selected a wrapped
+// paragraph and made it a list — stops counting as one, so re-filling never
+// merges two list items into one.
+const UNSPLITTABLE_FORMATS = ['list', 'header', 'blockquote', 'code-block', 'align', 'indent'];
+
+function unsplittable(attributes: Record<string, unknown>): boolean {
+  return UNSPLITTABLE_FORMATS.some(f => f in attributes);
+}
+
+/**
+ * Enter inside a wrapped paragraph, made hard.
+ *
+ * Splitting a block clones it, mark and all, so a break the author made inside
+ * a soft-wrapped paragraph comes out looking like one of ours — and the next
+ * re-fill would dissolve it, fusing two paragraphs the author had just
+ * separated. Clearing the mark on the inserted newline is what makes the break
+ * hard; the half after it keeps its own mark, which is still correct. Only a
+ * marked plain paragraph is taken over: in a list item, where Enter means far
+ * more than a line break, Quill's own handling stands.
+ */
+function hardEnter(this: { quill: QuillEditor }, range: QuillRange, context: KeyContext): boolean {
+  const q = this.quill;
+  const formats = context.format;
+  if (!(SOFT_BREAK in formats) || unsplittable(formats)) return true;
+  if (range.length > 0) q.deleteText(range.index, range.length, 'user');
+  q.insertText(range.index, '\n', { [SOFT_BREAK]: null }, 'user');
+  q.setSelection(range.index + 1, 'silent');
+  q.focus();
+  // Quill's Enter carries the inline formats at the caret across the split, and
+  // taking Enter over means carrying them too — otherwise a break in the middle
+  // of a bold paragraph is followed by unbolded typing. Only block formats are
+  // deliberately dropped, and by this point the only one left is our own mark.
+  for (const [name, value] of Object.entries(formats)) {
+    if (name === SOFT_BREAK || name === 'code' || name === 'link') continue;
+    if (Array.isArray(value)) continue;
+    q.format(name, value, 'user');
+  }
+  return false;
+}
+
+interface EditorScan {
+  text: string;
+  /** Indices of the newlines this wrapper inserted. */
+  soft: Set<number>;
+  /** Block attributes of every newline, by index. */
+  lines: Map<number, Record<string, unknown>>;
+}
+
+/**
+ * The document as flat text plus the block attributes of each line, in one
+ * pass. Returns null for a document holding an embed: `getContents` reports one
+ * position for an image that contributes no characters, so every index after it
+ * would be out of step — and an embed is exactly where a misplaced break would
+ * be most destructive. Such a document is left alone; the save-time wrap still
+ * bounds body_text.
+ */
+function scanEditor(q: QuillEditor): EditorScan | null {
+  const text: string[] = [];
+  const soft = new Set<number>();
+  const lines = new Map<number, Record<string, unknown>>();
+  let len = 0;
+  for (const op of q.getContents().ops) {
+    if (typeof op.insert !== 'string') return null;
+    const attributes = op.attributes ?? {};
+    for (let i = op.insert.indexOf('\n'); i !== -1; i = op.insert.indexOf('\n', i + 1)) {
+      lines.set(len + i, attributes);
+      if (attributes[SOFT_BREAK] && !unsplittable(attributes)) soft.add(len + i);
+    }
+    text.push(op.insert);
+    len += op.insert.length;
+  }
+  // The newline a Quill document always ends with terminates the document, not
+  // a line: there is nothing after it to pull back up. It can still end up
+  // marked — splitting a block clones its formats onto the half that inherits
+  // the old newline — and dissolving it would replace the terminator with a
+  // space that Quill then has to terminate again, appending one more blank on
+  // every keystroke.
+  soft.delete(len - 1);
+  return { text: text.join(''), soft, lines };
+}
+
+/**
+ * Keep every paragraph in the editor filled to `width`, so the line breaks the
+ * author sees while typing are the ones the recipient receives.
+ *
+ * Applied as one delta rather than an edit at a time: a single document update
+ * (a long paste wraps in one pass, not one pass per line), a single undo step,
+ * and Quill transforms the caret through it, so typing continues uninterrupted
+ * at the same character — now on the new line.
+ */
+function autoWrapEditor(q: QuillEditor, width: number): void {
+  const scan = scanEditor(q);
+  if (scan === null) return;
+
+  const edits = reflowEdits(scan.text, scan.soft, {
+    width,
+    // A quoted line is left to the save-time wrap, which is the only one that
+    // can repeat the `> ` markers: a break made here has to stay dissolvable,
+    // and a marker it had inserted could not be told from one the author typed.
+    // Wrapping it here anyway would ship continuation lines with no marker at
+    // all, which read to the recipient as newly written text.
+    canWrapLine: (start, end) =>
+      !unsplittable(scan.lines.get(end) ?? {}) && !isQuotedLine(scan.text, start),
+  });
+  if (edits.length === 0) return;
+
+  const Delta = Quill.import('delta') as new () => DeltaBuilder;
+  const delta = new Delta();
+  let pos = 0;
+  for (const e of edits) {
+    if (e.at > pos) delta.retain(e.at - pos);
+    if (e.remove > 0) delta.delete(e.remove);
+    delta.insert(e.insert, e.join ? undefined : SOFT_BREAK_FORMAT);
+    pos = e.at + e.remove;
+  }
+  q.updateContents(delta);
 }
 
 // ── LocalStorage draft helpers ─────────────────────────────────────────────
@@ -219,7 +384,6 @@ interface RestoredFields {
   bcc: string[];
   subject: string;
   bodyHtml: string;
-  bodyText: string;
   sendAt: string;
 }
 
@@ -237,7 +401,6 @@ function fieldsFromServerDraft(msg: MessageDetail, idents: Identity[]): Restored
     bcc: splitAddr(msg.bcc_addr),
     subject: msg.subject,
     bodyHtml: msg.body_html,
-    bodyText: msg.body_text,
     sendAt: msg.send_at ? isoToDatetimeLocal(msg.send_at) : '',
   };
 }
@@ -438,9 +601,11 @@ export function ComposeForm({ replyId, replyAllId, forwardId, draftId }: Compose
   const [quoteSize, setQuoteSize] = useState(0);
   const [quoteOpen, setQuoteOpen] = useState(false);
 
+  // Wrapped here rather than at join time so that the preview below the editor
+  // shows the quote exactly as it will be sent.
   function quoteText(): string {
     if (quoteTextRef.current === null) {
-      quoteTextRef.current = quoteHtmlToText(quoteHtmlRef.current);
+      quoteTextRef.current = wrapText(quoteHtmlToText(quoteHtmlRef.current), getWrapColumn());
     }
     return quoteTextRef.current;
   }
@@ -459,7 +624,7 @@ export function ComposeForm({ replyId, replyAllId, forwardId, draftId }: Compose
   }
 
   /** Restore a stored draft body, keeping its quoted half out of the editor. */
-  function loadStoredBody(bodyHtml: string, fallbackText: string) {
+  function loadStoredBody(bodyHtml: string) {
     const { editorHtml, quoteHtml } = splitQuotedHtml(bodyHtml);
     setQuote(quoteHtml);
     if (editorRef.current && quillRef.current && editorHtml) {
@@ -467,8 +632,14 @@ export function ComposeForm({ replyId, replyAllId, forwardId, draftId }: Compose
       bodyHtmlRef.current = quillRef.current.root.innerHTML;
       bodyTextRef.current = quillRef.current.getText();
     } else {
+      // Without the editor there is no text to read out of it, so the editable
+      // half is rendered down from its own HTML — the same way the quoted half
+      // always is. The stored body_text is not used for this: it holds both
+      // halves joined and wrapped at whatever column was set when it was saved,
+      // so recovering one half from it means matching a tail that a change of
+      // column silently invalidates, and a near miss appends the quote twice.
       bodyHtmlRef.current = editorHtml;
-      bodyTextRef.current = stripQuotedText(fallbackText, quoteHtmlToText(quoteHtml));
+      bodyTextRef.current = quoteHtmlToText(editorHtml);
     }
   }
 
@@ -477,6 +648,10 @@ export function ComposeForm({ replyId, replyAllId, forwardId, draftId }: Compose
   stateRef.current = { identityId, to, cc, bcc, subject, sendAt };
 
   // ── Build draft request body ─────────────────────────────────────────────
+  // The editor text arrives already wrapped (autoWrapEditor breaks it as it is
+  // typed), so wrapText here is a backstop for what the editor cannot break in
+  // place: list items, and a document holding an embed. It is idempotent, so it
+  // costs nothing when the editor has already done the work.
   const buildDraftBody = useCallback(() => {
     return {
       identity_id: stateRef.current.identityId,
@@ -485,7 +660,7 @@ export function ComposeForm({ replyId, replyAllId, forwardId, draftId }: Compose
       bcc_addr: stateRef.current.bcc.join(', '),
       subject: stateRef.current.subject,
       body_html: joinQuotedHtml(bodyHtmlRef.current, quoteHtmlRef.current),
-      body_text: joinQuotedText(bodyTextRef.current, quoteText()),
+      body_text: joinQuotedText(wrapText(bodyTextRef.current, getWrapColumn()), quoteText()),
       in_reply_to: inReplyToRef.current || undefined,
       references: refsRef.current.length > 0 ? refsRef.current : undefined,
       send_at: stateRef.current.sendAt ? new Date(stateRef.current.sendAt).toISOString() : null,
@@ -572,7 +747,7 @@ export function ComposeForm({ replyId, replyAllId, forwardId, draftId }: Compose
         let fields: RestoredFields = {
           identityId: defaultIdent?.id,
           to: [], cc: [], bcc: [],
-          subject: '', bodyHtml: '', bodyText: '', sendAt: '',
+          subject: '', bodyHtml: '', sendAt: '',
         };
         if (serverDraft) {
           fields = fieldsFromServerDraft(serverDraft, idents);
@@ -597,7 +772,7 @@ export function ComposeForm({ replyId, replyAllId, forwardId, draftId }: Compose
         setSubject(fields.subject);
         if (fields.sendAt) { setSendAt(fields.sendAt); setSendLater(true); }
 
-        loadStoredBody(fields.bodyHtml, fields.bodyText);
+        loadStoredBody(fields.bodyHtml);
 
         setLoading(false);
         return;
@@ -640,7 +815,6 @@ export function ComposeForm({ replyId, replyAllId, forwardId, draftId }: Compose
             bcc: localDraft.bcc,
             subject: localDraft.subject,
             bodyHtml: localDraft.bodyHtml,
-            bodyText: '',
             sendAt: localDraft.sendAt,
           };
 
@@ -658,7 +832,7 @@ export function ComposeForm({ replyId, replyAllId, forwardId, draftId }: Compose
           setSubject(f.subject);
           if (f.sendAt) { setSendAt(f.sendAt); setSendLater(true); }
 
-          loadStoredBody(f.bodyHtml, f.bodyText);
+          loadStoredBody(f.bodyHtml);
 
           setLoading(false);
           return;
@@ -776,6 +950,11 @@ export function ComposeForm({ replyId, replyAllId, forwardId, draftId }: Compose
   // ── Initialize Quill after first render ──────────────────────────────────
   useEffect(() => {
     if (!editorRef.current) return;
+    const Parchment = Quill.import('parchment') as ParchmentLike;
+    Quill.register(
+      new Parchment.ClassAttributor(SOFT_BREAK, SOFT_BREAK, { scope: Parchment.Scope.BLOCK }),
+      true,
+    );
     const q = new Quill(editorRef.current, {
       modules: {
         toolbar: [
@@ -786,12 +965,49 @@ export function ComposeForm({ replyId, replyAllId, forwardId, draftId }: Compose
       },
       theme: 'snow',
     });
+
+    // Quill stops at the first handler that does not return true, and its own
+    // Enter is registered first, so the correction has to be moved to the front
+    // of the chain to get a say at all. `shiftKey: null` matches either way:
+    // Shift+Enter reaches the same handler and needs the same correction.
+    q.keyboard.addBinding({ key: 'Enter', shiftKey: null }, hardEnter);
+    const enterBindings = q.keyboard.bindings['Enter'];
+    enterBindings.unshift(enterBindings.pop()!);
+
+    // Wrapping is itself a text change, so it has to be kept from re-entering.
+    // Every other source is wrapped, not just typing: a paste, a restored
+    // draft and an undo all have to end up within the column too.
+    let wrapping = false;
+    let composing = false;
+    function wrapNow() {
+      if (wrapping || composing) return;
+      wrapping = true;
+      try {
+        autoWrapEditor(q, getWrapColumn());
+      } finally {
+        wrapping = false;
+      }
+    }
+
     q.on('text-change', () => {
+      wrapNow();
       bodyHtmlRef.current = q.root.innerHTML;
       bodyTextRef.current = q.getText();
     });
+
+    // Editing the document under an active IME discards what is being
+    // composed, so wrapping waits for the composition to finish. Quill's own
+    // compositionend handler runs first (it registered first) and emits its
+    // text-change while `composing` is still set, hence the explicit wrap here.
+    const onCompositionStart = () => { composing = true; };
+    const onCompositionEnd = () => { composing = false; wrapNow(); };
+    q.root.addEventListener('compositionstart', onCompositionStart);
+    q.root.addEventListener('compositionend', onCompositionEnd);
+
     quillRef.current = q;
     return () => {
+      q.root.removeEventListener('compositionstart', onCompositionStart);
+      q.root.removeEventListener('compositionend', onCompositionEnd);
       quillRef.current = null;
     };
   }, []);
