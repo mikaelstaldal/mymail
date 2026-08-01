@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'preact/hooks';
 import { api } from '../../api/client.js';
+import { Icon } from '../../components/Icon.js';
 import type { components } from '../../api/types.js';
 
 type Filter = components['schemas']['Filter'];
@@ -315,7 +316,7 @@ export function Filters() {
             onDragLeave={() => setOverIdx(null)}
             onDrop={e => { e.preventDefault(); void handleDrop(idx); }}
           >
-            <span class="settings-drag-handle" title="Drag to reorder">⠿</span>
+            <Icon name="grip-vertical" size={18} class="settings-drag-handle" title="Drag to reorder" />
             <div class="settings-item-info">
               <div class="settings-item-name">{item.name || `Filter #${item.id}`}</div>
               <div class="settings-item-meta">
@@ -324,7 +325,7 @@ export function Filters() {
                   item.match_to && `To/Cc: ${item.match_to}`,
                   item.match_subject && `Subject: ${item.match_subject}`,
                 ].filter(Boolean).join(' · ')}
-                {' → '}
+                {' '}<Icon name="arrow-right" size={13} class="settings-meta-arrow" />{' '}
                 {ACTION_LABELS[item.action]}
                 {item.action === 'move' && item.folder_id && (
                   isFolderMissing(item.folder_id)

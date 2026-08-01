@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'preact/hooks';
 import { subscribe, dismissToast, type ToastItem } from '../util/toast.js';
+import { Icon } from './Icon.js';
 
 export function Toast() {
   const [items, setItems] = useState<ToastItem[]>([]);
@@ -27,7 +28,7 @@ export function Toast() {
               onClick={() => dismissToast(item.id)}
               aria-label="Dismiss"
             >
-              ✕
+              <Icon name="x" size={15} />
             </button>
           </div>
         </div>

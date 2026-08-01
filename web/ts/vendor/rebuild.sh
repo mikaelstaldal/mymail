@@ -1,13 +1,17 @@
 #!/usr/bin/env bash
 # Maintainer-only script. Fetches the pinned upstream sources for the vendored
-# browser libraries (Preact, Quill) via npm and copies each into
+# browser libraries (Preact, Quill, Lucide) via npm and copies each into
 # web/static/vendor/, plus Preact's .d.ts type stubs into web/ts/vendor/preact/.
 # It also vendors the test-only jsdom install tree under web/ts/vendor/test/.
 #
-# Both libraries ship prebuilt, self-contained files — Preact's dist/*.module.js
+# Preact and Quill ship prebuilt, self-contained files — Preact's dist/*.module.js
 # ESM modules and Quill's dist/quill.js UMD global + dist/quill.snow.css — so no
-# bundler is involved: the script only copies (and version-stamps) them. That
-# keeps the maintainer toolchain to npm + node; build.sh and CI need neither.
+# bundler is involved: the script only copies (and version-stamps) them. The
+# Lucide bundle is the one generated asset here: gen-lucide.mjs (committed,
+# fs-only, no network) trims lucide-static's icon set down to the icons the UI
+# actually names. Add an icon to its ICONS list before referencing it from a
+# component. That keeps the maintainer toolchain to npm + node; build.sh and CI
+# need neither.
 #
 # Every browser filename is version-stamped (e.g. preact-10.29.7.module.js,
 # quill-2.0.3.js) from the installed package version, so a file's name records
@@ -32,6 +36,7 @@ VENDOR_DIR="$(pwd)"
 BROWSER_OUT="$VENDOR_DIR/../../static/vendor"
 PREACT_OUT="$BROWSER_OUT/preact"    # runtime ESM modules served to the browser
 QUILL_OUT="$BROWSER_OUT/quill"      # Quill UMD global + snow theme CSS
+LUCIDE_OUT="$BROWSER_OUT/lucide"    # generated icon-geometry ESM module
 PREACT_TYPES="$VENDOR_DIR/preact"   # .d.ts type stubs (compile-time only)
 TEST_DIR="$VENDOR_DIR/test"         # jsdom install tree for the node --test suite
 
@@ -48,6 +53,7 @@ npm ci --ignore-scripts
 
 PREACT_VER="$(pkgver preact)"
 QUILL_VER="$(pkgver quill)"
+LUCIDE_VER="$(pkgver lucide-static)"
 
 # --- 1. Preact runtime modules + type stubs --------------------------------
 #
@@ -114,7 +120,25 @@ cp "$QUILL_SRC/dist/quill.snow.css" "$QUILL_OUT/quill-$QUILL_VER.snow.css"
 
 echo "Wrote $QUILL_OUT/quill-$QUILL_VER.js + quill-$QUILL_VER.snow.css"
 
-# --- 3. Test-only jsdom install tree (never shipped to the browser) ---------
+# --- 3. Lucide: icon geometry for the <Icon> component ---------------------
+#
+# lucide-static ships the whole collection as data (icon-nodes.json: each icon's
+# SVG child elements as [tag, attrs] pairs). MyMail has no icon picker, so
+# gen-lucide.mjs emits only the icons its ICONS list names — a few kB rather than
+# the ~600 kB full set — as a plain ESM module exporting LUCIDE_ICON_NODES, which
+# web/ts/components/Icon.tsx imports as "lucide-icons".
+
+mkdir -p "$LUCIDE_OUT"
+rm -f "$LUCIDE_OUT"/lucide-*.js
+
+node "$VENDOR_DIR/gen-lucide.mjs" \
+  "$VENDOR_DIR/node_modules/lucide-static/icon-nodes.json" \
+  "$LUCIDE_OUT/lucide-$LUCIDE_VER.js" \
+  "$LUCIDE_VER"
+
+echo "Wrote $LUCIDE_OUT/lucide-$LUCIDE_VER.js"
+
+# --- 4. Test-only jsdom install tree (never shipped to the browser) ---------
 #
 # The `node --test` frontend tests need a DOM. jsdom cannot be reduced to a
 # single self-contained file — it does dynamic require() of Node builtins and
@@ -139,16 +163,17 @@ echo "Wrote $QUILL_OUT/quill-$QUILL_VER.js + quill-$QUILL_VER.snow.css"
 
 echo "Wrote $TEST_DIR/jsdom-node_modules.tar.gz (jsdom $(node -p "require('$TEST_DIR/package.json').dependencies.jsdom"))"
 
-# --- 4. Reminder: keep web/static/index.html in sync -----------------------
+# --- 5. Reminder: keep web/static/index.html in sync -----------------------
 #
 # The filenames are version-stamped, so update index.html by hand whenever a
-# version bumped: the Preact import map and the Quill <script>/<link> tags.
+# version bumped: the Preact/Lucide import map and the Quill <script>/<link> tags.
 cat <<EOF
 
 Reminder: update web/static/index.html to reference:
   import map: preact             -> ./vendor/preact/preact-$PREACT_VER.module.js
   import map: preact/hooks       -> ./vendor/preact/hooks-$PREACT_VER.module.js
   import map: preact/jsx-runtime -> ./vendor/preact/jsx-runtime-$PREACT_VER.module.js
+  import map: lucide-icons       -> ./vendor/lucide/lucide-$LUCIDE_VER.js
   <link ... href="vendor/quill/quill-$QUILL_VER.snow.css">
   <script src="vendor/quill/quill-$QUILL_VER.js"></script>
 EOF

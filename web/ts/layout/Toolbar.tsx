@@ -1,4 +1,5 @@
 import { useState } from 'preact/hooks';
+import { Icon } from '../components/Icon.js';
 
 export function Toolbar() {
   const [query, setQuery] = useState('');
@@ -17,10 +18,10 @@ export function Toolbar() {
         class="compose-btn"
         onClick={() => { window.location.hash = '#/compose'; }}
       >
-        ✏ Compose
+        <Icon name="pencil" size={15} /> Compose
       </button>
       <form class="search-bar" onSubmit={handleSearch}>
-        <span class="search-icon">🔍</span>
+        <Icon name="search" size={15} class="search-icon" />
         <input
           type="search"
           placeholder="Search all mail…"

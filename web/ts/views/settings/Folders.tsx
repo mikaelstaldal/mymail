@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'preact/hooks';
 import { api } from '../../api/client.js';
+import { Icon } from '../../components/Icon.js';
 import type { components } from '../../api/types.js';
 
 type Folder = components['schemas']['Folder'];
@@ -193,7 +194,7 @@ export function Folders() {
             onDragLeave={() => setOverIdx(null)}
             onDrop={e => { e.preventDefault(); void handleDrop(idx); }}
           >
-            <span class="settings-drag-handle" title="Drag to reorder">⠿</span>
+            <Icon name="grip-vertical" size={18} class="settings-drag-handle" title="Drag to reorder" />
             <div class="settings-item-info">
               <div class="settings-item-name">{folder.name}</div>
             </div>

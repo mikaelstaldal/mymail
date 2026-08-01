@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'preact/hooks';
 import { api } from '../../api/client.js';
+import { Icon } from '../../components/Icon.js';
 import type { components } from '../../api/types.js';
 
 type Contact = components['schemas']['Contact'];
@@ -235,7 +236,7 @@ export function Contacts() {
             onClick={() => setOffset(Math.max(0, offset - PAGE_SIZE))}
             disabled={offset === 0}
           >
-            ← Prev
+            <Icon name="arrow-left" size={14} /> Prev
           </button>
           <span class="settings-pagination-info">
             {offset + 1}–{Math.min(offset + PAGE_SIZE, total)} of {total}
@@ -245,7 +246,7 @@ export function Contacts() {
             onClick={() => setOffset(offset + PAGE_SIZE)}
             disabled={offset + PAGE_SIZE >= total}
           >
-            Next →
+            Next <Icon name="arrow-right" size={14} />
           </button>
         </div>
       )}

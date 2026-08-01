@@ -5,6 +5,7 @@ import { showToast } from '../util/toast.js';
 import { quoteHtmlToText, stripLeadingBlankHtml, stripLeadingBlankLines } from '../util/quotetext.js';
 import { reflowEdits, wrapText, isQuotedLine } from '../util/wrap.js';
 import { getWrapColumn } from '../util/config.js';
+import { Icon } from '../components/Icon.js';
 import {
   hasValidRecipient, isValidAddressList, splitAddressList, formatAddress, normalizeAddressEntry,
 } from '../util/address.js';
@@ -537,7 +538,7 @@ function AddressField({ label, tags, onTagsChange, input, onInputChange, extra }
           {tags.map((t, i) => (
             <span key={i} class="cf-addr-tag" title={addrSpec(t)}>
               {displayName(t) || t}
-              <button type="button" onClick={() => removeTag(i)} aria-label="Remove">×</button>
+              <button type="button" onClick={() => removeTag(i)} aria-label="Remove"><Icon name="x" size={13} /></button>
             </span>
           ))}
           <input
@@ -1302,7 +1303,7 @@ export function ComposeForm({ replyId, replyAllId, forwardId, draftId }: Compose
               aria-expanded={quoteOpen}
               onClick={() => setQuoteOpen(o => !o)}
             >
-              {quoteOpen ? '▾' : '▸'} Quoted text ({formatBytes(quoteSize)})
+              <Icon name={quoteOpen ? 'chevron-down' : 'chevron-right'} size={14} /> Quoted text ({formatBytes(quoteSize)})
             </button>
             <span class="compose-quote-note">included when you send</span>
             <button type="button" class="btn btn-ghost btn-sm" onClick={dropQuote}>
@@ -1320,13 +1321,13 @@ export function ComposeForm({ replyId, replyAllId, forwardId, draftId }: Compose
             <span key={a.id} class="cf-attached-file">
               {a.filename}
               <span class="cf-attach-size">({formatBytes(a.size)})</span>
-              <button type="button" onClick={() => void removeExistingAttachment(a.id)}>×</button>
+              <button type="button" aria-label="Remove attachment" onClick={() => void removeExistingAttachment(a.id)}><Icon name="x" size={14} /></button>
             </span>
           ))}
           {files.map((f, i) => (
             <span key={i} class="cf-attached-file cf-new-attach">
               {f.name}
-              <button type="button" onClick={() => removeFile(i)}>×</button>
+              <button type="button" aria-label="Remove attachment" onClick={() => removeFile(i)}><Icon name="x" size={14} /></button>
             </span>
           ))}
         </div>

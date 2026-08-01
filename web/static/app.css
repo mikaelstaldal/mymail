@@ -1,94 +1,150 @@
 /* ── Reset ── */
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
-/* ── Design tokens ── */
+/* ── Design tokens ──
+   The palette is MyCal's, so the two apps read as one product: the five names
+   MyNotes owns and MyCal re-exports — --fg, --muted, --primary, --link,
+   --danger — carry the same values here, and the rest of the ramp is the same
+   Tailwind grey/blue one MyCal derives from them.
+
+   Below the ramp, MyMail's own long-standing token names (--topbar-bg,
+   --list-item-hover, …) are resolved onto it rather than deleted: ~700 rules
+   already reference them, and keeping them means a colour is still changed in
+   exactly one place. Note --text-muted is MyMail's *faintest* step, one below
+   --text-secondary; MyCal spells that step --text-faint.
+
+   --link and --muted carry their shared values even though no rule here reads
+   them yet: they are two of the canonical five, and the set is only useful as a
+   set. */
 :root {
-  --sidebar-bg: #1c2b3a;
-  --sidebar-text: #c8d8e8;
-  --sidebar-muted: #7a97b0;
-  --sidebar-hover: #243447;
-  --sidebar-active: #1e4d7b;
-  --sidebar-active-border: #3b82f6;
-  --sidebar-badge: #3b82f6;
-  --topbar-bg: #ffffff;
-  --topbar-border: #e2e8f0;
-  --list-bg: #f8fafc;
-  --list-border: #e2e8f0;
-  --list-item-hover: #f0f4f8;
-  --list-item-active-bg: #eff6ff;
-  --list-item-active-border: #3b82f6;
-  --btn-primary: #3b82f6;
-  --btn-primary-hover: #2563eb;
-  --btn-danger: #ef4444;
-  --btn-danger-hover: #dc2626;
-  --btn-success: #16a34a;
+  /* Tells the browser which palette to draw native widgets (form controls,
+     scrollbars, date pickers) from; without it a dark theme still gets
+     light-mode controls. */
+  color-scheme: light;
+
+  /* MyNotes' canonical five */
+  --fg: #1f2937;
+  --muted: #6b7280;
+  --primary: #2563eb;
+  --link: #2563eb;
+  --danger: #dc2626;
+
+  --primary-hover: #1d4ed8;
+
+  --bg: #f3f4f6;
+  --surface: #ffffff;
+  --surface-alt: #f9fafb;
+  --border: #e5e7eb;
+  --border-light: #f3f4f6;
+  --hover-bg: #f3f4f6;
+  --hover-bg-light: #f9fafb;
+  --accent-hover-bg: #eff6ff;
+  --error-bg: #fee2e2;
+  --success-bg: #dcfce7;
+  --success-color: #16a34a;
+  --text-subtle: #6b7280;
+  --text-faint: #9ca3af;
+  --text-disabled: #9ca3af;
+
+  /* MyMail's names, resolved onto the ramp above */
+  --sidebar-bg: var(--surface);
+  --sidebar-text: var(--fg);
+  --sidebar-muted: var(--text-subtle);
+  --sidebar-hover: var(--hover-bg);
+  --sidebar-active: var(--accent-hover-bg);
+  --sidebar-active-border: var(--primary);
+  --sidebar-badge: var(--primary);
+  --sidebar-divider: var(--border-light);
+  --topbar-bg: var(--surface);
+  --topbar-border: var(--border);
+  --list-bg: var(--bg);
+  --list-border: var(--border);
+  --list-item-hover: var(--hover-bg-light);
+  --list-item-active-bg: var(--accent-hover-bg);
+  --list-item-active-border: var(--primary);
+  --btn-primary: var(--primary);
+  --btn-primary-hover: var(--primary-hover);
+  --btn-danger: var(--danger);
+  --btn-danger-hover: #b91c1c;
+  --btn-success: var(--success-color);
   --btn-success-hover: #15803d;
-  --btn-disabled: #cbd5e1;
-  --btn-disabled-text: #64748b;
-  --text-primary: #1e293b;
-  --text-secondary: #475569;
-  --text-muted: #94a3b8;
-  --unread-weight: 700;
+  --btn-disabled: var(--border);
+  --btn-disabled-text: var(--text-disabled);
+  --text-primary: var(--fg);
+  --text-secondary: #4b5563;
+  --text-muted: var(--text-faint);
+  --unread-weight: 600;
   --border-radius: 6px;
-  --field-border: #cbd5e1;
-  --focus-ring: 0 0 0 3px rgba(59,130,246,0.18);
-  --app-bg: #e8edf2;
-  --status-error-bg: #fef2f2;
-  --status-error-text: #dc2626;
+  --field-border: var(--border);
+  --focus-ring: 0 0 0 3px rgba(37,99,235,0.18);
+  --app-bg: var(--bg);
+  --status-error-bg: var(--error-bg);
+  --status-error-text: var(--danger);
   --status-error-border: #fecaca;
-  --status-success-bg: #f0fdf4;
+  --status-success-bg: var(--success-bg);
   --status-success-border: #bbf7d0;
   --on-color-fg: #ffffff;
   /* Surface colors */
-  --surface-bg: #ffffff;
-  --surface-alt-bg: #fafafa;
-  --compose-actions-bg: #f8fafc;
-  --field-row-border: #f0f4f8;
+  --surface-bg: var(--surface);
+  --surface-alt-bg: var(--surface-alt);
+  --compose-actions-bg: var(--surface-alt);
+  --field-row-border: var(--border-light);
   /* Warning / info highlight */
   --warning-bg: #fffbeb;
   --warning-border: #fde68a;
   --warning-text: #92400e;
-  --highlight-bg: #eff6ff;
+  --highlight-bg: var(--accent-hover-bg);
   --highlight-border: #bfdbfe;
   --highlight-selected-hover: #dbeafe;
   /* Address tags */
-  --tag-bg: #eff6ff;
+  --tag-bg: #dbeafe;
   --tag-border: #bfdbfe;
   --tag-text: #1d4ed8;
-  --tag-btn-color: #93c5fd;
+  --tag-btn-color: #60a5fa;
+  /* Search-snippet highlight */
+  --mark-bg: #fef9c3;
+  --mark-text: #78350f;
+  --overlay-bg: rgba(255, 255, 255, 0.8);
 }
 
-/* ── Dark mode ── */
-html.dark {
-  --sidebar-bg: #0d1b2e;
-  --sidebar-text: #94a3b8;
-  --sidebar-muted: #4b6a87;
-  --sidebar-hover: #1e293b;
-  --sidebar-active: #1e3a5f;
-  --topbar-bg: #1e293b;
-  --topbar-border: #334155;
-  --list-bg: #0f172a;
-  --list-border: #1e293b;
-  --list-item-hover: #1e293b;
-  --list-item-active-bg: #1e3a5f;
-  --app-bg: #020617;
-  --text-primary: #e2e8f0;
-  --text-secondary: #94a3b8;
-  --text-muted: #64748b;
-  --field-border: #334155;
-  --status-error-bg: #450a0a;
+/* ── Dark mode ──
+   Same attribute MyCal switches on, so a saved preference reads the same in
+   both apps and the two never disagree about which theme is showing. */
+[data-theme="dark"] {
+  color-scheme: dark;
+
+  --fg: #f3f4f6;
+  --muted: #9ca3af;
+  --primary: #3b82f6;
+  --link: #60a5fa;
+  --danger: #ef4444;
+
+  --primary-hover: #60a5fa;
+
+  --bg: #111827;
+  --surface: #1f2937;
+  --surface-alt: #273549;
+  --border: #374151;
+  --border-light: #2b3644;
+  --hover-bg: #374151;
+  --hover-bg-light: #273549;
+  --accent-hover-bg: #1e3a5f;
+  --error-bg: #3f1d1d;
+  --success-bg: #14321f;
+  --success-color: #22c55e;
+  --text-subtle: #9ca3af;
+  --text-faint: #6b7280;
+  --text-disabled: #6b7280;
+
+  --text-secondary: #d1d5db;
+  --btn-danger-hover: #f87171;
+  --btn-success-hover: #4ade80;
   --status-error-text: #f87171;
   --status-error-border: #7f1d1d;
-  --status-success-bg: #052e16;
   --status-success-border: #14532d;
-  --surface-bg: #1e293b;
-  --surface-alt-bg: #1a2540;
-  --compose-actions-bg: #162032;
-  --field-row-border: #1e293b;
   --warning-bg: #2a1800;
   --warning-border: #4a2e00;
   --warning-text: #fbbf24;
-  --highlight-bg: #1e3a5f;
   --highlight-border: #1e4080;
   --highlight-selected-hover: #1e3a5f;
   --tag-bg: #1e3a5f;
@@ -96,14 +152,25 @@ html.dark {
   --tag-text: #93c5fd;
   --tag-btn-color: #3b82f6;
   --focus-ring: 0 0 0 3px rgba(59,130,246,0.30);
+  --mark-bg: #713f12;
+  --mark-text: #fef9c3;
+  --overlay-bg: rgba(31, 41, 55, 0.8);
 }
 
 /* ── Base ── */
 html, body {
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
-  font-size: 14px;
+  font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  line-height: 1.5;
   color: var(--text-primary);
   background: var(--app-bg);
+}
+
+/* Lucide icons are always either the whole content of an icon-only button or an
+   inline run beside a label. Centring them keeps the SVG's baseline from
+   leaving a descender gap under the glyph. */
+.lucide {
+  vertical-align: middle;
+  flex-shrink: 0;
 }
 
 /* ── App Shell ── */
@@ -118,23 +185,26 @@ html, body {
   height: 100vh;
 }
 
-/* ── Sidebar ── */
+/* ── Sidebar ──
+   A --surface panel with a --border edge, like MyCal's .calendar-sidebar and
+   .left-sidebar, rather than the dark slab this used to be: the whole chrome is
+   now drawn from the one shared light/dark ramp. */
 .sidebar {
   grid-area: sidebar;
   background: var(--sidebar-bg);
   color: var(--sidebar-text);
+  border-right: 1px solid var(--border);
   display: flex;
   flex-direction: column;
   overflow-y: auto;
 }
 
 .sidebar-header {
-  padding: 16px 16px 12px;
-  font-size: 18px;
-  font-weight: 700;
-  color: #fff;
-  letter-spacing: -0.3px;
-  border-bottom: 1px solid rgba(255,255,255,0.07);
+  padding: 14px 16px 12px;
+  font-size: 1.1rem;
+  font-weight: 600;
+  color: var(--text-primary);
+  border-bottom: 1px solid var(--border-light);
   display: flex;
   align-items: center;
   gap: 8px;
@@ -144,14 +214,14 @@ html, body {
 .logo-icon {
   width: 28px; height: 28px;
   background: var(--sidebar-badge);
+  color: #fff;
   border-radius: 6px;
   display: flex; align-items: center; justify-content: center;
-  font-size: 15px;
   flex-shrink: 0;
 }
 
 .sidebar-section-label {
-  font-size: 10px;
+  font-size: 0.65rem;
   font-weight: 600;
   letter-spacing: 0.08em;
   text-transform: uppercase;
@@ -167,10 +237,10 @@ html, body {
   align-items: center;
   gap: 8px;
   padding: 7px 10px;
-  border-radius: 5px;
+  border-radius: var(--border-radius);
   color: var(--sidebar-text);
   text-decoration: none;
-  font-size: 13.5px;
+  font-size: 0.85rem;
   transition: background 0.12s;
   border-left: 3px solid transparent;
 }
@@ -179,17 +249,20 @@ html, body {
 .folder-item.active a {
   background: var(--sidebar-active);
   border-left-color: var(--sidebar-active-border);
-  color: #fff;
+  color: var(--primary);
   font-weight: 600;
 }
 
-.folder-icon { font-size: 15px; width: 20px; text-align: center; flex-shrink: 0; }
+/* No width of its own: every Lucide icon is the same square, so the labels line
+   up on the icons themselves. Colour is inherited, which is what tints the
+   active row's icon along with its text. */
+.folder-icon { opacity: 0.85; }
 
 .folder-badge {
   margin-left: auto;
   background: var(--sidebar-badge);
   color: #fff;
-  font-size: 11px;
+  font-size: 0.7rem;
   font-weight: 700;
   min-width: 18px;
   height: 18px;
@@ -204,42 +277,60 @@ html, body {
   border: none;
   color: var(--sidebar-muted);
   cursor: pointer;
-  font-size: 22px;
   line-height: 1;
-  padding: 4px 6px;
-  border-radius: 5px;
+  padding: 5px 6px;
+  border-radius: var(--border-radius);
   transition: background 0.12s, color 0.12s;
   display: flex;
   align-items: center;
   justify-content: center;
   flex-shrink: 0;
 }
-.sidebar-reload-btn:hover { background: var(--sidebar-hover); color: #fff; }
+.sidebar-reload-btn:hover { background: var(--sidebar-hover); color: var(--text-primary); }
 .sidebar-reload-btn:focus-visible { outline: none; box-shadow: var(--focus-ring); }
 
-.sidebar-divider { height: 1px; background: rgba(255,255,255,0.07); margin: 6px 8px; flex-shrink: 0; }
+.sidebar-divider { height: 1px; background: var(--sidebar-divider); margin: 6px 8px; flex-shrink: 0; }
 
 .sidebar-spacer { flex: 1; }
 
+/* One line, always: nowrap plus one-word labels (see ThemeToggle) keeps both
+   controls side by side, rather than dropping the wider of them onto a second
+   row whenever the theme flips. */
 .sidebar-footer {
   padding: 8px;
-  border-top: 1px solid rgba(255,255,255,0.07);
+  border-top: 1px solid var(--border-light);
   flex-shrink: 0;
+  display: flex;
+  flex-wrap: nowrap;
+  gap: 4px;
 }
 
+/* Both words stacked in one grid cell: the cell is as wide as the longer of
+   them, so the button's width does not change when the theme is toggled. */
+.sidebar-theme-label { display: grid; }
+.sidebar-theme-label > span { grid-area: 1 / 1; visibility: hidden; }
+.sidebar-theme-label > .is-shown { visibility: visible; }
+
+.sidebar-theme-toggle,
 .sidebar-settings-link {
-  display: flex;
+  display: inline-flex;
   align-items: center;
-  gap: 8px;
-  padding: 7px 10px;
-  border-radius: 5px;
+  gap: 6px;
+  padding: 7px 8px;
+  border: none;
+  border-radius: var(--border-radius);
+  background: none;
   color: var(--sidebar-muted);
   text-decoration: none;
-  font-size: 13.5px;
-  transition: background 0.12s;
-  border-left: 3px solid transparent;
+  font-family: inherit;
+  font-size: 0.85rem;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background 0.12s, color 0.12s;
 }
-.sidebar-settings-link:hover { background: var(--sidebar-hover); color: var(--sidebar-text); }
+.sidebar-theme-toggle:hover,
+.sidebar-settings-link:hover { background: var(--sidebar-hover); color: var(--text-primary); }
+.sidebar-theme-toggle:focus-visible,
 .sidebar-settings-link:focus-visible { outline: none; box-shadow: var(--focus-ring); }
 
 /* ── Top bar ── */
@@ -256,7 +347,7 @@ html, body {
 
 .topbar-title {
   font-weight: 600;
-  font-size: 15px;
+  font-size: 0.95rem;
   color: var(--text-primary);
 }
 
@@ -273,7 +364,7 @@ html, body {
   justify-content: center;
   height: 100%;
   color: var(--text-muted);
-  font-size: 15px;
+  font-size: 0.95rem;
 }
 
 /* ── Bottom bar ── */
@@ -289,18 +380,19 @@ html, body {
 
 .compose-btn {
   display: inline-flex; align-items: center; gap: 6px;
-  padding: 7px 16px;
+  padding: 6px 14px;
   background: var(--btn-primary);
   color: #fff;
-  border: none;
-  border-radius: 20px;
-  font-size: 13px;
-  font-weight: 600;
+  border: 1px solid var(--btn-primary);
+  border-radius: var(--border-radius);
+  font-size: 0.9rem;
+  font-family: inherit;
+  font-weight: 500;
   cursor: pointer;
-  transition: background 0.12s;
+  transition: background 0.12s, border-color 0.12s;
   white-space: nowrap;
 }
-.compose-btn:hover { background: var(--btn-primary-hover); }
+.compose-btn:hover { background: var(--btn-primary-hover); border-color: var(--btn-primary-hover); }
 .compose-btn:focus-visible { outline: none; box-shadow: var(--focus-ring); }
 
 .search-bar {
@@ -310,11 +402,12 @@ html, body {
 }
 .search-bar input {
   width: 100%;
-  padding: 7px 12px 7px 34px;
-  border: 1px solid var(--list-border);
-  border-radius: 20px;
-  font-size: 13px;
-  background: var(--list-bg);
+  padding: 6px 12px 6px 32px;
+  border: 1px solid var(--border);
+  border-radius: var(--border-radius);
+  font-size: 0.9rem;
+  font-family: inherit;
+  background: var(--surface-bg);
   color: var(--text-primary);
   outline: none;
   transition: border-color 0.15s, box-shadow 0.15s;
@@ -322,11 +415,10 @@ html, body {
 .search-bar input:focus-visible {
   border-color: var(--btn-primary);
   box-shadow: var(--focus-ring);
-  background: var(--surface-bg);
 }
 .search-bar .search-icon {
-  position: absolute; left: 11px; top: 50%; transform: translateY(-50%);
-  color: var(--text-muted); font-size: 14px; pointer-events: none;
+  position: absolute; left: 10px; top: 50%; transform: translateY(-50%);
+  color: var(--text-faint); pointer-events: none;
 }
 
 /* ── Folder view ── */
@@ -348,7 +440,7 @@ html, body {
 }
 
 .pagination-info {
-  font-size: 12px;
+  font-size: 0.75rem;
   color: var(--text-secondary);
   white-space: nowrap;
 }
@@ -364,7 +456,7 @@ html, body {
 }
 
 .bulk-count {
-  font-size: 13px;
+  font-size: 0.8rem;
   font-weight: 600;
   color: var(--text-secondary);
   white-space: nowrap;
@@ -374,7 +466,7 @@ html, body {
   padding: 4px 8px;
   border: 1px solid var(--field-border);
   border-radius: var(--border-radius);
-  font-size: 13px;
+  font-size: 0.8rem;
   color: var(--text-primary);
   background: var(--surface-bg);
   cursor: pointer;
@@ -385,7 +477,7 @@ html, body {
   padding: 8px 16px;
   background: var(--status-error-bg);
   color: var(--status-error-text);
-  font-size: 13px;
+  font-size: 0.8rem;
   border-bottom: 1px solid var(--status-error-border);
   flex-shrink: 0;
 }
@@ -396,7 +488,7 @@ html, body {
   justify-content: center;
   flex: 1;
   color: var(--text-muted);
-  font-size: 14px;
+  font-size: 0.9rem;
 }
 
 .folder-empty { font-style: italic; }
@@ -405,6 +497,7 @@ html, body {
 .msg-list-wrap {
   flex: 1;
   overflow-y: auto;
+  background: var(--surface-bg);
 }
 
 .msg-table {
@@ -417,7 +510,7 @@ html, body {
   position: sticky;
   top: 0;
   background: var(--list-bg);
-  font-size: 11px;
+  font-size: 0.7rem;
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.05em;
@@ -456,7 +549,7 @@ html, body {
 
 .msg-row td {
   padding: 8px 8px;
-  font-size: 13px;
+  font-size: 0.8rem;
   color: var(--text-primary);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -469,7 +562,7 @@ html, body {
 .msg-row .col-date {
   color: var(--text-secondary);
   text-align: right;
-  font-size: 12px;
+  font-size: 0.75rem;
 }
 .msg-row.unread .col-date { color: var(--text-primary); }
 
@@ -483,10 +576,9 @@ html, body {
 .subject-text { margin-right: 4px; }
 
 .msg-badge {
-  display: inline-block;
-  font-size: 12px;
-  margin-left: 3px;
+  margin-left: 4px;
   vertical-align: middle;
+  color: var(--text-faint);
 }
 
 .msg-badge-fail {
@@ -498,7 +590,7 @@ html, body {
   background: var(--btn-danger);
   color: #fff;
   border-radius: 50%;
-  font-size: 11px;
+  font-size: 0.7rem;
   font-weight: 700;
   vertical-align: middle;
 }
@@ -507,23 +599,24 @@ html, body {
 .btn {
   display: inline-flex; align-items: center; gap: 5px;
   padding: 6px 12px;
-  border: none;
+  border: 1px solid transparent;
   border-radius: var(--border-radius);
-  font-size: 13px;
+  font-size: 0.85rem;
+  font-family: inherit;
   font-weight: 500;
   cursor: pointer;
-  transition: background 0.12s, box-shadow 0.12s;
+  transition: background 0.12s, border-color 0.12s, box-shadow 0.12s;
   text-decoration: none;
 }
 .btn:focus-visible { outline: none; box-shadow: var(--focus-ring); }
-.btn-ghost { background: transparent; color: var(--text-secondary); border: 1px solid var(--list-border); }
-.btn-ghost:hover:not(:disabled) { background: var(--list-item-hover); }
-.btn-primary { background: var(--btn-primary); color: #fff; }
-.btn-primary:hover:not(:disabled) { background: var(--btn-primary-hover); }
-.btn-danger { background: var(--btn-danger); color: #fff; }
-.btn-danger:hover:not(:disabled) { background: var(--btn-danger-hover); }
-.btn-success { background: var(--btn-success); color: #fff; }
-.btn-success:hover:not(:disabled) { background: var(--btn-success-hover); }
+.btn-ghost { background: var(--surface); color: var(--text-primary); border-color: var(--border); }
+.btn-ghost:hover:not(:disabled) { background: var(--hover-bg); }
+.btn-primary { background: var(--btn-primary); color: #fff; border-color: var(--btn-primary); }
+.btn-primary:hover:not(:disabled) { background: var(--btn-primary-hover); border-color: var(--btn-primary-hover); }
+.btn-danger { background: var(--btn-danger); color: #fff; border-color: var(--btn-danger); }
+.btn-danger:hover:not(:disabled) { background: var(--btn-danger-hover); border-color: var(--btn-danger-hover); }
+.btn-success { background: var(--btn-success); color: #fff; border-color: var(--btn-success); }
+.btn-success:hover:not(:disabled) { background: var(--btn-success-hover); border-color: var(--btn-success-hover); }
 /* Grey for every variant, so a button that cannot be pressed reads as such
    without being hovered — the Send buttons in compose and on a draft spend
    most of their life disabled. Comes after the variants so it wins over their
@@ -534,7 +627,7 @@ html, body {
   border-color: var(--btn-disabled);
   cursor: not-allowed;
 }
-.btn-sm { padding: 4px 9px; font-size: 12px; }
+.btn-sm { padding: 4px 9px; font-size: 0.8rem; }
 .btn-icon { padding: 5px 7px; }
 
 .toolbar-sep { width: 1px; height: 20px; background: var(--list-border); margin: 0 4px; }
@@ -556,7 +649,7 @@ html, body {
   flex: 1;
   height: 100%;
   color: var(--text-muted);
-  font-size: 14px;
+  font-size: 0.9rem;
 }
 
 .msg-detail-error { color: var(--btn-danger); }
@@ -574,7 +667,7 @@ html, body {
 }
 
 .msg-folder-indicator {
-  font-size: 12px;
+  font-size: 0.75rem;
   color: var(--text-muted);
   white-space: nowrap;
 }
@@ -596,7 +689,7 @@ html, body {
 }
 
 .snooze-label {
-  font-size: 13px;
+  font-size: 0.8rem;
   color: var(--text-secondary);
   white-space: nowrap;
 }
@@ -605,13 +698,13 @@ html, body {
   padding: 4px 8px;
   border: 1px solid var(--field-border);
   border-radius: var(--border-radius);
-  font-size: 13px;
+  font-size: 0.8rem;
   color: var(--text-primary);
 }
 .snooze-input:focus { outline: none; box-shadow: var(--focus-ring); }
 
 .snooze-until-display {
-  font-size: 13px;
+  font-size: 0.8rem;
   color: var(--text-secondary);
   white-space: nowrap;
 }
@@ -627,13 +720,13 @@ html, body {
   align-items: baseline;
   gap: 8px;
   padding: 3px 0;
-  font-size: 13.5px;
+  font-size: 0.85rem;
 }
 
 .msg-detail-label {
   font-weight: 600;
   color: var(--text-muted);
-  font-size: 11.5px;
+  font-size: 0.7rem;
   text-transform: uppercase;
   letter-spacing: 0.04em;
   min-width: 56px;
@@ -650,7 +743,7 @@ html, body {
 
 .msg-detail-subject {
   font-weight: 600;
-  font-size: 15px;
+  font-size: 0.95rem;
 }
 
 .msg-detail-attachments {
@@ -676,14 +769,14 @@ html, body {
   border-radius: var(--border-radius);
   color: var(--text-primary);
   text-decoration: none;
-  font-size: 12.5px;
+  font-size: 0.8rem;
   transition: background 0.1s;
 }
 .attachment-link:hover { background: var(--list-item-hover); }
 
 .attachment-size {
   color: var(--text-muted);
-  font-size: 11.5px;
+  font-size: 0.7rem;
 }
 
 .import-cal-btn {
@@ -695,7 +788,7 @@ html, body {
   border: 1px solid var(--list-border);
   border-radius: var(--border-radius);
   color: var(--text-primary);
-  font-size: 12.5px;
+  font-size: 0.8rem;
   cursor: pointer;
   transition: background 0.1s;
   margin-left: 4px;
@@ -704,8 +797,8 @@ html, body {
 .import-cal-btn:disabled { opacity: 0.7; cursor: default; }
 
 .import-cal-error {
-  color: var(--color-danger, #c0392b);
-  font-size: 12px;
+  color: var(--danger);
+  font-size: 0.75rem;
   margin-left: 4px;
 }
 
@@ -719,7 +812,7 @@ html, body {
 
 .msg-headers-loading {
   padding: 8px 16px;
-  font-size: 13px;
+  font-size: 0.8rem;
   color: var(--text-muted);
 }
 
@@ -727,7 +820,7 @@ html, body {
   margin: 0;
   padding: 8px 16px;
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  font-size: 12px;
+  font-size: 0.75rem;
   line-height: 1.5;
   color: var(--text-primary);
   white-space: pre-wrap;
@@ -758,7 +851,7 @@ html, body {
   padding: 6px 16px;
   background: var(--warning-bg);
   border-bottom: 1px solid var(--warning-border);
-  font-size: 13px;
+  font-size: 0.8rem;
   color: var(--text-secondary);
   flex-shrink: 0;
 }
@@ -783,7 +876,7 @@ html, body {
   flex: 1;
   padding: 16px;
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  font-size: 13px;
+  font-size: 0.8rem;
   line-height: 1.6;
   color: var(--text-primary);
   white-space: pre-wrap;
@@ -819,7 +912,7 @@ html, body {
   align-items: center;
   gap: 8px;
   padding: 8px 16px 6px;
-  font-size: 12px;
+  font-size: 0.75rem;
   font-weight: 600;
   color: var(--text-muted);
   text-transform: uppercase;
@@ -863,7 +956,7 @@ html, body {
   border: none;
   cursor: pointer;
   text-align: left;
-  font-size: 13px;
+  font-size: 0.8rem;
   color: var(--text-primary);
   transition: background 0.08s;
 }
@@ -912,7 +1005,7 @@ html, body {
 }
 
 .thread-date {
-  font-size: 12px;
+  font-size: 0.75rem;
   color: var(--text-muted);
   white-space: nowrap;
   flex-shrink: 0;
@@ -937,7 +1030,7 @@ html, body {
   align-items: baseline;
   gap: 8px;
   padding: 8px 0 6px;
-  font-size: 13px;
+  font-size: 0.8rem;
   flex-wrap: wrap;
 }
 
@@ -952,19 +1045,19 @@ html, body {
 .thread-expanded-status {
   padding: 12px 0;
   color: var(--text-muted);
-  font-size: 13px;
+  font-size: 0.8rem;
 }
 
 /* ── Compose Form ── */
 .compose-loading {
   display: flex; align-items: center; justify-content: center;
-  flex: 1; height: 100%; color: var(--text-muted); font-size: 14px;
+  flex: 1; height: 100%; color: var(--text-muted); font-size: 0.9rem;
 }
 
 .compose-loading-overlay {
-  position: absolute; inset: 0; background: rgba(255,255,255,0.8);
+  position: absolute; inset: 0; background: var(--overlay-bg);
   display: flex; align-items: center; justify-content: center;
-  color: var(--text-muted); font-size: 14px; z-index: 10;
+  color: var(--text-muted); font-size: 0.9rem; z-index: 10;
 }
 
 .compose-form {
@@ -987,7 +1080,7 @@ html, body {
 .cf-field-row:last-child { border-bottom: none; }
 
 .cf-field-label {
-  font-size: 11.5px; font-weight: 600; color: var(--text-muted);
+  font-size: 0.7rem; font-weight: 600; color: var(--text-muted);
   text-transform: uppercase; letter-spacing: 0.04em;
   padding: 11px 8px 0 16px; text-align: right; white-space: nowrap; flex-shrink: 0;
 }
@@ -996,7 +1089,7 @@ html, body {
   padding: 8px 0; align-self: center;
 }
 .cf-field-input select {
-  border: none; background: transparent; font-size: 13.5px;
+  border: none; background: transparent; font-size: 0.85rem;
   color: var(--text-primary); outline: none; cursor: pointer; width: 100%; padding: 0;
 }
 
@@ -1005,8 +1098,8 @@ html, body {
 }
 
 .cf-toggle-btn {
-  font-size: 12px; color: var(--btn-primary); cursor: pointer;
-  padding: 3px 6px; border-radius: 3px; border: none; background: none;
+  font-size: 0.75rem; color: var(--btn-primary); cursor: pointer;
+  padding: 3px 6px; border-radius: var(--border-radius); border: none; background: none;
   transition: background 0.1s;
 }
 .cf-toggle-btn:hover { background: var(--highlight-bg); }
@@ -1019,18 +1112,18 @@ html, body {
   padding: 6px 0; min-height: 40px; cursor: text;
 }
 .cf-tags-input input {
-  border: none; outline: none; font-size: 13.5px; min-width: 120px;
+  border: none; outline: none; font-size: 0.85rem; min-width: 120px;
   flex: 1; background: transparent; padding: 2px 0;
 }
 
 .cf-addr-tag {
   display: inline-flex; align-items: center; gap: 4px;
   background: var(--tag-bg); border: 1px solid var(--tag-border); border-radius: 4px;
-  padding: 2px 6px 2px 8px; font-size: 12.5px; color: var(--tag-text);
+  padding: 2px 6px 2px 8px; font-size: 0.8rem; color: var(--tag-text);
 }
 .cf-addr-tag button {
   background: none; border: none; cursor: pointer; color: var(--tag-btn-color);
-  font-size: 14px; line-height: 1; padding: 0;
+  font-size: 0.9rem; line-height: 1; padding: 0;
 }
 .cf-addr-tag button:hover { color: var(--tag-text); }
 
@@ -1042,15 +1135,15 @@ html, body {
 
 .cf-ac-item {
   display: flex; align-items: center; gap: 8px; padding: 8px 12px;
-  cursor: pointer; font-size: 13px; transition: background 0.1s;
+  cursor: pointer; font-size: 0.8rem; transition: background 0.1s;
 }
 .cf-ac-item:hover, .cf-ac-item.selected { background: var(--list-item-hover); }
 .cf-ac-name { font-weight: 500; color: var(--text-primary); }
-.cf-ac-addr { font-size: 12px; color: var(--text-muted); margin-left: 4px; }
-.cf-ac-hint { padding: 6px 12px; font-size: 12px; color: var(--text-muted); font-style: italic; }
+.cf-ac-addr { font-size: 0.75rem; color: var(--text-muted); margin-left: 4px; }
+.cf-ac-hint { padding: 6px 12px; font-size: 0.75rem; color: var(--text-muted); font-style: italic; }
 
 .cf-subject-input {
-  padding: 9px 0; font-size: 15px; font-weight: 600; color: var(--text-primary);
+  padding: 9px 0; font-size: 0.95rem; font-weight: 600; color: var(--text-primary);
   border: none; outline: none; width: 100%; background: transparent;
 }
 .cf-subject-input::placeholder { color: var(--text-muted); font-weight: 400; }
@@ -1060,7 +1153,7 @@ html, body {
   flex: 1; overflow: hidden; display: flex; flex-direction: column; min-height: 0;
 }
 .compose-editor-wrap .ql-container {
-  flex: 1; overflow-y: auto; font-family: inherit; font-size: 14px;
+  flex: 1; overflow-y: auto; font-family: inherit; font-size: 0.9rem;
   line-height: 1.7; border: none;
 }
 .compose-editor-wrap .ql-toolbar {
@@ -1083,11 +1176,11 @@ html, body {
   background: var(--surface-alt-bg);
 }
 .compose-quote-note {
-  flex: 1; font-size: 12px; color: var(--text-muted);
+  flex: 1; font-size: 0.75rem; color: var(--text-muted);
 }
 .compose-quote-preview {
   margin: 0; padding: 0 20px 12px;
-  font-size: 13px; line-height: 1.6; color: var(--text-secondary);
+  font-size: 0.8rem; line-height: 1.6; color: var(--text-secondary);
   white-space: pre-wrap; overflow-wrap: anywhere;
 }
 
@@ -1101,32 +1194,32 @@ html, body {
   display: inline-flex; align-items: center; gap: 5px;
   background: var(--surface-bg); border: 1px solid var(--list-border);
   border-radius: var(--border-radius); padding: 4px 8px;
-  font-size: 12px; color: var(--text-secondary);
+  font-size: 0.75rem; color: var(--text-secondary);
 }
 .cf-attached-file button {
   background: none; border: none; color: var(--text-muted);
-  cursor: pointer; font-size: 14px; padding: 0; line-height: 1;
+  cursor: pointer; font-size: 0.9rem; padding: 0; line-height: 1;
 }
 .cf-attached-file button:hover { color: var(--btn-danger); }
 .cf-new-attach { border-color: var(--tag-border); background: var(--tag-bg); color: var(--tag-text); }
-.cf-attach-size { color: var(--text-muted); font-size: 11px; }
+.cf-attach-size { color: var(--text-muted); font-size: 0.7rem; }
 
 /* Send later panel */
 .compose-send-later {
   display: flex; align-items: center; gap: 12px;
   padding: 10px 16px; border-top: 1px solid var(--list-border);
-  background: var(--warning-bg); flex-shrink: 0; font-size: 13px;
+  background: var(--warning-bg); flex-shrink: 0; font-size: 0.8rem;
 }
 .compose-send-later label { font-weight: 500; color: var(--warning-text); }
 .compose-send-later input[type="datetime-local"] {
   padding: 5px 8px; border: 1px solid var(--warning-border); border-radius: var(--border-radius);
-  font-size: 13px; background: var(--surface-bg); color: var(--text-primary); outline: none;
+  font-size: 0.8rem; background: var(--surface-bg); color: var(--text-primary); outline: none;
 }
 
 /* Send error */
 .compose-send-error {
   padding: 8px 16px; background: var(--status-error-bg); color: var(--status-error-text);
-  font-size: 13px; border-top: 1px solid var(--status-error-border); flex-shrink: 0;
+  font-size: 0.8rem; border-top: 1px solid var(--status-error-border); flex-shrink: 0;
 }
 
 /* Bottom actions bar */
@@ -1136,7 +1229,7 @@ html, body {
   background: var(--compose-actions-bg); flex-shrink: 0;
 }
 .compose-save-status {
-  font-size: 12px; color: var(--text-muted); font-style: italic; margin-left: 4px;
+  font-size: 0.75rem; color: var(--text-muted); font-style: italic; margin-left: 4px;
 }
 .cf-attach-btn { cursor: pointer; }
 
@@ -1165,7 +1258,7 @@ html, body {
   padding: 6px 10px;
   border: 1px solid var(--field-border);
   border-radius: var(--border-radius);
-  font-size: 13px;
+  font-size: 0.8rem;
   color: var(--text-primary);
   background: var(--surface-bg);
 }
@@ -1175,7 +1268,7 @@ html, body {
   padding: 5px 8px;
   border: 1px solid var(--field-border);
   border-radius: var(--border-radius);
-  font-size: 13px;
+  font-size: 0.8rem;
   background: var(--surface-bg);
   color: var(--text-primary);
   cursor: pointer;
@@ -1190,7 +1283,7 @@ html, body {
 }
 
 .search-field-label {
-  font-size: 12px;
+  font-size: 0.75rem;
   color: var(--text-muted);
   white-space: nowrap;
 }
@@ -1200,7 +1293,7 @@ html, body {
   padding: 5px 8px;
   border: 1px solid var(--field-border);
   border-radius: var(--border-radius);
-  font-size: 13px;
+  font-size: 0.8rem;
   background: var(--surface-bg);
   color: var(--text-primary);
 }
@@ -1231,7 +1324,7 @@ html, body {
 .msg-snippet {
   display: block;
   white-space: normal;
-  font-size: 12px;
+  font-size: 0.75rem;
   color: var(--text-muted);
   font-weight: 400;
   margin-top: 2px;
@@ -1243,8 +1336,8 @@ html, body {
 .msg-row.unread .msg-snippet { font-weight: 400; }
 
 .snippet-mark {
-  background: #fef9c3;
-  color: #78350f;
+  background: var(--mark-bg);
+  color: var(--mark-text);
   border-radius: 2px;
   padding: 0 1px;
 }
@@ -1266,18 +1359,17 @@ html, body {
   display: flex;
   align-items: center;
   gap: 10px;
-  background: #1e293b;
-  color: #fff;
+  background: var(--fg);
+  color: var(--bg);
   padding: 10px 12px;
   border-radius: var(--border-radius);
-  font-size: 13px;
+  font-size: 0.8rem;
   box-shadow: 0 4px 16px rgba(0,0,0,0.25);
   pointer-events: all;
   animation: toast-in 0.18s ease;
 }
 
 .toast-persistent {
-  background: #1e293b;
   border-left: 3px solid var(--btn-danger);
 }
 
@@ -1301,24 +1393,28 @@ html, body {
   color: #fff;
   border: none;
   border-radius: var(--border-radius);
-  font-size: 12px;
+  font-size: 0.75rem;
   font-weight: 600;
   cursor: pointer;
   transition: background 0.12s;
 }
 .toast-retry-btn:hover { background: var(--btn-primary-hover); }
 
+/* The toast paints its own inverted surface, so these follow the toast's text
+   colour rather than the page's. */
 .toast-close-btn {
+  display: inline-flex;
+  align-items: center;
   background: none;
   border: none;
-  color: rgba(255,255,255,0.6);
+  color: inherit;
+  opacity: 0.65;
   cursor: pointer;
-  font-size: 14px;
   line-height: 1;
   padding: 2px 4px;
-  transition: color 0.12s;
+  transition: opacity 0.12s;
 }
-.toast-close-btn:hover { color: #fff; }
+.toast-close-btn:hover { opacity: 1; }
 
 /* ── Settings Page ── */
 .settings-page {
@@ -1343,7 +1439,7 @@ html, body {
   border: none;
   background: none;
   border-bottom: 2px solid transparent;
-  font-size: 13.5px;
+  font-size: 0.85rem;
   font-weight: 500;
   color: var(--text-secondary);
   cursor: pointer;
@@ -1387,7 +1483,7 @@ html, body {
   padding: 5px 10px;
   border: 1px solid var(--field-border);
   border-radius: var(--border-radius);
-  font-size: 13px;
+  font-size: 0.8rem;
   color: var(--text-primary);
   background: var(--topbar-bg);
   min-width: 0;
@@ -1414,8 +1510,6 @@ html, body {
 .settings-drag-handle {
   color: var(--text-muted);
   cursor: grab;
-  font-size: 18px;
-  line-height: 1;
   flex-shrink: 0;
   user-select: none;
 }
@@ -1428,7 +1522,7 @@ html, body {
 
 .settings-item-name {
   font-weight: 600;
-  font-size: 13.5px;
+  font-size: 0.85rem;
   color: var(--text-primary);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1436,7 +1530,7 @@ html, body {
 }
 
 .settings-item-meta {
-  font-size: 12.5px;
+  font-size: 0.8rem;
   color: var(--text-secondary);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1447,7 +1541,7 @@ html, body {
 .settings-badge {
   display: inline-flex;
   align-items: center;
-  font-size: 11px;
+  font-size: 0.7rem;
   font-weight: 600;
   padding: 2px 7px;
   border-radius: 10px;
@@ -1460,7 +1554,7 @@ html, body {
   border: 1px solid var(--list-border);
   border-radius: var(--border-radius);
   padding: 16px;
-  background: var(--list-bg);
+  background: var(--surface-bg);
   margin-bottom: 8px;
 }
 
@@ -1471,7 +1565,7 @@ html, body {
 
 .settings-field > label {
   display: block;
-  font-size: 11.5px;
+  font-size: 0.7rem;
   font-weight: 600;
   color: var(--text-muted);
   text-transform: uppercase;
@@ -1488,7 +1582,7 @@ html, body {
   padding: 7px 10px;
   border: 1px solid var(--field-border);
   border-radius: var(--border-radius);
-  font-size: 13.5px;
+  font-size: 0.85rem;
   color: var(--text-primary);
   background: var(--topbar-bg);
   font-family: inherit;
@@ -1504,7 +1598,7 @@ html, body {
   resize: vertical;
   min-height: 80px;
   line-height: 1.5;
-  font-size: 13px;
+  font-size: 0.8rem;
 }
 
 .settings-field-check {
@@ -1514,7 +1608,7 @@ html, body {
   margin-bottom: 12px;
 }
 .settings-field-check label {
-  font-size: 13.5px;
+  font-size: 0.85rem;
   color: var(--text-primary);
   cursor: pointer;
 }
@@ -1535,7 +1629,7 @@ html, body {
   padding: 8px 12px;
   background: var(--status-error-bg);
   color: var(--status-error-text);
-  font-size: 13px;
+  font-size: 0.8rem;
   border-radius: var(--border-radius);
   margin-bottom: 12px;
   border: 1px solid var(--status-error-border);
@@ -1545,7 +1639,7 @@ html, body {
   padding: 8px 12px;
   background: var(--status-success-bg);
   color: var(--btn-success);
-  font-size: 13px;
+  font-size: 0.8rem;
   border-radius: var(--border-radius);
   margin-bottom: 12px;
   border: 1px solid var(--status-success-border);
@@ -1555,7 +1649,7 @@ html, body {
   padding: 24px;
   text-align: center;
   color: var(--text-muted);
-  font-size: 13px;
+  font-size: 0.8rem;
   font-style: italic;
 }
 
@@ -1563,7 +1657,7 @@ html, body {
   padding: 24px;
   text-align: center;
   color: var(--text-muted);
-  font-size: 13px;
+  font-size: 0.8rem;
 }
 
 .settings-pagination {
@@ -1575,7 +1669,7 @@ html, body {
 
 .settings-pagination-info {
   flex: 1;
-  font-size: 12px;
+  font-size: 0.75rem;
   color: var(--text-muted);
   text-align: center;
 }
@@ -1586,6 +1680,11 @@ html, body {
   border: 1px solid var(--list-border);
   border-radius: var(--border-radius);
   padding: 20px;
+}
+
+.settings-meta-arrow {
+  color: var(--text-faint);
+  margin: 0 1px;
 }
 
 /* Filter with broken folder reference */
@@ -1607,13 +1706,13 @@ html, body {
 .pref-row-info { flex: 1; }
 
 .pref-label {
-  font-size: 13.5px;
+  font-size: 0.85rem;
   font-weight: 500;
   color: var(--text-primary);
 }
 
 .pref-description {
-  font-size: 12px;
+  font-size: 0.75rem;
   color: var(--text-muted);
   margin-top: 2px;
 }
@@ -1662,7 +1761,7 @@ html, body {
   padding: 5px 12px;
   border: 1px solid var(--field-border);
   border-radius: var(--border-radius);
-  font-size: 12.5px;
+  font-size: 0.8rem;
   background: var(--topbar-bg);
   color: var(--text-secondary);
   cursor: pointer;
@@ -1681,7 +1780,7 @@ html, body {
   padding: 6px 10px;
   border: 1px solid var(--field-border);
   border-radius: var(--border-radius);
-  font-size: 13px;
+  font-size: 0.8rem;
   color: var(--text-primary);
   background: var(--topbar-bg);
   font-family: inherit;
@@ -1703,7 +1802,7 @@ html, body {
    so that nothing here can be mistaken for a real mailbox. */
 .demo-badge {
   margin-left: auto;
-  font-size: 12px;
+  font-size: 0.75rem;
   color: var(--text-secondary);
   background: var(--list-item-active-bg);
   border: 1px solid var(--list-item-active-border);
@@ -1716,7 +1815,7 @@ html, body {
   position: fixed;
   inset: 0;
   z-index: 100;
-  background: rgba(15, 23, 42, 0.55);
+  background: rgba(0, 0, 0, 0.4);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -1733,13 +1832,13 @@ html, body {
 }
 
 .demo-title {
-  font-size: 16px;
+  font-size: 1rem;
   color: var(--text-primary);
   margin-bottom: 12px;
 }
 
 .demo-body p {
-  font-size: 13px;
+  font-size: 0.8rem;
   line-height: 1.5;
   color: var(--text-secondary);
   margin-bottom: 10px;
@@ -1757,7 +1856,7 @@ html, body {
   border: none;
   border-radius: var(--border-radius);
   padding: 7px 18px;
-  font-size: 13px;
+  font-size: 0.8rem;
   font-family: inherit;
   cursor: pointer;
 }

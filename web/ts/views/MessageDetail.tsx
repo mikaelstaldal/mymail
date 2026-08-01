@@ -5,6 +5,7 @@ import { showToast } from '../util/toast.js';
 import { getMycalUrl, isDemo } from '../util/config.js';
 import { formatDateFull, formatDateAdaptive } from '../util/date.js';
 import { hasValidRecipient } from '../util/address.js';
+import { Icon } from '../components/Icon.js';
 import type { components } from '../api/types.js';
 
 type MessageDetailType = components['schemas']['MessageDetail'];
@@ -788,7 +789,8 @@ export function MessageDetail({ id, folders }: MessageDetailProps) {
                       download={a.filename}
                       class="attachment-link"
                     >
-                      📎 {a.filename}
+                      <Icon name="paperclip" size={14} />
+                      {a.filename}
                       <span class="attachment-size">({formatBytes(a.size)})</span>
                     </a>
                     {isIcs(a) && getMycalUrl() && (
@@ -798,7 +800,8 @@ export function MessageDetail({ id, folders }: MessageDetailProps) {
                         onClick={() => void importToMycal(a.id)}
                         title="Import this event into MyCal"
                       >
-                        {status === 'loading' ? 'Importing…' : status === 'success' ? 'Imported' : '📅 Import to Calendar'}
+                        {status === 'loading' ? 'Importing…' : status === 'success' ? 'Imported'
+                          : <><Icon name="calendar-plus" size={14} /> Import to Calendar</>}
                       </button>
                     )}
                     {isIcs(a) && status && status !== 'loading' && status !== 'success' && (

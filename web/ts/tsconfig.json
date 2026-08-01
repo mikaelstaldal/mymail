@@ -12,7 +12,8 @@
     "paths": {
       "preact": ["./vendor/preact/src/index.d.ts"],
       "preact/hooks": ["./vendor/preact/hooks/src/index.d.ts"],
-      "preact/jsx-runtime": ["./vendor/preact/jsx-runtime/src/index.d.ts"]
+      "preact/jsx-runtime": ["./vendor/preact/jsx-runtime/src/index.d.ts"],
+      "lucide-icons": ["./vendor/lucide.d.ts"]
     },
     "lib": ["ES2020", "DOM", "DOM.Iterable"]
   },

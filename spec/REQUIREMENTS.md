@@ -931,13 +931,16 @@ On first load the UI reads `localStorage` for the last selected folder and navig
 
 10. **Contact management** — Paginated list with add/edit/delete.
 
-11. **Preferences** — Client-side display preferences: dark mode toggle, message list density (Compact/Normal/Relaxed),
+11. **Preferences** — Client-side display preferences: dark mode toggle (the same preference the sidebar's
+    light/dark button carries; either control moves the other), message list density (Compact/Normal/Relaxed),
     default body view (HTML/Plain text), browser notifications toggle, compose line width (the column composing wraps
     at, or `0` to wrap nothing — see **Compose View → Line breaks**).
 
 ### Settings Navigation
 
-A gear icon in the sidebar footer opens `/#/settings`. The page uses a tabbed layout:
+The sidebar footer holds two controls: a light/dark mode button, and — to its right — a gear icon that opens
+`/#/settings`. The mode button's icon shows the theme it would switch *to* (a moon in light mode, a sun in dark),
+and it writes the same stored preference as the Preferences tab's dark mode switch. The page uses a tabbed layout:
 
 | Tab slug      | Content              |
 |---------------|----------------------|
@@ -1008,7 +1011,7 @@ and the feature degrades silently (polling continues; no browser notifications a
 
 - Selected folder
 - Compose draft state (JSON with all field values, draft `id`, and `savedAt` timestamp)
-- Dark mode toggle
+- Dark mode toggle (applied as `data-theme` on `<html>`, `"light"` or `"dark"`)
 - Message list density preference
 - Notification permission state (cached)
 - Preferred body view (`"html"` or `"text"`)

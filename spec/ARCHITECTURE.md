@@ -40,7 +40,16 @@ Web UI assets embedded in the binary via `//go:embed`.
 - ES6 modules with import maps.
 - Preact + JSX for reactive components (vendored, no CDN dependency).
 - Quill rich-text editor (vendored, no CDN dependency).
-- Plain CSS for styling.
+- Lucide icons, rendered inline as SVG by `components/Icon.tsx` (vendored, no
+  CDN dependency). The vendored bundle carries only the icons the UI names —
+  see the `ICONS` list in `web/ts/vendor/gen-lucide.mjs`. The UI uses no emoji
+  or other Unicode glyphs as icons.
+- Plain CSS for styling. The palette, type scale and control styling are
+  MyCal's, so the two apps read as one product; the theme is selected by
+  `data-theme` on `<html>`, the same attribute MyCal and MyNotes switch on.
+  `util/theme.ts` owns it — read, persist, apply, and a change event — because
+  two controls expose the same preference (the sidebar button and the
+  Preferences switch) and either may be mounted while the other is used.
 - `node --test` for frontend unit tests, run against the compiled output in
   `web/static/` with jsdom supplying the DOM (vendored, no package-manager
   install at build time).
@@ -88,7 +97,7 @@ Reads spam verdicts from headers set by the MTA pipeline (SpamAssassin, Rspamd, 
 Bulk endpoints return 404 if any ID is missing — all-or-nothing, no partial success.
 
 ### Web UI: No Bundler
-TypeScript compiled with `tsc` only. ES6 modules + import maps. Preact and Quill vendored. All assets embedded in the binary.
+TypeScript compiled with `tsc` only. ES6 modules + import maps. Preact, Quill and Lucide vendored. All assets embedded in the binary.
 
 ### Authentication
 HTTP Basic Auth via htpasswd file (bcrypt). CSRF protection via Origin/Referer validation middleware.

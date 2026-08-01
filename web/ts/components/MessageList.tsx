@@ -1,5 +1,6 @@
 import { useRef, useEffect } from 'preact/hooks';
 import { formatDateAdaptive } from '../util/date.js';
+import { Icon } from './Icon.js';
 import type { components } from '../api/types.js';
 
 type MessageSummary = components['schemas']['MessageSummary'];
@@ -61,7 +62,7 @@ function Badges({ msg }: { msg: MessageSummary }) {
   return (
     <>
       {msg.has_attachments && (
-        <span class="msg-badge" title="Has attachments">📎</span>
+        <Icon name="paperclip" size={14} class="msg-badge" title="Has attachments" />
       )}
       {msg.send_failed && msg.folder_id !== 4 && (
         <span class="msg-badge msg-badge-fail" title="Send failed">!</span>

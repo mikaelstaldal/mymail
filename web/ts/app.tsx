@@ -11,14 +11,16 @@ import { SettingsPage } from './views/SettingsPage.js';
 import { initRouter, onRouteChange, type Route } from './router.js';
 import { startPolling } from './poll.js';
 import { isDemo } from './util/config.js';
+import { applyTheme, getTheme } from './util/theme.js';
 import { DemoDialog, demoNoticeSeen, markDemoNoticeSeen } from './components/DemoDialog.js';
 import type { components } from './api/types.js';
 
 // Apply persisted preferences on startup
 (function initPrefs() {
-  if (localStorage.getItem('darkMode') === 'true') {
-    document.documentElement.classList.add('dark');
-  }
+  // `data-theme` rather than a class: the same attribute MyCal's and MyNotes'
+  // stylesheets switch on, so the shared palette is selected the same way in
+  // all three apps.
+  applyTheme(getTheme());
   const density = localStorage.getItem('density');
   const VALID_DENSITIES = ['compact', 'normal', 'relaxed'];
   if (density && VALID_DENSITIES.includes(density)) {

@@ -1,13 +1,10 @@
 import { useState, useEffect } from 'preact/hooks';
 import { getMycalUrl, getWrapColumn, WRAP_COLUMN_KEY } from '../../util/config.js';
 import { normalizeWrapColumn, WRAP_COLUMN, WRAP_OFF, MAX_WRAP_COLUMN } from '../../util/wrap.js';
+import { getTheme, onThemeChange, setTheme } from '../../util/theme.js';
 
 type Density = 'compact' | 'normal' | 'relaxed';
 type BodyView = 'html' | 'text';
-
-function applyDarkMode(dark: boolean) {
-  document.documentElement.classList.toggle('dark', dark);
-}
 
 function applyDensity(density: Density) {
   const el = document.documentElement;
@@ -16,7 +13,7 @@ function applyDensity(density: Density) {
 }
 
 export function Preferences() {
-  const [darkMode, setDarkMode] = useState(() => localStorage.getItem('darkMode') === 'true');
+  const [darkMode, setDarkMode] = useState(() => getTheme() === 'dark');
   const [density, setDensity] = useState<Density>(
     () => (localStorage.getItem('density') as Density | null) ?? 'normal',
   );
@@ -30,6 +27,10 @@ export function Preferences() {
   // Kept as the raw string so the field shows what is being typed; only what is
   // stored is normalised. Blur then snaps the field to the column in effect.
   const [wrapColumn, setWrapColumn] = useState(() => String(getWrapColumn()));
+
+  // The sidebar carries the same toggle, so follow it rather than going stale
+  // while this tab is open.
+  useEffect(() => onThemeChange(t => setDarkMode(t === 'dark')), []);
 
   useEffect(() => {
     // Auto-disable if notification permission was revoked since last visit
@@ -45,8 +46,7 @@ export function Preferences() {
 
   function toggleDarkMode(value: boolean) {
     setDarkMode(value);
-    localStorage.setItem('darkMode', String(value));
-    applyDarkMode(value);
+    setTheme(value ? 'dark' : 'light');
   }
 
   function changeDensity(value: Density) {

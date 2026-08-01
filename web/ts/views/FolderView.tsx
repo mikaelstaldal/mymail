@@ -3,6 +3,7 @@ import { api } from '../api/client.js';
 import { navigate } from '../router.js';
 import { showToast } from '../util/toast.js';
 import { MessageList } from '../components/MessageList.js';
+import { Icon } from '../components/Icon.js';
 import type { components } from '../api/types.js';
 
 type Folder = components['schemas']['Folder'];
@@ -166,7 +167,7 @@ export function FolderView({ folder, folders }: FolderViewProps) {
           onClick={() => void load(offset - PAGE_SIZE)}
           aria-label="Previous page"
         >
-          ‹
+          <Icon name="chevron-left" />
         </button>
         <button
           class="btn btn-ghost btn-sm btn-icon"
@@ -174,7 +175,7 @@ export function FolderView({ folder, folders }: FolderViewProps) {
           onClick={() => void load(offset + PAGE_SIZE)}
           aria-label="Next page"
         >
-          ›
+          <Icon name="chevron-right" />
         </button>
       </div>
 

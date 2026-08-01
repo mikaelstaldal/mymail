@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useRef } from 'preact/hooks';
 import { api } from '../api/client.js';
 import { navigate } from '../router.js';
 import { MessageList } from '../components/MessageList.js';
+import { Icon } from '../components/Icon.js';
 import type { components } from '../api/types.js';
 
 type Folder = components['schemas']['Folder'];
@@ -234,7 +235,7 @@ export function SearchView({ query, folders }: SearchViewProps) {
               onClick={() => void runSearch(activeQ, active, offset - PAGE_SIZE)}
               aria-label="Previous page"
             >
-              ‹
+              <Icon name="chevron-left" />
             </button>
             <button
               class="btn btn-ghost btn-sm btn-icon"
@@ -242,7 +243,7 @@ export function SearchView({ query, folders }: SearchViewProps) {
               onClick={() => void runSearch(activeQ, active, offset + PAGE_SIZE)}
               aria-label="Next page"
             >
-              ›
+              <Icon name="chevron-right" />
             </button>
           </div>
           <div class="msg-list-wrap">

@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'preact/hooks';
 import { api } from '../../api/client.js';
+import { Icon } from '../../components/Icon.js';
 import type { components } from '../../api/types.js';
 
 type Identity = components['schemas']['Identity'];
@@ -242,7 +243,7 @@ export function Identities() {
             onDragLeave={() => setOverIdx(null)}
             onDrop={e => { e.preventDefault(); void handleDrop(idx); }}
           >
-            <span class="settings-drag-handle" title="Drag to reorder">⠿</span>
+            <Icon name="grip-vertical" size={18} class="settings-drag-handle" title="Drag to reorder" />
             <div class="settings-item-info">
               <div class="settings-item-name">{item.name}</div>
               <div class="settings-item-meta">{item.address}</div>
