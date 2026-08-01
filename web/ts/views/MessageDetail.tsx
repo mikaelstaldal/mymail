@@ -4,6 +4,7 @@ import { navigate } from '../router.js';
 import { showToast } from '../util/toast.js';
 import { getMycalUrl, isDemo } from '../util/config.js';
 import { formatDateFull, formatDateAdaptive } from '../util/date.js';
+import { hasValidRecipient } from '../util/address.js';
 import type { components } from '../api/types.js';
 
 type MessageDetailType = components['schemas']['MessageDetail'];
@@ -16,6 +17,17 @@ const TRASH_ID = 4;
 const SCHEDULED_ID = 5;
 const SNOOZED_ID = 6;
 const JUNK_ID = 7;
+
+/** Deferred rather than sent, per handler.isScheduled. */
+const SCHEDULE_THRESHOLD_MS = 60_000;
+
+/**
+ * Whether sending now would schedule rather than send. `_tick` is unused: it is
+ * there so a caller can re-evaluate this as the clock passes the threshold.
+ */
+function isDeferred(sendAt: string | null, _tick?: number): boolean {
+  return sendAt !== null && Date.parse(sendAt) > Date.now() + SCHEDULE_THRESHOLD_MS;
+}
 
 const MANAGED_FOLDER_IDS = new Set([DRAFTS_ID, SCHEDULED_ID, SNOOZED_ID]);
 const NO_MOVE_DEST_IDS = new Set([DRAFTS_ID, SCHEDULED_ID, SNOOZED_ID]);
@@ -196,6 +208,7 @@ export function MessageDetail({ id, folders }: MessageDetailProps) {
   const msgDetailRef = useRef<HTMLDivElement>(null);
   const threadStripRef = useRef<HTMLDivElement>(null);
   const [threadHeight, setThreadHeight] = useState<number | null>(null);
+  const [scheduleTick, setScheduleTick] = useState(0);
 
   useEffect(() => {
     let cancelled = false;
@@ -332,6 +345,34 @@ export function MessageDetail({ id, folders }: MessageDetailProps) {
       navigateToSourceFolder(sourceFolderId);
     } catch (e) {
       showToast(e instanceof Error ? e.message : 'Failed to delete message');
+      setActionInFlight(false);
+    }
+  };
+
+  // Re-render at the instant a deferred send stops being one, so the button
+  // stops saying "Schedule" the moment it would no longer schedule.
+  const sendAt = msg?.send_at ?? null;
+  useEffect(() => {
+    if (sendAt === null) return;
+    const ms = Date.parse(sendAt) - Date.now() - SCHEDULE_THRESHOLD_MS;
+    if (ms <= 0) return;
+    const t = setTimeout(() => setScheduleTick(n => n + 1), ms + 100);
+    return () => clearTimeout(t);
+  }, [sendAt, scheduleTick]);
+
+  const handleSendDraft = async () => {
+    if (!msg || actionInFlight) return;
+    if (!confirm(isDeferred(msg.send_at)
+      ? 'Schedule this draft as it is?'
+      : 'Send this draft as it is?')) return;
+    setActionInFlight(true);
+    try {
+      // The server sends what it has stored, so nothing needs uploading first.
+      // 202 means the draft's send_at was far enough out to be scheduled.
+      const { status } = await api.drafts.send(msg.id);
+      navigate(status === 202 ? '#/folder/scheduled' : '#/folder/sent');
+    } catch (e) {
+      showToast(e instanceof Error ? e.message : 'Failed to send draft');
       setActionInFlight(false);
     }
   };
@@ -509,6 +550,16 @@ export function MessageDetail({ id, folders }: MessageDetailProps) {
   const canCancelSchedule = folderId === SCHEDULED_ID;
   const showSendFailed = msg.send_failed && folderId !== TRASH_ID;
 
+  // Sending a draft untouched is only offered when the server would accept it —
+  // it refuses a draft with no recipient, and rejects a malformed address list.
+  const canSendDraft = hasValidRecipient(msg.to_addr, msg.cc_addr, msg.bcc_addr);
+  // A stored send_at defers the send rather than performing it, on the same
+  // threshold the server applies (see handler.isScheduled). The threshold moves
+  // with the clock, so this is re-derived on the tick below rather than only at
+  // load: a detail view left open must not keep offering to schedule a send
+  // that would now go out immediately.
+  const draftScheduled = isDeferred(msg.send_at, scheduleTick);
+
   const threadEntries = thread && thread.total > 1 ? thread.items : null;
 
   return (
@@ -516,7 +567,15 @@ export function MessageDetail({ id, folders }: MessageDetailProps) {
       <div class="msg-detail-actions">
         {folderId === DRAFTS_ID ? (
           <>
-            <button class="btn btn-primary btn-sm" onClick={() => navigate(`#/compose?draft=${id}`)}>
+            <button
+              class="btn btn-primary btn-sm"
+              disabled={actionInFlight || !canSendDraft}
+              title={canSendDraft ? undefined : 'This draft has no valid recipient'}
+              onClick={() => void handleSendDraft()}
+            >
+              {draftScheduled ? 'Schedule' : 'Send'}
+            </button>
+            <button class="btn btn-ghost btn-sm" onClick={() => navigate(`#/compose?draft=${id}`)}>
               Edit
             </button>
             <button class="btn btn-danger btn-sm" disabled={actionInFlight} onClick={() => void handleDiscardDraft()}>

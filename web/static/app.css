@@ -23,6 +23,8 @@
   --btn-danger-hover: #dc2626;
   --btn-success: #16a34a;
   --btn-success-hover: #15803d;
+  --btn-disabled: #cbd5e1;
+  --btn-disabled-text: #64748b;
   --text-primary: #1e293b;
   --text-secondary: #475569;
   --text-muted: #94a3b8;
@@ -515,13 +517,23 @@ html, body {
 }
 .btn:focus-visible { outline: none; box-shadow: var(--focus-ring); }
 .btn-ghost { background: transparent; color: var(--text-secondary); border: 1px solid var(--list-border); }
-.btn-ghost:hover { background: var(--list-item-hover); }
+.btn-ghost:hover:not(:disabled) { background: var(--list-item-hover); }
 .btn-primary { background: var(--btn-primary); color: #fff; }
-.btn-primary:hover { background: var(--btn-primary-hover); }
+.btn-primary:hover:not(:disabled) { background: var(--btn-primary-hover); }
 .btn-danger { background: var(--btn-danger); color: #fff; }
-.btn-danger:hover { background: var(--btn-danger-hover); }
+.btn-danger:hover:not(:disabled) { background: var(--btn-danger-hover); }
 .btn-success { background: var(--btn-success); color: #fff; }
-.btn-success:hover { background: var(--btn-success-hover); }
+.btn-success:hover:not(:disabled) { background: var(--btn-success-hover); }
+/* Grey for every variant, so a button that cannot be pressed reads as such
+   without being hovered — the Send buttons in compose and on a draft spend
+   most of their life disabled. Comes after the variants so it wins over their
+   background, and the :not(:disabled) above keeps hover from lighting it up. */
+.btn:disabled {
+  background: var(--btn-disabled);
+  color: var(--btn-disabled-text);
+  border-color: var(--btn-disabled);
+  cursor: not-allowed;
+}
 .btn-sm { padding: 4px 9px; font-size: 12px; }
 .btn-icon { padding: 5px 7px; }
 

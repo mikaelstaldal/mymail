@@ -5,6 +5,9 @@ import { showToast } from '../util/toast.js';
 import { quoteHtmlToText, stripLeadingBlankHtml, stripLeadingBlankLines } from '../util/quotetext.js';
 import { reflowEdits, wrapText, isQuotedLine } from '../util/wrap.js';
 import { getWrapColumn } from '../util/config.js';
+import {
+  hasValidRecipient, isValidAddressList, splitAddressList, formatAddress, normalizeAddressEntry,
+} from '../util/address.js';
 import type { components } from '../api/types.js';
 
 type Identity = components['schemas']['Identity'];
@@ -69,7 +72,7 @@ function stripSubjectPrefixes(subject: string): string {
 
 function parseAddrSpecs(header: string): string[] {
   if (!header.trim()) return [];
-  return header.split(',').map(a => {
+  return splitAddressList(header).map(a => {
     const m = a.match(/<([^>]+)>/);
     return (m ? m[1] : a).trim().toLowerCase();
   }).filter(Boolean);
@@ -88,12 +91,28 @@ function isOwnAddress(addrString: string, identityAddrs: Set<string>): boolean {
 
 function displayName(addr: string): string {
   const m = addr.match(/^([^<>]+?)\s*<[^>]+>$/);
-  return m ? m[1].trim() : addr.trim();
+  const name = m ? m[1].trim() : addr.trim();
+  // Quoting is a wire-format detail — a pill reading `"Doe, Jane"` would just
+  // look like a mistake.
+  return name.length >= 2 && name.startsWith('"') && name.endsWith('"')
+    ? name.slice(1, -1)
+    : name;
 }
 
 function addrSpec(addr: string): string {
   const m = addr.match(/<([^>]+)>/);
   return m ? m[1].trim() : addr.trim();
+}
+
+/** What the text in an address input would become as a pill, if anything. */
+function pendingAddress(raw: string): string {
+  return raw.trim().replace(/,$/, '').trim();
+}
+
+/** The tags of an address field including whatever is still in its input. */
+function withPending(tags: string[], input: string): string[] {
+  const pending = pendingAddress(input);
+  return pending ? [...tags, pending] : tags;
 }
 
 // body_text is stored with the CRLF line endings it arrived with; a stray CR
@@ -388,7 +407,10 @@ interface RestoredFields {
 }
 
 function fieldsFromServerDraft(msg: MessageDetail, idents: Identity[]): RestoredFields {
-  const splitAddr = (s: string) => s.trim() ? s.split(',').map(a => a.trim()).filter(Boolean) : [];
+  // Top-level commas only — a quoted display name may contain one, and
+  // splitting there would turn one recipient into two malformed pills.
+  const splitAddr = (s: string) =>
+    s.trim() ? splitAddressList(s).map(normalizeAddressEntry).filter(Boolean) : [];
   const fromSpec = parseAddrSpecs(msg.from_addr)[0] ?? '';
   const matchedIdent =
     idents.find(i => i.address.toLowerCase() === fromSpec.toLowerCase()) ??
@@ -411,32 +433,43 @@ interface AddressFieldProps {
   label: string;
   tags: string[];
   onTagsChange: (tags: string[]) => void;
+  /**
+   * What is typed but not yet a pill. Held by the parent because it is still a
+   * recipient as far as the user is concerned: it decides whether Send is
+   * offered, and Send folds it into `tags` before saving.
+   */
+  input: string;
+  onInputChange: (value: string) => void;
   extra?: preact.ComponentChildren;
 }
 
-function AddressField({ label, tags, onTagsChange, extra }: AddressFieldProps) {
-  const [input, setInput] = useState('');
+function AddressField({ label, tags, onTagsChange, input, onInputChange, extra }: AddressFieldProps) {
   const [suggestions, setSuggestions] = useState<Contact[]>([]);
   const [total, setTotal] = useState(0);
   const [showDrop, setShowDrop] = useState(false);
   const [selIdx, setSelIdx] = useState(0);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const inputRef = useRef<HTMLInputElement | null>(null);
+  // What is in the field right now, readable before the state update lands: a
+  // blur arriving in the same tick as a suggestion click would otherwise still
+  // see the pre-click text and commit it a second time.
+  const inputValRef = useRef('');
 
   function commitInput(raw: string) {
-    const val = raw.trim().replace(/,$/, '').trim();
+    const val = pendingAddress(raw);
     if (!val) return;
     onTagsChange([...tags, val]);
-    setInput('');
+    inputValRef.current = '';
+    onInputChange('');
     setSuggestions([]);
     setShowDrop(false);
     setSelIdx(0);
   }
 
   function addContact(c: Contact) {
-    const val = c.name ? `${c.name} <${c.address}>` : c.address;
-    onTagsChange([...tags, val]);
-    setInput('');
+    onTagsChange([...tags, formatAddress(c.name, c.address)]);
+    inputValRef.current = '';
+    onInputChange('');
     setSuggestions([]);
     setShowDrop(false);
     setSelIdx(0);
@@ -449,7 +482,8 @@ function AddressField({ label, tags, onTagsChange, extra }: AddressFieldProps) {
 
   function handleInput(e: Event) {
     const v = (e.target as HTMLInputElement).value;
-    setInput(v);
+    inputValRef.current = v;
+    onInputChange(v);
     setSelIdx(0);
 
     if (timerRef.current) clearTimeout(timerRef.current);
@@ -513,7 +547,21 @@ function AddressField({ label, tags, onTagsChange, extra }: AddressFieldProps) {
             value={input}
             onInput={handleInput}
             onKeyDown={handleKeyDown}
-            onBlur={() => setTimeout(() => setShowDrop(false), 150)}
+            onBlur={() => {
+              // Turn a finished address into a pill on the way out, so it is
+              // visibly part of the message. Only a well-formed one: a pill is
+              // what gets saved, and the server rejects the whole draft over a
+              // malformed address list — which would make every later auto-save
+              // fail, and the navigate-away save fail silently. Half-typed text
+              // stays in the field where it can still be corrected.
+              // Checked as a list, not as one address: `Doe, Jane <j@e.com>`
+              // is a well-formed entry but splits into a broken list, which is
+              // exactly what the server would refuse.
+              if (isValidAddressList(pendingAddress(inputValRef.current))) {
+                commitInput(inputValRef.current);
+              }
+              setTimeout(() => setShowDrop(false), 150);
+            }}
             onFocus={() => input.trim() && suggestions.length > 0 && setShowDrop(true)}
           />
         </div>
@@ -563,6 +611,10 @@ export function ComposeForm({ replyId, replyAllId, forwardId, draftId }: Compose
   const [to, setTo] = useState<string[]>([]);
   const [cc, setCc] = useState<string[]>([]);
   const [bcc, setBcc] = useState<string[]>([]);
+  // Text typed into an address field but not yet committed to a pill.
+  const [toInput, setToInput] = useState('');
+  const [ccInput, setCcInput] = useState('');
+  const [bccInput, setBccInput] = useState('');
   const [showCc, setShowCc] = useState(false);
   const [showBcc, setShowBcc] = useState(false);
   const [subject, setSubject] = useState('');
@@ -885,17 +937,20 @@ export function ComposeForm({ replyId, replyAllId, forwardId, draftId }: Compose
         // To / Cc population
         const allIdentityAddrs = new Set(idents.map(i => i.address.toLowerCase()));
 
+        // A stored sender is re-quoted on the way into a pill: it is about to
+        // become part of an address list again, and it was not stored as one
+        // that survives being re-parsed (see normalizeAddressEntry).
         if (mode === 'reply') {
           const replyTo = msg.reply_to_addr.trim();
-          setTo(replyTo ? [replyTo] : [msg.from_addr]);
+          setTo([normalizeAddressEntry(replyTo || msg.from_addr)]);
         } else if (mode === 'replyall') {
           const replyTo = msg.reply_to_addr.trim();
-          const primary = replyTo ? [replyTo] : [msg.from_addr];
+          const primary = [normalizeAddressEntry(replyTo || msg.from_addr)];
           const toFiltered = primary.filter(
             a => !isOwnAddress(a, allIdentityAddrs)
           );
-          const originalTo = msg.to_addr ? msg.to_addr.split(',').map(s => s.trim()).filter(Boolean) : [];
-          const originalCc = msg.cc_addr ? msg.cc_addr.split(',').map(s => s.trim()).filter(Boolean) : [];
+          const originalTo = msg.to_addr ? splitAddressList(msg.to_addr).map(normalizeAddressEntry).filter(Boolean) : [];
+          const originalCc = msg.cc_addr ? splitAddressList(msg.cc_addr).map(normalizeAddressEntry).filter(Boolean) : [];
           const ccFiltered = [...originalTo, ...originalCc].filter(
             a => !isOwnAddress(a, allIdentityAddrs)
           );
@@ -1107,6 +1162,18 @@ export function ComposeForm({ replyId, replyAllId, forwardId, draftId }: Compose
     setSendInFlight(true);
     setSendError(null);
 
+    // An address still sitting in an input is one the user counts as a
+    // recipient — it is why Send is clickable — so commit it before the save
+    // that decides what actually goes out. stateRef is what performSave reads,
+    // and it is only refreshed on render, so set it here rather than waiting.
+    const foldedTo = withPending(to, toInput);
+    const foldedCc = withPending(cc, ccInput);
+    const foldedBcc = withPending(bcc, bccInput);
+    setTo(foldedTo); setToInput('');
+    setCc(foldedCc); setCcInput('');
+    setBcc(foldedBcc); setBccInput('');
+    stateRef.current = { ...stateRef.current, to: foldedTo, cc: foldedCc, bcc: foldedBcc };
+
     // Save first
     try {
       setSaveStatus('saving');
@@ -1139,6 +1206,15 @@ export function ComposeForm({ replyId, replyAllId, forwardId, draftId }: Compose
   }
 
   // ── Render ────────────────────────────────────────────────────────────────
+  // Text still in an address input counts too. It is on screen, so a Send
+  // button greyed out next to a perfectly good address would just look broken —
+  // and handleSend commits it before saving, so it is a recipient in fact.
+  const canSend = hasValidRecipient(
+    withPending(to, toInput).join(', '),
+    withPending(cc, ccInput).join(', '),
+    withPending(bcc, bccInput).join(', '),
+  );
+
   const saveLabel =
     saveStatus === 'saving' ? 'Saving…' :
     saveStatus === 'saved' ? 'Draft saved' :
@@ -1173,6 +1249,8 @@ export function ComposeForm({ replyId, replyAllId, forwardId, draftId }: Compose
           label="To"
           tags={to}
           onTagsChange={setTo}
+          input={toInput}
+          onInputChange={setToInput}
           extra={
             <>
               {!showCc && (
@@ -1187,12 +1265,12 @@ export function ComposeForm({ replyId, replyAllId, forwardId, draftId }: Compose
 
         {/* Cc */}
         {showCc && (
-          <AddressField label="Cc" tags={cc} onTagsChange={setCc} />
+          <AddressField label="Cc" tags={cc} onTagsChange={setCc} input={ccInput} onInputChange={setCcInput} />
         )}
 
         {/* Bcc */}
         {showBcc && (
-          <AddressField label="Bcc" tags={bcc} onTagsChange={setBcc} />
+          <AddressField label="Bcc" tags={bcc} onTagsChange={setBcc} input={bccInput} onInputChange={setBccInput} />
         )}
 
         {/* Subject */}
@@ -1278,7 +1356,8 @@ export function ComposeForm({ replyId, replyAllId, forwardId, draftId }: Compose
       <div class="compose-actions">
         <button
           class="btn btn-primary"
-          disabled={sendInFlight}
+          disabled={sendInFlight || !canSend}
+          title={canSend ? undefined : 'Add a valid recipient first'}
           onClick={() => void handleSend()}
         >
           {sendLater ? 'Schedule' : 'Send'}

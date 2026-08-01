@@ -679,8 +679,12 @@ On first load the UI reads `localStorage` for the last selected folder and navig
 2. **Message detail** — Full headers, sanitized HTML body in a sandboxed iframe (or plain-text fallback), attachment
    download links. Reply/Reply All/Forward/Move/Delete/Snooze/Mark as junk buttons. An **All headers** toggle button (
    hidden for drafts) fetches and displays the raw RFC 5322 header block via `GET /messages/{id}/headers`; clicking
-   again collapses the panel. **Draft messages** show **Edit** (opens the compose form) and **Discard** (permanently
-   deletes the draft after confirmation) buttons instead of Reply/Reply-All/Forward. The Snooze button is available only
+   again collapses the panel. **Draft messages** show **Send**, **Edit** (opens the compose form) and **Discard**
+   (permanently deletes the draft after confirmation) buttons instead of Reply/Reply-All/Forward. **Send** sends the
+   draft in its stored state, without opening the compose form: after confirmation it calls `POST /drafts/{id}/send`
+   and navigates to Sent, or to Scheduled when the draft carries a `send_at` more than 60 seconds ahead (in which case
+   the button is labelled **Schedule** instead). It is disabled unless the draft has a valid recipient — at least one
+   of To/Cc/Bcc non-empty, and none of the three malformed — which is the same condition the server enforces. The Snooze button is available only
    when the message is in Inbox, Snoozed, or a user-created folder. It is not available for messages in Drafts, Sent,
    Trash, Junk, or Scheduled — each of those folders has its own dedicated lifecycle management that would conflict with
    snooze behaviour. The snooze `until` time must be at least 1 minute ahead of the current server time; a shorter value
@@ -883,8 +887,18 @@ On first load the UI reads `localStorage` for the last selected folder and navig
    is rendered as `<hr>`; all other lines have `&`, `<`, and `>` escaped to `&amp;`, `&lt;`, and `&gt;` respectively,
    and line breaks become `<br>`.
 
-   **Send button behavior:** Disabled while in-flight. Performs an immediate draft save before sending. On send failure,
-   keeps the compose form open and shows the error inline.
+   **Send button behavior:** Disabled while in-flight, and disabled until the message has a valid recipient — at least
+   one of To/Cc/Bcc non-empty, and none of the three malformed. An address typed into an address field but not yet
+   committed to a pill counts as a recipient: it is visible to the user, Send folds it into its field before saving, and
+   leaving the field commits it as a pill on its own — but only when it is well-formed, since a malformed address list
+   makes the server reject the whole draft, which would break every subsequent auto-save. Performs an immediate draft
+   save before sending. On send failure, keeps the compose form open and shows the error inline.
+
+   **Address list quoting:** a display name containing a comma (or any other RFC 5322 special) is quoted when a pill is
+   built from a contact, otherwise the comma reads as a recipient separator and the list is malformed. Since
+   `DecodeAddressHeader` stores address headers with the quoting removed, a stored sender is re-quoted on its way into a
+   pill when replying, forwarding, or reopening a draft. This is only possible for one address at a time — a *list* that
+   was stored with an unquoted comma is genuinely ambiguous and is split at that comma.
 
    **Auto-save failure:** If an auto-save request fails, a transient error toast is shown. The save is retried on the
    next 30-second tick. If the navigate-away save fails, a brief warning is shown but navigation is not blocked.

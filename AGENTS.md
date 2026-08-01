@@ -45,7 +45,7 @@ go test ./internal/handler/... -run TestFolderCreate
 # Run the frontend tests (needs web/static/*.js compiled first; unpack.sh is a
 # no-op once web/ts/vendor/test/node_modules/ exists)
 web/ts/vendor/test/unpack.sh
-node --test web/ts/quotetext.test.mjs web/ts/wrap.test.mjs web/ts/demo.test.mjs
+node --test web/ts/quotetext.test.mjs web/ts/wrap.test.mjs web/ts/address.test.mjs web/ts/demo.test.mjs
 
 # Run a single frontend test
 node --test --test-name-pattern 'depth cap' web/ts/quotetext.test.mjs
@@ -268,6 +268,15 @@ so it skips the jsdom install entirely. It is deliberately the whole of the
 wrapping logic: `ComposeForm` only turns its edits into a Quill delta and
 decides which breaks are the editor's own. Anything about *where* a line breaks
 belongs in `wrap.ts`, where it can be tested; the Quill wiring cannot be.
+
+`address.test.mjs` needs no DOM either. `web/ts/util/address.ts` decides whether
+the Send button is offered at all — in ComposeForm and on a draft in
+MessageDetail — by answering the question the server answers with a 400: is
+there at least one recipient, and is every address list well-formed. It is a
+pre-flight check, never the authority; the server's 400 still surfaces inline.
+Its parser is a third copy of the same rules (`service.ParseAddressList`,
+`demo/text.ts`), unavoidably so — the demo backend has no imports to share with
+— and the three must move together.
 
 `demo.test.mjs` needs no DOM either, but it does something the other two do not:
 the demo backend is a set of classic worker scripts sharing one global scope, so
