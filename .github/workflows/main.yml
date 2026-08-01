@@ -81,6 +81,31 @@ jobs:
         with:
           path: site
 
+      # Publishes the binaries ./build.sh produced as a rolling release, so
+      # https://github.com/<owner>/<repo>/releases/latest always serves the
+      # newest green build of main. `gh` is preinstalled on the runner, so this
+      # pulls in no third-party action.
+      #
+      # A rolling release means the `latest` tag has to move: delete the
+      # release and its tag, then recreate both at this commit. The delete is
+      # tolerant of there being nothing to delete (the first run), but the
+      # create is not — if that fails, the job fails.
+      - name: Release the binary
+        env:
+          GH_TOKEN: ${{ github.token }}
+          # Via the environment rather than spliced into the command line, so
+          # the value can never be read as shell syntax.
+          SHA: ${{ github.sha }}
+        run: |
+          # The asset name says what it is: the static linux/amd64 binaries,
+          # which is the only platform ./build.sh targets here.
+          tar -czf mymail-linux-amd64.tar.gz mymail mymail-lda
+          gh release delete latest --yes --cleanup-tag || true
+          gh release create latest mymail-linux-amd64.tar.gz \
+            --target "$SHA" \
+            --title "Latest build from main" \
+            --notes "Automated build of \`main\` at commit $SHA."
+
   deploy:
     needs: build
     runs-on: ubuntu-latest
