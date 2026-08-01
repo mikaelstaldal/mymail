@@ -60,7 +60,7 @@ At startup the server resolves the configured sendmail binary (using `PATH` look
 >
 > **TLS and reverse proxy note:** mymail does not terminate TLS itself. For any deployment that is not loopback-only, place mymail behind a TLS-terminating reverse proxy. HTTP Basic Auth must not be used over plain HTTP on a non-loopback interface. Rate limiting is also the responsibility of the reverse proxy layer.
 
-Identities are managed entirely through the REST API and the web UI. The initial identity is created at init time via `-identity-address` (see Init mode). 
+Identities are managed entirely through the REST API and the web UI. The initial identity is created at init time via `-identity-address` (see Init mode).
 The server assumes that exactly one identity marked as default exists at all times, operations that require a default identity return 500 otherwise — an internal data-integrity violation that should never occur under normal operation.
 
 ### LDA mode (`-lda`)
@@ -537,7 +537,7 @@ On first load the UI reads `localStorage` for the last selected folder and navig
 
 1. **Folder view** — Paginated message list. Unread messages shown in bold. **Mark all as read** button marks all messages in the folder as read.
 
-2. **Message detail** — Full headers, sanitized HTML body in a sandboxed iframe (or plain-text fallback), attachment download links. Reply/Reply All/Forward/Move/Delete/Snooze/Mark as junk buttons. An **All headers** toggle button (hidden for drafts) fetches and displays the raw RFC 5322 header block via `GET /messages/{id}/headers`; clicking again collapses the panel. **Draft messages** show **Edit** (opens the compose form) and **Discard** (permanently deletes the draft after confirmation) buttons instead of Reply/Reply-All/Forward. The Snooze button is available only when the message is in Inbox, Snoozed, or a user-created folder. It is not available for messages in Drafts, Sent, Trash, Junk, or Scheduled — each of those folders has its own dedicated lifecycle management that would conflict with snooze behaviour. The snooze `until` time must be at least 1 minute ahead of the current server time; a shorter value is rejected. **Re-snooze / edit snooze:** if the message is already in Snoozed, the Snooze button is labelled "Edit snooze" and pre-fills the datetime picker with the current snooze time; submitting updates the expiry time and preserves the original return folder. Opening an unread message causes the UI to issue an explicit `PATCH /messages/{id}` request (with `{"read": true}`) after a successful GET to mark it as read; `GET /messages/{id}` itself does not alter read state. When the message has both body types, a toggle switches between HTML and plain text; the preference is stored. Thread display: if the message is part of a thread, a collapsed conversation strip is shown below the body; clicking an entry expands it. The thread panel is resizable by dragging the divider between the body and the thread strip. When the thread is truncated at the 1000-message cap (`truncated: true` in the API response), a "thread too long" indicator is shown in place of the missing entries.
+2. **Message detail** — Full headers, sanitized HTML body in a sandboxed iframe (or plain-text fallback), attachment download links. Reply/Reply All/Forward/Move/Delete/Snooze/Mark as junk buttons. An **All headers** toggle button (hidden for drafts) fetches and displays the raw RFC 5322 header block via `GET /messages/{id}/headers`; clicking again collapses the panel. **Draft messages** show **Edit** (opens the compose form) and **Discard** (permanently deletes the draft after confirmation) buttons instead of Reply/Reply-All/Forward. The Snooze button is available only when the message is in Inbox, Snoozed, or a user-created folder. It is not available for messages in Drafts, Sent, Trash, Junk, or Scheduled — each of those folders has its own dedicated lifecycle management that would conflict with snooze behaviour. The snooze `until` time must be at least 1 minute ahead of the current server time; a shorter value is rejected. **Re-snooze / edit snooze:** if the message is already in Snoozed, the Snooze button is labelled "Edit snooze" and pre-fills the datetime picker with the current snooze time; submitting updates the expiry time and preserves the original return folder. Opening an unread message causes the UI to issue an explicit `PATCH /messages/{id}` request (with `{"read": true}`) after a successful GET to mark it as read; `GET /messages/{id}` itself does not alter read state. When the message has both body types, a toggle switches between HTML and plain text; the preference is stored. Thread display: if the message is part of a thread, a collapsed conversation strip is shown below the body; clicking an entry expands it inline. Each entry other than the currently displayed message also offers an **Open** button (revealed on hover or keyboard focus) that navigates to that message, replacing the main view with it. The thread panel is resizable by dragging the divider between the body and the thread strip. When the thread is truncated at the 1000-message cap (`truncated: true` in the API response), a "thread too long" indicator is shown in place of the missing entries.
 
 3. **Compose / Reply / Reply All / Forward** — Form with From selector, To/Cc/Bcc/Reply-To fields (To/Cc/Bcc offer address autocomplete), Subject, rich-text body editor (Quill), file upload for attachments. For Reply / Reply All / Forward, a read-only quoted-text block sits below the editor (see Body quoting). A **Send later** toggle reveals a date/time picker. Auto-saves to Drafts every 30 seconds. Navigate-away triggers an immediate draft save.
 
@@ -663,7 +663,7 @@ All timestamps displayed in the browser's local timezone. Display format is adap
 | Previous years         | Short date with year         | "Apr 3, 2023"      |
 
 Message detail always shows the full "Apr 3, 14:32 CEST" form with timezone abbreviation.
-Simple timestamps have a tooltip with the full form. 
+Simple timestamps have a tooltip with the full form.
 
 ### Error Handling UX
 
@@ -799,7 +799,7 @@ mymail binds plain HTTP and delegates TLS termination, rate limiting, and access
 
 ## Performance and system requirements
 
-mymail should be able to handle a database of at least 10 GiB containing at least 200000 messages on a system with 
+mymail should be able to handle a database of at least 10 GiB containing at least 200000 messages on a system with
 512 MiB RAM with reasonable performance for a single user.
 
 ## Out of Scope

@@ -105,22 +105,37 @@ interface ThreadEntryProps {
   expandedMsg: MessageDetailType | null;
   expandedLoading: boolean;
   onToggle: (id: number) => void;
+  onOpen: (id: number) => void;
 }
 
-function ThreadEntry({ entry, isCurrent, expanded, expandedMsg, expandedLoading, onToggle }: ThreadEntryProps) {
+function ThreadEntry({ entry, isCurrent, expanded, expandedMsg, expandedLoading, onToggle, onOpen }: ThreadEntryProps) {
   const { display: dateDisplay } = formatDateAdaptive(entry.date);
   return (
     <li class={`thread-entry${isCurrent ? ' thread-current' : ''}`}>
-      <button
-        class="thread-entry-btn"
-        onClick={() => !isCurrent && onToggle(entry.id)}
-        disabled={isCurrent}
-      >
-        <span class="thread-from">{senderName(entry.from_addr)}</span>
-        <span class="thread-subject">{entry.subject || '(no subject)'}</span>
-        <span class="thread-date" title={formatDateFull(entry.date)}>{dateDisplay}</span>
-        {!entry.read && <span class="thread-unread-dot" aria-label="Unread" />}
-      </button>
+      {/* The two buttons are siblings: an Open button nested inside the
+          expand button would be invalid markup and unreachable by click. */}
+      <div class="thread-entry-row">
+        <button
+          class="thread-entry-btn"
+          onClick={() => !isCurrent && onToggle(entry.id)}
+          disabled={isCurrent}
+        >
+          <span class="thread-from">{senderName(entry.from_addr)}</span>
+          <span class="thread-subject">{entry.subject || '(no subject)'}</span>
+          <span class="thread-date" title={formatDateFull(entry.date)}>{dateDisplay}</span>
+          {!entry.read && <span class="thread-unread-dot" aria-label="Unread" />}
+        </button>
+        {/* Rendered even for the current entry, where CSS keeps it invisible:
+            it reserves the column so the dates line up down the strip. */}
+        <button
+          class="btn btn-ghost btn-sm thread-open-btn"
+          onClick={() => !isCurrent && onOpen(entry.id)}
+          disabled={isCurrent}
+          title="Open this message in the main view"
+        >
+          Open
+        </button>
+      </div>
       {expanded && (
         <div class="thread-expanded">
           {expandedLoading ? (
@@ -809,6 +824,7 @@ export function MessageDetail({ id, folders }: MessageDetailProps) {
                   expandedMsg={expandedThreadId === entry.id ? expandedMsg : null}
                   expandedLoading={expandedThreadId === entry.id && expandedLoading}
                   onToggle={entryId => void handleExpandThread(entryId)}
+                  onOpen={entryId => navigate(`#/message/${entryId}`)}
                 />
               ))}
             </ul>

@@ -835,11 +835,17 @@ html, body {
 }
 .thread-entry:last-child { border-bottom: none; }
 
+.thread-entry-row {
+  display: flex;
+  align-items: stretch;
+}
+
 .thread-entry-btn {
   display: flex;
   align-items: center;
   gap: 10px;
-  width: 100%;
+  flex: 1;
+  min-width: 0;
   padding: 8px 16px;
   background: transparent;
   border: none;
@@ -851,6 +857,23 @@ html, body {
 }
 .thread-entry-btn:hover:not(:disabled) { background: var(--list-item-hover); }
 .thread-entry-btn:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+
+.thread-open-btn {
+  align-self: center;
+  flex-shrink: 0;
+  margin-right: 16px;
+  visibility: hidden;
+}
+/* Revealed on hover, and on focus so it stays keyboard-reachable. */
+.thread-entry-row:hover .thread-open-btn,
+.thread-entry-row:focus-within .thread-open-btn { visibility: visible; }
+/* Nothing hovers on a touch screen, so there it is always shown. */
+@media (hover: none) {
+  .thread-open-btn { visibility: visible; }
+}
+/* The current message is already open, so its button never shows — it is there
+   only to reserve the column. Last, and specific enough to beat both above. */
+.thread-current .thread-entry-row .thread-open-btn { visibility: hidden; }
 
 .thread-current .thread-entry-btn {
   background: var(--list-item-active-bg);
