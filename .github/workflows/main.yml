@@ -1,10 +1,11 @@
-# Builds the project and publishes the browser-only demo to GitHub Pages.
+# Builds the project, publishes the browser-only demo to GitHub Pages, and
+# publishes the binaries as a rolling `latest` release.
 #
 # The demo needs no backend (see README § Demo mode), so the whole site is the
 # static bundle `-demo-bundle` writes. It is published only from main, and only
 # after ./build.sh has passed — which includes the frontend tests, the Go tests,
 # and the linter — so a broken commit never reaches the published demo.
-name: Demo
+name: Build
 
 on:
   push:
@@ -24,6 +25,12 @@ concurrency:
 jobs:
   build:
     runs-on: ubuntu-latest
+    # Overrides the workflow default only to add contents: write, which the
+    # release step needs to move the `latest` tag and upload the binary.
+    permissions:
+      contents: write
+      pages: write
+      id-token: write
     steps:
       - uses: actions/checkout@v5
 
