@@ -887,6 +887,29 @@ On first load the UI reads `localStorage` for the last selected folder and navig
    is rendered as `<hr>`; all other lines have `&`, `<`, and `>` escaped to `&amp;`, `&lt;`, and `&gt;` respectively,
    and line breaks become `<br>`.
 
+   **Locating the signature.** The swap has to find the old signature before it can replace it, and the editor does not
+   give back the HTML it was handed: a `<br>` becomes a block break, the `<hr>` a delimiter becomes is dropped, runs of
+   spaces collapse, and any line past the wrap column is broken into two paragraphs. Searching the editor's HTML for
+   the converted signature therefore fails for nearly every real signature, and a swap that cannot find the old one
+   leaves it in the message — beside the new one, or, when the new identity has no signature, alone and unannounced.
+   Sending the previous identity's name and employer to a recipient is the whole failure the swap exists to prevent, so
+   the signature is marked rather than searched for: the blocks it occupies carry a block format rendered as
+   `class="ql-signature-y"`, exactly as the wrapper marks its own breaks, and the swap replaces the span from the first
+   marked block to the last. `class` is on no sanitiser allowlist, so the mark never reaches a recipient; drafts are
+   stored verbatim, so it survives a save and reopen and the swap still works on a reopened draft.
+
+   The mark moves with ordinary editing, and two edits have to keep it deliberately. A break the wrapper makes inside a
+   signature line carries the mark, so the half above it stays part of the signature — without that the swap would
+   replace only the half below and leave the other above the new signature. Enter at the *end* of the signature does
+   the opposite: the paragraph it starts is not signature, so the mark is cleared there, and text written below the
+   signature is not deleted by a later swap.
+
+   A signature that cannot be located is not guessed at. On opening a draft written before the mark existed, the
+   editor looks for the selected identity's signature as text — with the wrapper's breaks dissolved, so a wrapped
+   signature still matches — and marks it if it is found. If it is not, and when the previous identity had no signature
+   or the author deleted it, the swap appends the new signature after everything written so far, which is directly
+   above the quote.
+
    **Send button behavior:** Disabled while in-flight, and disabled until the message has a valid recipient — at least
    one of To/Cc/Bcc non-empty, and none of the three malformed. An address typed into an address field but not yet
    committed to a pill counts as a recipient: it is visible to the user, Send folds it into its field before saving, and

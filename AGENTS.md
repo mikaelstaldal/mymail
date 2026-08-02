@@ -45,7 +45,7 @@ go test ./internal/handler/... -run TestFolderCreate
 # Run the frontend tests (needs web/static/*.js compiled first; unpack.sh is a
 # no-op once web/ts/vendor/test/node_modules/ exists)
 web/ts/vendor/test/unpack.sh
-node --test web/ts/quotetext.test.mjs web/ts/wrap.test.mjs web/ts/address.test.mjs web/ts/demo.test.mjs
+node --test web/ts/quotetext.test.mjs web/ts/wrap.test.mjs web/ts/address.test.mjs web/ts/signature.test.mjs web/ts/demo.test.mjs
 
 # Run a single frontend test
 node --test --test-name-pattern 'depth cap' web/ts/quotetext.test.mjs
@@ -278,7 +278,14 @@ Its parser is a third copy of the same rules (`service.ParseAddressList`,
 `demo/text.ts`), unavoidably so — the demo backend has no imports to share with
 — and the three must move together.
 
-`demo.test.mjs` needs no DOM either, but it does something the other two do not:
+`signature.test.mjs` needs no DOM either. `web/ts/util/signature.ts` is the
+arithmetic behind the signature mark — ops in, a span or a set of ops out — kept
+apart from ComposeForm's Quill wiring so it can be exercised without a Quill.
+The ops in that test are shapes the vendored Quill actually produces, so a
+change in what Quill does to a `<br>`, an `<hr>` or a split block shows up as a
+test that no longer describes reality rather than as a silently wrong span.
+
+`demo.test.mjs` needs no DOM either, but it does something the other three do not:
 the demo backend is a set of classic worker scripts sharing one global scope, so
 the test evaluates them into *this* realm with `vm.runInThisContext`, exactly as
 `importScripts` would, and reads the declarations back out. `store.js` is the
@@ -302,3 +309,4 @@ than a paraphrase of it.
 - **LDA exit codes:** 0 = success or duplicate, 1 = parse failure, 75 = transient error.
 - **`send_failed` badge:** suppress in Trash (`folder_id = 4`) even when `send_failure_count > 0`.
 - **Compose soft-break mark:** the editor wraps at the `wrapColumn` preference (default 80, `0` off) and marks its own breaks with a Quill block format rendered as `class="ql-softwrap-y"`, so a paragraph can be re-filled rather than only broken further. Two things keep it working: the sanitiser must never allow `class` (or the mark ships to recipients), and the format's attribute name must stay equal to the class prefix (or Quill's clipboard cannot map the class back when a draft is reopened). Enter inside a wrapped paragraph must clear the mark explicitly — splitting a paragraph copies it to both halves, and a marked break is one the wrapper may dissolve.
+- **Compose signature mark:** the identity signature is found by a second block format, `class="ql-signature-y"` (`web/ts/util/signature.ts`), never by searching the editor's HTML for what `signatureToHtml` produced — Quill does not give that string back, and the swap that relied on it left the old identity's signature in the message. It carries the same two obligations as the soft-break mark, plus two of its own. A wrap break made inside the signature must carry the mark, or the half above it stops counting as signature and a swap leaves it behind (Quill puts the block format only on the half inheriting the old newline, so `autoWrapEditor` has to add it back). Enter at the end of the signature must clear it, or a paragraph written below the signature is deleted by the next swap.

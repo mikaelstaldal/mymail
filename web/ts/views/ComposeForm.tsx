@@ -4,6 +4,10 @@ import { navigate } from '../router.js';
 import { showToast } from '../util/toast.js';
 import { quoteHtmlToText, stripLeadingBlankHtml, stripLeadingBlankLines } from '../util/quotetext.js';
 import { reflowEdits, wrapText, isQuotedLine } from '../util/wrap.js';
+import {
+  SIGNATURE, signatureToHtml, signatureRange, signatureOps, findSignature,
+} from '../util/signature.js';
+import type { DeltaOp, SignatureRange } from '../util/signature.js';
 import { getWrapColumn } from '../util/config.js';
 import { Icon } from '../components/Icon.js';
 import {
@@ -32,8 +36,13 @@ interface QuillEditor {
   deleteText(index: number, length: number, source: string): void;
   setSelection(index: number, source: string): void;
   format(name: string, value: unknown, source: string): void;
+  formatLine(index: number, length: number, name: string, value: unknown, source: string): void;
   focus(): void;
-  clipboard: { dangerouslyPasteHTML(html: string): void };
+  clipboard: {
+    dangerouslyPasteHTML(html: string): void;
+    /** The delta a paste of this HTML would produce, without pasting it. */
+    convert(input: { html: string }): DeltaBuilder;
+  };
   keyboard: {
     addBinding(key: Record<string, unknown>, handler: KeyHandler): void;
     bindings: Record<string, KeyBinding[]>;
@@ -45,15 +54,12 @@ interface QuillRange { index: number; length: number }
 interface KeyContext { format: Record<string, unknown> }
 type KeyHandler = (this: { quill: QuillEditor }, range: QuillRange, context: KeyContext) => boolean;
 interface KeyBinding { key: string; handler: KeyHandler }
-interface DeltaOp {
-  insert?: string | Record<string, unknown>;
-  attributes?: Record<string, unknown>;
-}
 /** The subset of Quill's Delta used to describe a batch of wrap edits. */
 interface DeltaBuilder {
   retain(length: number): DeltaBuilder;
   delete(length: number): DeltaBuilder;
   insert(text: string, attributes?: Record<string, unknown>): DeltaBuilder;
+  ops: DeltaOp[];
 }
 /** The subset of Parchment used to declare the soft-break format. */
 interface ParchmentLike {
@@ -123,19 +129,6 @@ function normalizeNewlines(s: string): string {
   return s.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
 }
 
-function signatureToHtml(sig: string): string {
-  const lines = normalizeNewlines(sig).split('\n');
-  const parts: string[] = [];
-  for (const line of lines) {
-    if (line === '-- ') {
-      parts.push('<hr>');
-    } else {
-      parts.push(line.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'));
-    }
-  }
-  return parts.join('<br>');
-}
-
 // Quoted material is deliberately kept *out* of the Quill document. Quill 2
 // re-derives and diffs the whole document on every DOM mutation, so an editable
 // buffer containing the quote makes each keystroke cost O(entire thread) — a
@@ -154,24 +147,36 @@ interface ComposeParts {
   quoteHtml: string;
 }
 
+interface NewCompose extends ComposeParts {
+  /**
+   * Not part of editorHtml: the signature is written into the editor as its own
+   * step, so the blocks it becomes can be marked as the signature (see
+   * util/signature.ts). Pasting it as one string with the rest is what left the
+   * identity swap with nothing it could reliably find later.
+   */
+  signatureHtml: string;
+}
+
 function buildComposeParts(
   mode: 'new' | 'reply' | 'replyall' | 'forward',
   msg: MessageDetail | null,
   identity: Identity | null,
-): ComposeParts {
-  const sigHtml = identity?.signature ? signatureToHtml(identity.signature) : '';
+): NewCompose {
+  const signatureHtml = identity?.signature ? signatureToHtml(identity.signature) : '';
+  // One blank paragraph to type into; the signature is appended after it. Reply
+  // and Forward used to ask for a second blank paragraph below the signature,
+  // which Quill discarded in every case but one (a signature ending in a block
+  // of its own, i.e. one with a `-- ` delimiter). Asking for it uniformly, and
+  // being given it uniformly, are both defensible; being given it for one
+  // signature in five is not, so it goes.
+  const editorHtml = '<p><br></p>';
 
   if (!msg || mode === 'new') {
-    return {
-      editorHtml: sigHtml ? `<p><br></p><p>${sigHtml}</p>` : '<p><br></p>',
-      quoteHtml: '',
-    };
+    return { editorHtml, quoteHtml: '', signatureHtml };
   }
 
   const date = new Date(msg.date).toUTCString();
   const sender = displayName(msg.from_addr) || msg.from_addr;
-  const sigPart = sigHtml ? `<p>${sigHtml}</p><p><br></p>` : '';
-  const editorHtml = `<p><br></p>${sigPart}`;
 
   if (mode === 'forward') {
     const fwdBlock = [
@@ -184,7 +189,7 @@ function buildComposeParts(
     ].join('');
 
     const body = msg.body_html || `<pre>${esc(normalizeNewlines(msg.body_text))}</pre>`;
-    return { editorHtml, quoteHtml: `${fwdBlock}${body}` };
+    return { editorHtml, quoteHtml: `${fwdBlock}${body}`, signatureHtml };
   }
 
   // reply / replyall
@@ -196,7 +201,7 @@ function buildComposeParts(
     ? `<blockquote style="margin:0 0 0 0.8ex;border-left:1px solid #ccc;padding-left:1ex">${stripLeadingBlankHtml(msg.body_html)}</blockquote>`
     : `<p>${stripLeadingBlankLines(normalizeNewlines(msg.body_text)).split('\n').map(l => '&gt; ' + esc(l)).join('<br>')}</p>`;
 
-  return { editorHtml, quoteHtml: `${attribution}${body}` };
+  return { editorHtml, quoteHtml: `${attribution}${body}`, signatureHtml };
 }
 
 /** Split a stored body_html back into its editable and quoted halves. */
@@ -248,31 +253,53 @@ function unsplittable(attributes: Record<string, unknown>): boolean {
   return UNSPLITTABLE_FORMATS.some(f => f in attributes);
 }
 
+/** Whether the caret sits at the very end of the signature. */
+function atSignatureEnd(q: QuillEditor, index: number): boolean {
+  const range = signatureRange(q.getContents().ops);
+  return range !== null && index === range.index + range.length - 1;
+}
+
 /**
- * Enter inside a wrapped paragraph, made hard.
+ * Enter inside a wrapped paragraph, made hard — and Enter past the signature,
+ * kept out of it.
  *
  * Splitting a block clones it, mark and all, so a break the author made inside
  * a soft-wrapped paragraph comes out looking like one of ours — and the next
  * re-fill would dissolve it, fusing two paragraphs the author had just
- * separated. Clearing the mark on the inserted newline is what makes the break
- * hard; the half after it keeps its own mark, which is still correct. Only a
- * marked plain paragraph is taken over: in a list item, where Enter means far
+ * separated. Clearing the soft-break mark on the inserted newline is what makes
+ * the break hard; the half after it keeps its own mark, which is still correct.
+ *
+ * Cloning is what is wanted inside the signature — both halves of a split
+ * signature line are still signature — but not at its end, where Enter is how
+ * an author starts writing below it. The new newline terminates the half above,
+ * so it carries the signature mark; the paragraph the caret lands in is the new
+ * one, and its mark is cleared. Without that the signature would swallow
+ * whatever is typed there, and the next identity swap would delete it.
+ *
+ * Only a plain paragraph is taken over: in a list item, where Enter means far
  * more than a line break, Quill's own handling stands.
  */
 function hardEnter(this: { quill: QuillEditor }, range: QuillRange, context: KeyContext): boolean {
   const q = this.quill;
   const formats = context.format;
-  if (!(SOFT_BREAK in formats) || unsplittable(formats)) return true;
+  const soft = SOFT_BREAK in formats;
+  const past = SIGNATURE in formats && atSignatureEnd(q, range.index + range.length);
+  if ((!soft && !past) || unsplittable(formats)) return true;
   if (range.length > 0) q.deleteText(range.index, range.length, 'user');
-  q.insertText(range.index, '\n', { [SOFT_BREAK]: null }, 'user');
+  const inserted: Record<string, unknown> = {};
+  if (soft) inserted[SOFT_BREAK] = null;
+  if (SIGNATURE in formats) inserted[SIGNATURE] = formats[SIGNATURE];
+  q.insertText(range.index, '\n', inserted, 'user');
   q.setSelection(range.index + 1, 'silent');
   q.focus();
+  if (past) q.format(SIGNATURE, null, 'user');
   // Quill's Enter carries the inline formats at the caret across the split, and
   // taking Enter over means carrying them too — otherwise a break in the middle
   // of a bold paragraph is followed by unbolded typing. Only block formats are
-  // deliberately dropped, and by this point the only one left is our own mark.
+  // deliberately dropped, and by this point the only ones left are our own two
+  // marks, both of which have just been placed deliberately.
   for (const [name, value] of Object.entries(formats)) {
-    if (name === SOFT_BREAK || name === 'code' || name === 'link') continue;
+    if (name === SOFT_BREAK || name === SIGNATURE || name === 'code' || name === 'link') continue;
     if (Array.isArray(value)) continue;
     q.format(name, value, 'user');
   }
@@ -345,16 +372,97 @@ function autoWrapEditor(q: QuillEditor, width: number): void {
   });
   if (edits.length === 0) return;
 
+  // Newline indices in ascending order, which is the order the edits come in,
+  // so one walking pointer answers "which line is this break being made in".
+  const lineEnds = [...scan.lines.keys()];
   const Delta = Quill.import('delta') as new () => DeltaBuilder;
   const delta = new Delta();
   let pos = 0;
+  let line = 0;
   for (const e of edits) {
+    while (line < lineEnds.length && lineEnds[line] < e.at) line++;
+    // A break made inside the signature stays inside it. The newline being
+    // inserted terminates the half above, so unless it carries the mark that
+    // half stops counting as signature — and an identity swap, which replaces
+    // what is marked, would leave it behind while inserting the new signature
+    // below it. Nothing carries a mark onto a dissolved break: that one is a
+    // space, and the newline it replaces is the marked one that survives.
+    const marked = line < lineEnds.length
+      && scan.lines.get(lineEnds[line])?.[SIGNATURE] != null;
     if (e.at > pos) delta.retain(e.at - pos);
     if (e.remove > 0) delta.delete(e.remove);
-    delta.insert(e.insert, e.join ? undefined : SOFT_BREAK_FORMAT);
+    delta.insert(
+      e.insert,
+      e.join ? undefined
+        : marked ? { ...SOFT_BREAK_FORMAT, [SIGNATURE]: 'y' } : SOFT_BREAK_FORMAT,
+    );
     pos = e.at + e.remove;
   }
   q.updateContents(delta);
+}
+
+// ── The signature as a region of the document ──────────────────────────────
+
+/**
+ * What the editor makes of a signature's HTML, as flat text.
+ *
+ * Quill is asked rather than predicted: it is the one that turns a `<br>` into
+ * a block break and drops the `<hr>` a `-- ` delimiter becomes, and every
+ * attempt to second-guess it is what this whole mechanism replaces. `convert`
+ * drops the newline terminating the last block — pasted, it would become the
+ * document's own terminator — but a signature inserted mid-document has to keep
+ * it, or it runs into the line below.
+ */
+function signatureText(q: QuillEditor, sigHtml: string): string {
+  if (!sigHtml) return '';
+  const ops = q.clipboard.convert({ html: `<p>${sigHtml}</p>` }).ops;
+  const text = ops.map(op => (typeof op.insert === 'string' ? op.insert : '')).join('');
+  return text.endsWith('\n') ? text : text + '\n';
+}
+
+/** Where a signature goes in a document that has none: after everything else. */
+function signatureEnd(q: QuillEditor): SignatureRange {
+  return { index: q.getLength(), length: 0 };
+}
+
+/** Put `text` in the document at `at`, marked, replacing whatever `at` covers. */
+function writeSignature(q: QuillEditor, at: SignatureRange, text: string): void {
+  const ops = signatureOps(text);
+  if (at.length === 0 && ops.length === 0) return;
+  const Delta = Quill.import('delta') as new () => DeltaBuilder;
+  const delta = new Delta();
+  if (at.index > 0) delta.retain(at.index);
+  if (at.length > 0) delta.delete(at.length);
+  for (const op of ops) delta.insert(op.insert as string, op.attributes);
+  q.updateContents(delta);
+}
+
+/**
+ * Mark the signature in a document this editor did not build.
+ *
+ * A draft saved before the mark existed carries its signature as ordinary
+ * paragraphs, so there is nothing for `signatureRange` to find and an identity
+ * swap would append the new signature below the old one — the very failure the
+ * mark exists to prevent. The signature is located by text instead, with the
+ * wrapper's own breaks dissolved back into the spaces they replaced, so one
+ * written as a single long line still matches after being wrapped into two.
+ * Dissolving preserves length, so a position in the dissolved text is the same
+ * position in the document.
+ *
+ * Nothing found means nothing marked, and the swap then appends — which is also
+ * what it does for an identity that never had a signature, and is the one
+ * honest answer when the old one cannot be located.
+ */
+function adoptSignature(q: QuillEditor, sigHtml: string): void {
+  if (!sigHtml || signatureRange(q.getContents().ops)) return;
+  const scan = scanEditor(q);
+  if (scan === null) return;
+  const flat = scan.text.split('');
+  for (const i of scan.soft) flat[i] = ' ';
+  const needle = signatureText(q, sigHtml);
+  const at = findSignature(flat.join(''), needle);
+  if (at < 0) return;
+  q.formatLine(at, needle.length, SIGNATURE, 'y', 'api');
 }
 
 // ── LocalStorage draft helpers ─────────────────────────────────────────────
@@ -676,14 +784,32 @@ export function ComposeForm({ replyId, replyAllId, forwardId, draftId }: Compose
     setQuoteOpen(false);
   }
 
+  /**
+   * Fill a fresh editor: the blank composition area, then the signature written
+   * in as its own marked step so a later identity change can find it again.
+   */
+  function initEditor(parts: NewCompose) {
+    const q = quillRef.current;
+    if (!q) return;
+    q.clipboard.dangerouslyPasteHTML(parts.editorHtml);
+    writeSignature(q, signatureEnd(q), signatureText(q, parts.signatureHtml));
+    bodyHtmlRef.current = q.root.innerHTML;
+    bodyTextRef.current = q.getText();
+  }
+
   /** Restore a stored draft body, keeping its quoted half out of the editor. */
   function loadStoredBody(bodyHtml: string) {
     const { editorHtml, quoteHtml } = splitQuotedHtml(bodyHtml);
     setQuote(quoteHtml);
     if (editorRef.current && quillRef.current && editorHtml) {
-      quillRef.current.clipboard.dangerouslyPasteHTML(editorHtml);
-      bodyHtmlRef.current = quillRef.current.root.innerHTML;
-      bodyTextRef.current = quillRef.current.getText();
+      const q = quillRef.current;
+      q.clipboard.dangerouslyPasteHTML(editorHtml);
+      // A draft saved with the mark brings it back with it; one saved before
+      // the mark existed gets its signature found and marked here, once.
+      const ident = currentIdentityRef.current;
+      adoptSignature(q, ident?.signature ? signatureToHtml(ident.signature) : '');
+      bodyHtmlRef.current = q.root.innerHTML;
+      bodyTextRef.current = q.getText();
     } else {
       // Without the editor there is no text to read out of it, so the editable
       // half is rendered down from its own HTML — the same way the quoted half
@@ -896,10 +1022,7 @@ export function ComposeForm({ replyId, replyAllId, forwardId, draftId }: Compose
         setIdentityId(sel?.id);
         currentIdentityRef.current = sel ?? null;
         if (editorRef.current && quillRef.current) {
-          const { editorHtml } = buildComposeParts('new', null, sel ?? null);
-          quillRef.current.clipboard.dangerouslyPasteHTML(editorHtml);
-          bodyHtmlRef.current = quillRef.current.root.innerHTML;
-          bodyTextRef.current = quillRef.current.getText();
+          initEditor(buildComposeParts('new', null, sel ?? null));
         }
         setLoading(false);
         return;
@@ -974,9 +1097,7 @@ export function ComposeForm({ replyId, replyAllId, forwardId, draftId }: Compose
       // showing. Forwards and reopened drafts stay collapsed.
       if (mode === 'reply' || mode === 'replyall') setQuoteOpen(true);
       if (editorRef.current && quillRef.current) {
-        quillRef.current.clipboard.dangerouslyPasteHTML(parts.editorHtml);
-        bodyHtmlRef.current = quillRef.current.root.innerHTML;
-        bodyTextRef.current = quillRef.current.getText();
+        initEditor(parts);
       }
 
       setLoading(false);
@@ -1009,6 +1130,10 @@ export function ComposeForm({ replyId, replyAllId, forwardId, draftId }: Compose
     const Parchment = Quill.import('parchment') as ParchmentLike;
     Quill.register(
       new Parchment.ClassAttributor(SOFT_BREAK, SOFT_BREAK, { scope: Parchment.Scope.BLOCK }),
+      true,
+    );
+    Quill.register(
+      new Parchment.ClassAttributor(SIGNATURE, SIGNATURE, { scope: Parchment.Scope.BLOCK }),
       true,
     );
     const q = new Quill(editorRef.current, {
@@ -1107,32 +1232,21 @@ export function ComposeForm({ replyId, replyAllId, forwardId, draftId }: Compose
     setIdentityId(newId);
     const ident = identities.find(i => i.id === newId) ?? null;
     currentIdentityRef.current = ident;
-    // Swap signature: rebuild initial HTML and re-set
-    // We do a simple approach: load current body, detect old sig block and replace
-    // For simplicity, only swap if we can access Quill
+
     const q = quillRef.current;
     if (!q) return;
     // Operates on the editable half only — the quoted block is held outside the
     // editor and never contains a signature, so it is unaffected.
-    // This is a simplification: we just swap the sig by re-building initial HTML
-    // and re-inserting. In practice, swap logic requires finding the sig delimiter.
-    // The spec says "swap signature block" - we implement this by rebuilding.
-    const html = q.root.innerHTML;
-    const newSigHtml = ident?.signature ? signatureToHtml(ident.signature) : '';
-    const oldSigHtml = identities.find(i => i.id === identityId)?.signature
-      ? signatureToHtml(identities.find(i => i.id === identityId)!.signature)
-      : '';
-
-    if (oldSigHtml && html.includes(oldSigHtml)) {
-      const updated = newSigHtml
-        ? html.replace(oldSigHtml, newSigHtml)
-        : html.replace(`<p>${oldSigHtml}</p>`, '');
-      q.clipboard.dangerouslyPasteHTML(updated);
-    } else if (newSigHtml) {
-      // Insert new sig at the beginning
-      const updated = `<p>${newSigHtml}</p>${html}`;
-      q.clipboard.dangerouslyPasteHTML(updated);
-    }
+    //
+    // The old signature is wherever the mark says it is, whatever has since
+    // been typed around it and however the wrapper has broken it up. Nothing is
+    // marked when the previous identity had no signature, or when the author
+    // deleted it, or when the draft predates the mark and could not be adopted;
+    // the new signature then goes where a signature goes — after everything
+    // written so far, which is directly above the quote, since the quote is not
+    // in the editor.
+    const at = signatureRange(q.getContents().ops) ?? signatureEnd(q);
+    writeSignature(q, at, signatureText(q, ident?.signature ? signatureToHtml(ident.signature) : ''));
   }
 
   // ── File input ───────────────────────────────────────────────────────────
