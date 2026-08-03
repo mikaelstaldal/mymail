@@ -97,7 +97,23 @@ export function FolderView({ folder, folders }: FolderViewProps) {
   };
 
   const handleBulkDelete = async () => {
+    // Snapshotted before the question for the same reason as handleBulkDiscard:
+    // the selection the user was asked about is the one that gets deleted.
     const ids = [...selectedIds];
+    // Every message in the list is in this folder, so the whole selection goes
+    // the same way — permanently from Trash and Junk, to Trash from anywhere
+    // else (repository.BulkDeleteMessages decides this per message's folder).
+    const isPermanent = folder.id === TRASH_ID || folder.id === JUNK_ID;
+    const what = ids.length === 1 ? 'this message' : `these ${ids.length} messages`;
+    if (!await confirmDialog({
+      title: ids.length === 1 ? 'Delete message' : `Delete ${ids.length} messages`,
+      body: isPermanent
+        ? `Permanently delete ${what}? This cannot be undone.`
+        : `Delete ${what}? ${ids.length === 1 ? 'It' : 'They'} will be moved to Trash.`,
+      confirmLabel: 'Delete',
+      cancelLabel: 'Keep',
+      destructive: true,
+    })) return;
     try {
       await api.messages.delete(ids);
       void load(0);

@@ -1010,13 +1010,14 @@ Both buttons are named after what they do — never "OK" and "Cancel" together:
   **Cancel** — except where "Cancel" is itself the action being confirmed (cancelling a scheduled message), where the
   declining button says **Keep scheduled**.
 
-Confirmation is requested for: deleting a single message from message detail, emptying Trash or Junk, discarding a
-draft (in compose, in message detail, and in bulk from the Drafts list), sending or scheduling a stored draft,
-cancelling a scheduled message, and deleting a folder, identity, filter, or contact.
+Confirmation is requested for: deleting a message (from message detail, and in bulk from a message list), emptying
+Trash or Junk, discarding a draft (in compose, in message detail, and in bulk from the Drafts list), sending or
+scheduling a stored draft, cancelling a scheduled message, and deleting a folder, identity, filter, or contact.
 
-It is **not** requested for the bulk **Delete** button in a message list, which acts on the selection immediately —
-even in Trash and Junk, where `DELETE /messages` deletes permanently. This is inconsistent with the single-message
-Delete in those same folders, which does confirm.
+A delete that cannot be undone says so. Deleting from Trash or Junk — single or bulk — is worded "Permanently delete …
+This cannot be undone."; deleting from anywhere else says the message will be moved to Trash. Bulk wording names the
+count ("Permanently delete these 4 messages?"), and that count is the selection as it stood when the question was
+asked. The other bulk actions (Mark read, Mark unread, Move to) are not confirmed: none of them loses anything.
 
 ### Error Handling UX
 
