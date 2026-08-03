@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'preact/hooks';
 import { api } from '../../api/client.js';
+import { confirmDialog } from '../../util/confirm.js';
 import { Icon } from '../../components/Icon.js';
 import type { components } from '../../api/types.js';
 
@@ -146,7 +147,13 @@ export function Contacts() {
   }
 
   async function deleteContact(id: number) {
-    if (!confirm('Delete this contact?')) return;
+    if (!await confirmDialog({
+      title: 'Delete contact',
+      body: 'Delete this contact? This cannot be undone.',
+      confirmLabel: 'Delete',
+      cancelLabel: 'Keep',
+      destructive: true,
+    })) return;
     setError(null);
     try {
       await api.contacts.delete(id);

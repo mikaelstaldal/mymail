@@ -55,17 +55,17 @@ export function DemoDialog({ onClose }: Props) {
   }, [onClose]);
 
   return (
-    <div class="demo-overlay" onClick={onClose}>
+    <div class="dialog-overlay" onClick={onClose}>
       <div
-        class="demo-dialog"
+        class="dialog"
         role="alertdialog"
         aria-modal="true"
         aria-labelledby="demo-title"
         aria-describedby="demo-body"
         onClick={(e) => e.stopPropagation()}
       >
-        <h2 id="demo-title" class="demo-title">This is a demo</h2>
-        <div id="demo-body" class="demo-body">
+        <h2 id="demo-title" class="dialog-title">This is a demo</h2>
+        <div id="demo-body" class="dialog-body">
           <p>
             There is no server behind this MyMail. Everything you see is running in
             your browser, and every message, contact, and setting you create is
@@ -82,8 +82,8 @@ export function DemoDialog({ onClose }: Props) {
             sample messages. Please don&apos;t keep anything here that you would miss.
           </p>
         </div>
-        <div class="demo-actions">
-          <button ref={okRef} type="button" class="primary" onClick={onClose}>OK</button>
+        <div class="dialog-actions">
+          <button ref={okRef} type="button" class="btn btn-primary" onClick={onClose}>OK</button>
         </div>
       </div>
     </div>

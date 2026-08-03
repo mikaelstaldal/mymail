@@ -990,6 +990,34 @@ All timestamps displayed in the browser's local timezone. Display format is adap
 Message detail always shows the full "Apr 3, 14:32 CEST" form with timezone abbreviation.
 Simple timestamps have a tooltip with the full form.
 
+### Confirmation Dialogs
+
+The UI never uses the browser's native `window.confirm`/`alert`/`prompt`. Every confirmation is an in-app modal dialog
+(`web/ts/components/ConfirmDialog.tsx`, driven by `confirmDialog()` in `web/ts/util/confirm.ts`) with a title, the
+question, and two buttons. It is dismissed by Escape or a click outside the dialog, which both count as declining, and
+Tab stays inside it. A destructive question opens with the **declining** button focused, so a reflexive Enter keeps
+rather than deletes; every other question opens on the confirming button.
+
+Because the dialog does not block the event loop the way `window.confirm` did, a caller must claim its in-flight guard
+*before* awaiting the answer (and release it if declined), and must act on the selection it snapshotted before asking —
+not on whatever the selection has become by the time the user answers.
+
+Both buttons are named after what they do — never "OK" and "Cancel" together:
+
+- **Anything that deletes** (delete a message, empty Trash or Junk, discard a draft, delete a folder, identity, filter,
+  or contact) is confirmed with **Delete** and declined with **Keep**. The confirming button is styled as destructive.
+- **Anything else** is confirmed with its own verb (**Send**, **Schedule**, **Move to Drafts**) and declined with
+  **Cancel** — except where "Cancel" is itself the action being confirmed (cancelling a scheduled message), where the
+  declining button says **Keep scheduled**.
+
+Confirmation is requested for: deleting a single message from message detail, emptying Trash or Junk, discarding a
+draft (in compose, in message detail, and in bulk from the Drafts list), sending or scheduling a stored draft,
+cancelling a scheduled message, and deleting a folder, identity, filter, or contact.
+
+It is **not** requested for the bulk **Delete** button in a message list, which acts on the selection immediately —
+even in Trash and Junk, where `DELETE /messages` deletes permanently. This is inconsistent with the single-message
+Delete in those same folders, which does confirm.
+
 ### Error Handling UX
 
 - **Transient API errors:** shown as a toast/snackbar (bottom-right), auto-dismisses after 5 seconds.

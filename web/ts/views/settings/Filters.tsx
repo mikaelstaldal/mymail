@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'preact/hooks';
 import { api } from '../../api/client.js';
+import { confirmDialog } from '../../util/confirm.js';
 import { Icon } from '../../components/Icon.js';
 import type { components } from '../../api/types.js';
 
@@ -233,7 +234,13 @@ export function Filters() {
   }
 
   async function deleteFilter(id: number) {
-    if (!confirm('Delete this filter?')) return;
+    if (!await confirmDialog({
+      title: 'Delete filter',
+      body: 'Delete this filter? This cannot be undone.',
+      confirmLabel: 'Delete',
+      cancelLabel: 'Keep',
+      destructive: true,
+    })) return;
     setError(null);
     try {
       await api.filters.delete(id);

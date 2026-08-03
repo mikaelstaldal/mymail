@@ -3,6 +3,7 @@ import { useState, useEffect, useRef, useCallback } from 'preact/hooks';
 import { Sidebar } from './layout/Sidebar.js';
 import { Toolbar } from './layout/Toolbar.js';
 import { Toast } from './components/Toast.js';
+import { ConfirmDialog } from './components/ConfirmDialog.js';
 import { FolderView } from './views/FolderView.js';
 import { MessageDetail } from './views/MessageDetail.js';
 import { ComposeForm } from './views/ComposeForm.js';
@@ -170,6 +171,7 @@ function App() {
       </main>
       <Toolbar />
       <Toast />
+      <ConfirmDialog />
       {showDemoNotice && <DemoDialog onClose={dismissDemoNotice} />}
     </div>
   );

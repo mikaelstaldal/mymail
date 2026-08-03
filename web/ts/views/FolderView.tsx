@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useRef } from 'preact/hooks';
 import { api } from '../api/client.js';
 import { navigate } from '../router.js';
 import { showToast } from '../util/toast.js';
+import { confirmDialog } from '../util/confirm.js';
 import { MessageList } from '../components/MessageList.js';
 import { Icon } from '../components/Icon.js';
 import type { components } from '../api/types.js';
@@ -69,7 +70,13 @@ export function FolderView({ folder, folders }: FolderViewProps) {
 
   const handleEmpty = async () => {
     const label = folder.id === TRASH_ID ? 'Trash' : 'Junk';
-    if (!confirm(`Permanently delete all messages in ${label}? This cannot be undone.`)) return;
+    if (!await confirmDialog({
+      title: `Empty ${label}`,
+      body: `Permanently delete all messages in ${label}? This cannot be undone.`,
+      confirmLabel: 'Delete',
+      cancelLabel: 'Keep',
+      destructive: true,
+    })) return;
     try {
       await api.folders.deleteAllMessages(folder.id);
       void load(0);
@@ -100,8 +107,20 @@ export function FolderView({ folder, folders }: FolderViewProps) {
   };
 
   const handleBulkDiscard = async () => {
-    if (!confirm(`Discard ${selectedIds.size} draft${selectedIds.size === 1 ? '' : 's'}?`)) return;
+    // Snapshotted before the question, and it is this snapshot that gets
+    // deleted: the selection can change while the dialog is up (it could not
+    // while `window.confirm` blocked the page), and what the user was asked
+    // about has to be what happens.
     const ids = [...selectedIds];
+    if (!await confirmDialog({
+      title: ids.length === 1 ? 'Discard draft' : `Discard ${ids.length} drafts`,
+      body: ids.length === 1
+        ? 'Permanently delete this draft? This cannot be undone.'
+        : `Permanently delete these ${ids.length} drafts? This cannot be undone.`,
+      confirmLabel: 'Delete',
+      cancelLabel: 'Keep',
+      destructive: true,
+    })) return;
     try {
       await Promise.all(ids.map(id => api.drafts.delete(id)));
       void load(0);

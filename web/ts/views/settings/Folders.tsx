@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'preact/hooks';
 import { api } from '../../api/client.js';
+import { confirmDialog } from '../../util/confirm.js';
 import { Icon } from '../../components/Icon.js';
 import type { components } from '../../api/types.js';
 
@@ -76,7 +77,13 @@ export function Folders() {
   }
 
   async function deleteFolder(id: number, name: string) {
-    if (!confirm(`Delete folder "${name}"? Messages will be moved to Trash.`)) return;
+    if (!await confirmDialog({
+      title: 'Delete folder',
+      body: `Delete folder "${name}"? Messages in it will be moved to Trash.`,
+      confirmLabel: 'Delete',
+      cancelLabel: 'Keep',
+      destructive: true,
+    })) return;
     setError(null);
     try {
       await api.folders.delete(id);

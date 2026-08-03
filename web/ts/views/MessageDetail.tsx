@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from 'preact/hooks';
 import { api, NotFoundError } from '../api/client.js';
 import { navigate } from '../router.js';
 import { showToast } from '../util/toast.js';
+import { confirmDialog } from '../util/confirm.js';
 import { getMycalUrl, isDemo } from '../util/config.js';
 import { formatDateFull, formatDateAdaptive } from '../util/date.js';
 import { hasValidRecipient } from '../util/address.js';
@@ -336,11 +337,23 @@ export function MessageDetail({ id, folders }: MessageDetailProps) {
   const handleDelete = async () => {
     if (!msg || actionInFlight) return;
     const isPermanent = msg.folder_id === JUNK_ID || msg.folder_id === TRASH_ID;
-    if (!confirm(isPermanent
-      ? 'Permanently delete this message? This cannot be undone.'
-      : 'Delete this message?')) return;
     const sourceFolderId = msg.folder_id;
+    // Claimed before the question, not after it: `window.confirm` blocked the
+    // event loop, so nothing else could start while it was up, but the dialog
+    // does not — and this flag is what keeps two actions off the same message.
     setActionInFlight(true);
+    if (!await confirmDialog({
+      title: 'Delete message',
+      body: isPermanent
+        ? 'Permanently delete this message? This cannot be undone.'
+        : 'Delete this message? It will be moved to Trash.',
+      confirmLabel: 'Delete',
+      cancelLabel: 'Keep',
+      destructive: true,
+    })) {
+      setActionInFlight(false);
+      return;
+    }
     try {
       await api.messages.deleteSingle(msg.id);
       navigateToSourceFolder(sourceFolderId);
@@ -363,10 +376,19 @@ export function MessageDetail({ id, folders }: MessageDetailProps) {
 
   const handleSendDraft = async () => {
     if (!msg || actionInFlight) return;
-    if (!confirm(isDeferred(msg.send_at)
-      ? 'Schedule this draft as it is?'
-      : 'Send this draft as it is?')) return;
+    const deferred = isDeferred(msg.send_at);
     setActionInFlight(true);
+    if (!await confirmDialog({
+      title: deferred ? 'Schedule draft' : 'Send draft',
+      body: deferred
+        ? 'Schedule this draft as it is?'
+        : 'Send this draft as it is?',
+      confirmLabel: deferred ? 'Schedule' : 'Send',
+      cancelLabel: 'Cancel',
+    })) {
+      setActionInFlight(false);
+      return;
+    }
     try {
       // The server sends what it has stored, so nothing needs uploading first.
       // 202 means the draft's send_at was far enough out to be scheduled.
@@ -380,8 +402,17 @@ export function MessageDetail({ id, folders }: MessageDetailProps) {
 
   const handleDiscardDraft = async () => {
     if (!msg || actionInFlight) return;
-    if (!confirm('Discard this draft?')) return;
     setActionInFlight(true);
+    if (!await confirmDialog({
+      title: 'Discard draft',
+      body: 'Permanently delete this draft? This cannot be undone.',
+      confirmLabel: 'Delete',
+      cancelLabel: 'Keep',
+      destructive: true,
+    })) {
+      setActionInFlight(false);
+      return;
+    }
     try {
       await api.drafts.delete(msg.id);
       navigate('#/folder/drafts');
@@ -460,8 +491,18 @@ export function MessageDetail({ id, folders }: MessageDetailProps) {
 
   const handleCancelSchedule = async () => {
     if (!msg || actionInFlight) return;
-    if (!confirm('Cancel this scheduled message and move it to Drafts?')) return;
+    // "Cancel" is the action here, so it cannot also be the label that backs
+    // out of it — both buttons say what they do instead.
     setActionInFlight(true);
+    if (!await confirmDialog({
+      title: 'Cancel scheduled message',
+      body: 'Cancel this scheduled message and move it to Drafts? It will not be sent.',
+      confirmLabel: 'Move to Drafts',
+      cancelLabel: 'Keep scheduled',
+    })) {
+      setActionInFlight(false);
+      return;
+    }
     try {
       await api.scheduled.cancel(msg.id);
       navigate('#/folder/drafts');

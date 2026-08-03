@@ -45,7 +45,7 @@ go test ./internal/handler/... -run TestFolderCreate
 # Run the frontend tests (needs web/static/*.js compiled first; unpack.sh is a
 # no-op once web/ts/vendor/test/node_modules/ exists)
 web/ts/vendor/test/unpack.sh
-node --test web/ts/quotetext.test.mjs web/ts/wrap.test.mjs web/ts/address.test.mjs web/ts/signature.test.mjs web/ts/demo.test.mjs
+node --test web/ts/quotetext.test.mjs web/ts/wrap.test.mjs web/ts/address.test.mjs web/ts/signature.test.mjs web/ts/confirm.test.mjs web/ts/demo.test.mjs
 
 # Run a single frontend test
 node --test --test-name-pattern 'depth cap' web/ts/quotetext.test.mjs
@@ -285,7 +285,16 @@ The ops in that test are shapes the vendored Quill actually produces, so a
 change in what Quill does to a `<br>`, an `<hr>` or a split block shows up as a
 test that no longer describes reality rather than as a silently wrong span.
 
-`demo.test.mjs` needs no DOM either, but it does something the other three do not:
+`confirm.test.mjs` needs no DOM either. `web/ts/util/confirm.ts` is the store
+behind every confirmation the UI asks for, holding the promise a caller is
+awaiting; the dialog that renders it (`components/ConfirmDialog.tsx`) is not
+reachable from here. What the test pins is the two ways an answer could go
+missing — a question superseded before it was answered resolves `false` rather
+than stranding its caller's `await`, and answering a stale id is ignored instead
+of resolving the question that replaced it. A stranded promise is a button that
+silently stops working, with nothing in the console to say so.
+
+`demo.test.mjs` needs no DOM either, but it does something the other four do not:
 the demo backend is a set of classic worker scripts sharing one global scope, so
 the test evaluates them into *this* realm with `vm.runInThisContext`, exactly as
 `importScripts` would, and reads the declarations back out. `store.js` is the

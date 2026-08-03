@@ -2,6 +2,7 @@ import { useState, useEffect, useRef, useCallback } from 'preact/hooks';
 import { api, NotFoundError } from '../api/client.js';
 import { navigate } from '../router.js';
 import { showToast } from '../util/toast.js';
+import { confirmDialog } from '../util/confirm.js';
 import { quoteHtmlToText, stripLeadingBlankHtml, stripLeadingBlankLines } from '../util/quotetext.js';
 import { reflowEdits, wrapText, isQuotedLine } from '../util/wrap.js';
 import {
@@ -746,6 +747,13 @@ export function ComposeForm({ replyId, replyAllId, forwardId, draftId }: Compose
   // Draft persistence
   const draftIdRef = useRef<number | null>(null);
   const discardedRef = useRef(false);
+  // True from the moment the Discard question goes up until it is answered, and
+  // for good once it is answered "delete". `window.confirm` blocked the event
+  // loop, so the 30-second autosave could not run while the user was reading
+  // the question; the dialog does not block, so it can — and a PUT that lands
+  // after the DELETE 404s straight into performSave's recreate-transparently
+  // path, putting the deleted draft back under a new id that nothing owns.
+  const discardPendingRef = useRef(false);
   const autoSaveTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const currentIdentityRef = useRef<Identity | null>(null);
 
@@ -882,7 +890,10 @@ export function ComposeForm({ replyId, replyAllId, forwardId, draftId }: Compose
             : await api.drafts.update(draftIdRef.current, body);
         } catch (e) {
           if (!(e instanceof NotFoundError)) throw e;
-          // Draft was deleted externally; recreate it transparently.
+          // Draft was deleted externally; recreate it transparently — unless we
+          // are the ones deleting it, in which case recreating it would undo
+          // the discard the user just confirmed.
+          if (discardPendingRef.current) return;
           draftIdRef.current = null;
           res = hasFiles
             ? await api.drafts.createWithAttachments(body, pendingFiles)
@@ -1196,7 +1207,7 @@ export function ComposeForm({ replyId, replyAllId, forwardId, draftId }: Compose
   // ── Auto-save every 30 seconds ────────────────────────────────────────────
   useEffect(() => {
     autoSaveTimerRef.current = setInterval(async () => {
-      if (sendInFlight) return;
+      if (sendInFlight || discardPendingRef.current) return;
       setSaveStatus('saving');
       try {
         await performSave(files);
@@ -1497,12 +1508,21 @@ export function ComposeForm({ replyId, replyAllId, forwardId, draftId }: Compose
           class="btn btn-ghost btn-sm ml-auto"
           onClick={async () => {
             if (draftIdRef.current !== null) {
-              if (confirm('Discard this draft?')) {
+              discardPendingRef.current = true;
+              if (await confirmDialog({
+                title: 'Discard draft',
+                body: 'Permanently delete this draft? This cannot be undone.',
+                confirmLabel: 'Delete',
+                cancelLabel: 'Keep',
+                destructive: true,
+              })) {
                 await api.drafts.delete(draftIdRef.current).catch(() => {/* ignore */});
                 draftIdRef.current = null;
                 discardedRef.current = true;
                 clearLocalDraft();
                 navigate('#/inbox');
+              } else {
+                discardPendingRef.current = false;
               }
             } else {
               discardedRef.current = true;

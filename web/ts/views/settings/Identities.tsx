@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'preact/hooks';
 import { api } from '../../api/client.js';
+import { confirmDialog } from '../../util/confirm.js';
 import { Icon } from '../../components/Icon.js';
 import type { components } from '../../api/types.js';
 
@@ -166,7 +167,13 @@ export function Identities() {
   }
 
   async function deleteIdentity(id: number) {
-    if (!confirm('Delete this identity?')) return;
+    if (!await confirmDialog({
+      title: 'Delete identity',
+      body: 'Delete this identity? This cannot be undone.',
+      confirmLabel: 'Delete',
+      cancelLabel: 'Keep',
+      destructive: true,
+    })) return;
     setError(null);
     try {
       await api.identities.delete(id);
