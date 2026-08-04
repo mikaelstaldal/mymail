@@ -962,8 +962,9 @@ On first load the UI reads `localStorage` for the last selected folder and navig
 ### Settings Navigation
 
 The sidebar footer holds two controls: a light/dark mode button, and — to its right — a gear icon that opens
-`/#/settings`. The mode button's icon shows the theme it would switch *to* (a moon in light mode, a sun in dark),
-and it writes the same stored preference as the Preferences tab's dark mode switch. The page uses a tabbed layout:
+`/#/settings`. Both are drawn as outlined buttons, matching MyNotes' equivalent pair. The mode button's icon shows
+the theme it would switch *to* (a moon in light mode, a sun in dark), and it writes the same stored preference as
+the Preferences tab's dark mode switch. The page uses a tabbed layout:
 
 | Tab slug      | Content              |
 |---------------|----------------------|

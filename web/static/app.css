@@ -311,13 +311,19 @@ html, body {
 .sidebar-theme-label > span { grid-area: 1 / 1; visibility: hidden; }
 .sidebar-theme-label > .is-shown { visibility: visible; }
 
+/* Outlined, the way MyNotes draws the same pair (`a.btn-icon`: 1px of --border
+   at --border-radius). The padding is one pixel short of the 7px/8px an
+   unbordered button would use, so adding the border leaves the outer box the
+   size it already was — the footer is a nowrap row on a fixed 220px sidebar.
+   Only this pair is outlined; .sidebar-reload-btn stays a ghost button, being an
+   icon-only affordance in the header rather than one of the two MyNotes draws. */
 .sidebar-theme-toggle,
 .sidebar-settings-link {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  padding: 7px 8px;
-  border: none;
+  padding: 6px 7px;
+  border: 1px solid var(--border);
   border-radius: var(--border-radius);
   background: none;
   color: var(--sidebar-muted);
@@ -326,10 +332,18 @@ html, body {
   font-size: 0.85rem;
   white-space: nowrap;
   cursor: pointer;
-  transition: background 0.12s, color 0.12s;
+  transition: background 0.12s, color 0.12s, border-color 0.12s;
 }
+/* The hover border must be a token that differs from --hover-bg in *both*
+   themes, or hovering erases the outline: in the dark theme --border and
+   --hover-bg are the same #374151, so keeping --border here would fill the
+   button with its own border colour. --text-faint is distinct in both. */
 .sidebar-theme-toggle:hover,
-.sidebar-settings-link:hover { background: var(--sidebar-hover); color: var(--text-primary); }
+.sidebar-settings-link:hover {
+  background: var(--sidebar-hover);
+  border-color: var(--text-faint);
+  color: var(--text-primary);
+}
 .sidebar-theme-toggle:focus-visible,
 .sidebar-settings-link:focus-visible { outline: none; box-shadow: var(--focus-ring); }
 
