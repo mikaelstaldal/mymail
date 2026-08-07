@@ -311,8 +311,24 @@ html, body {
 
    Full-bleed by spec, in all three apps: the 8px the buttons sit in is this
    element's padding, never a margin, so the rule above them spans the whole
-   sidebar rather than starting where the buttons start. */
+   sidebar rather than starting where the buttons start.
+
+   Sticky, because .sidebar-spacer only holds this down while the sidebar fits.
+   .sidebar scrolls, and once the folder list is taller than the panel the spacer
+   collapses to nothing and this scrolls away with it — measured at 13 user
+   folders in an 800px window, which put the buttons 44px below the fold, and at
+   40 folders over 1000px below. The shared spec requires them 8px from the
+   window's bottom edge in every state, so the footer has to leave the flow when
+   the content overflows. `bottom: 0` and not `bottom: 8px`: this element's own
+   padding is the 8px, and doubling it would put the buttons at 16.
+
+   The background is not decoration either — without it the folder rows show
+   through as they scroll underneath. It must stay equal to the sidebar's own, or
+   the footer becomes a visible band. */
 .sidebar-footer {
+  position: sticky;
+  bottom: 0;
+  background: var(--sidebar-bg);
   padding: 8px;
   border-top: 1px solid var(--sidebar-footer-border);
   flex-shrink: 0;
