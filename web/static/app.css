@@ -55,6 +55,10 @@
   --sidebar-active-border: var(--primary);
   --sidebar-badge: var(--primary);
   --sidebar-divider: var(--border-light);
+  /* Deliberately a step darker than --sidebar-divider: this rule is the top of
+     the footer, and the shared MySuite spec ties it to the same colour the two
+     buttons below it are outlined in, not to the folder-list divider. */
+  --sidebar-footer-border: var(--border);
   --topbar-bg: var(--surface);
   --topbar-border: var(--border);
   --list-bg: var(--bg);
@@ -173,11 +177,17 @@ html, body {
   flex-shrink: 0;
 }
 
-/* ── App Shell ── */
+/* ── App Shell ──
+   The sidebar track is in `rem`, not `px`: 13.75rem is 220px at the default
+   16px root and identical to the literal it replaced, but it grows with the
+   reader's browser font setting. The footer's two buttons are rem-sized by the
+   shared MySuite spec, so a px column would have let them outgrow it — Chrome's
+   "Large" (20px) and "Very Large" (24px) settings would push Settings over the
+   content beside it, which is WCAG 1.4.4. Both sides must scale or neither. */
 .app {
   display: grid;
   grid-template-rows: auto 1fr auto;
-  grid-template-columns: 220px 1fr;
+  grid-template-columns: 13.75rem 1fr;
   grid-template-areas:
     "sidebar topbar"
     "sidebar content"
@@ -295,14 +305,18 @@ html, body {
 
 /* One line, always: nowrap plus one-word labels (see ThemeToggle) keeps both
    controls side by side, rather than dropping the wider of them onto a second
-   row whenever the theme flips. */
+   row whenever the theme flips.
+
+   Full-bleed by spec, in all three apps: the 8px the buttons sit in is this
+   element's padding, never a margin, so the rule above them spans the whole
+   sidebar rather than starting where the buttons start. */
 .sidebar-footer {
   padding: 8px;
-  border-top: 1px solid var(--border-light);
+  border-top: 1px solid var(--sidebar-footer-border);
   flex-shrink: 0;
   display: flex;
   flex-wrap: nowrap;
-  gap: 4px;
+  gap: 6px;
 }
 
 /* Both words stacked in one grid cell: the cell is as wide as the longer of
@@ -311,25 +325,61 @@ html, body {
 .sidebar-theme-label > span { grid-area: 1 / 1; visibility: hidden; }
 .sidebar-theme-label > .is-shown { visibility: visible; }
 
-/* Outlined, the way MyNotes draws the same pair (`a.btn-icon`: 1px of --border
-   at --border-radius). The padding is one pixel short of the 7px/8px an
-   unbordered button would use, so adding the border leaves the outer box the
-   size it already was — the footer is a nowrap row on a fixed 220px sidebar.
+/* Outlined, and geometrically identical to the same pair in MyCal and MyNotes:
+   the three apps share one spec for this footer, so the buttons must measure the
+   same in all of them. Every number below is that spec, not a local choice —
+   including the trailing zero in `0.80rem`, which is the shared value written the
+   way all three repos write it, so a grep finds them together. It is the only
+   trailing zero in this file — `0.8rem`, the identical computed value in ordinary
+   spelling, appears ~37 times elsewhere — so the distinction is a convention and
+   nothing more. Any formatter would collapse it and no test here would notice.
+   0.80rem over a 1.5 line-height is a 19.2px line box, and 4px of padding plus
+   1px of border on each side makes the outer height exactly 29.2px at the
+   default 16px root size (it is rem-based, so it scales with the reader's
+   browser font setting — 29.2px is the agreed reference, not an absolute).
+   line-height is stated rather than inherited so the height survives a change
+   to `body`. The size is set by the narrowest of the three sidebars, not by
+   this one: on MyMail's 13.75rem sidebar the pair measures 174px of the 203px
+   available at the default root and in the default UI font, where MyCal has
+   ~10px of slack. Both scale together with the root font size, so that margin
+   only grows.
    Only this pair is outlined; .sidebar-reload-btn stays a ghost button, being an
-   icon-only affordance in the header rather than one of the two MyNotes draws. */
+   icon-only affordance in the header rather than one of the two the spec covers. */
 .sidebar-theme-toggle,
 .sidebar-settings-link {
   display: inline-flex;
   align-items: center;
+  /* The pair must not shrink. `flex-wrap: nowrap` on the footer does not prevent
+     that — a flex item shrinks before it overflows, and these are saved only by
+     `min-width: auto` resolving to the nowrap content width. A `min-width: 0`
+     reset reaching them would let the labels silently clip with no ellipsis, so
+     overflow is made the only possible failure instead. It is not a local one:
+     .sidebar has `overflow-y: auto`, which computes `overflow-x` to `auto` too,
+     so the footer overflowing puts a horizontal scrollbar under the whole
+     sidebar. Visible, which is the point. */
+  flex-shrink: 0;
   gap: 6px;
-  padding: 6px 7px;
+  padding: 4px 8px;
   border: 1px solid var(--border);
   border-radius: var(--border-radius);
   background: none;
   color: var(--sidebar-muted);
   text-decoration: none;
   font-family: inherit;
-  font-size: 0.85rem;
+  font-size: 0.80rem;
+  line-height: 1.5;
+  /* These three are no-ops today and pinned anyway: the two controls compute the
+     same values from different places, so they match by luck rather than by
+     contract. A <button> takes weight and style from the UA `font` shorthand and
+     its alignment from a separate UA `text-align: center`, inheriting none of the
+     three; the Settings <a> inherits all three from `body`. Anything that ever
+     sets a base weight would move one and not the other, and the UA values differ
+     between engines besides. text-align is
+     `center` because that is what a <button> already computes — it reaches the
+     toggle's stacked label, where `start` would shift the shorter word 1px. */
+  font-weight: 400;
+  font-style: normal;
+  text-align: center;
   white-space: nowrap;
   cursor: pointer;
   transition: background 0.12s, color 0.12s, border-color 0.12s;
@@ -344,8 +394,38 @@ html, body {
   border-color: var(--text-faint);
   color: var(--text-primary);
 }
+/* A real outline, not this file's usual `outline: none` + --focus-ring shadow.
+   That ring composites to 1.288:1 in light and 1.501:1 in dark against the panel
+   it sits on, where WCAG 1.4.11 (Non-text Contrast, AA) wants 3:1 of a focus
+   indicator — so it replaced a compliant browser outline with a nearly invisible
+   one. Raising its alpha cannot fix it: a `box-shadow` with no offset is painted
+   directly against the button's own 1px --border, and in dark that border caps
+   the achievable contrast at 2.803:1 even with the ring fully opaque.
+
+   `outline-offset` is what does the work. It lifts the outline clear of the
+   border, so both of the outline's neighbours are the panel background instead:
+   --primary measures 5.169:1 on white and 3.991:1 on #1f2937. 2px also meets
+   the minimum indicator area of 2.4.13 (Focus Appearance, AAA) — a 2px
+   perimeter — exactly, so do not thin it. The offset plus the outline extend 4px
+   outside the border box and .sidebar is a scroll container in both axes, so
+   .sidebar-footer's 8px of padding is what keeps them from being cropped: a
+   footer padding below 4px would silently start truncating the indicator.
+
+   An outline is painted under forced colours, where a box-shadow is not, so no
+   `forced-colors` fallback is needed here — and one that reverted the outline
+   would undo this rule rather than help it.
+
+   --focus-ring itself stays: 17 other rules in this file still use it, and they
+   have the same problem — including .folder-item a and .sidebar-reload-btn, in
+   this same sidebar, so tabbing down it watches the indicator come and go. This
+   pair is what the shared MySuite spec covers; fixing the rest is not a
+   find-replace, since several of those are inputs in tight containers where a 4px
+   outward outline needs the same clearance check this rule got. */
 .sidebar-theme-toggle:focus-visible,
-.sidebar-settings-link:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+.sidebar-settings-link:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
+}
 
 /* ── Top bar ── */
 .topbar {

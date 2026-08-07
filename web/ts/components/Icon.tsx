@@ -4,7 +4,7 @@ import { LUCIDE_ICON_NODES } from 'lucide-icons';
 interface Props {
   /** Canonical kebab-case Lucide icon name (e.g. "trash-2"). */
   name: string;
-  /** Pixel width/height of the square icon. Defaults to Lucide's 24. */
+  /** Pixel width/height of the square icon. Defaults to 16, not Lucide's 24. */
   size?: number;
   /** Stroke width. Lucide's default is 2. */
   strokeWidth?: number;

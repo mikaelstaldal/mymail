@@ -41,10 +41,10 @@ function FolderItem({ folder, active }: FolderItemProps) {
   );
 }
 
-// The same control MyNotes puts in its sidebar footer: the icon shows the theme
-// you would switch *to*, not the one in effect. It subscribes rather than
-// reading the stored value once, so flipping the equivalent switch in
-// Preferences moves this button too.
+// The same control MyCal and MyNotes put in their sidebar footers: the icon
+// shows the theme you would switch *to*, not the one in effect. It subscribes
+// rather than reading the stored value once, so flipping the equivalent switch
+// in Preferences moves this button too.
 function ThemeToggle() {
   const [theme, setThemeState] = useState<Theme>(getTheme);
   useEffect(() => onThemeChange(setThemeState), []);
@@ -59,13 +59,21 @@ function ThemeToggle() {
       aria-pressed={dark}
       onClick={() => setThemeState(toggleTheme())}
     >
-      <Icon name={dark ? 'sun' : 'moon'} class="folder-icon" />
-      {/* One word, not "Dark mode": the two buttons share a 220px sidebar and
-          the full phrase leaves single-digit pixels of slack, which the first
-          slightly wider font wipes out. Both words sit in the same grid cell so
-          the button is the width of the longer one either way, and toggling
-          cannot shift the Settings link beside it. `aria-label` above already
-          names the button, so this text is decoration. */}
+      {/* No `folder-icon` here, unlike the folder rows: that class exists to dim
+          the icon to 0.85, and the footer pair is spec'd at full opacity in all
+          three apps. */}
+      <Icon name={dark ? 'sun' : 'moon'} />
+      {/* One word, not "Dark mode": the two buttons share a 13.75rem sidebar,
+          which at the default root leaves 203px for them. Measured in Chromium in
+          the default UI font, one-word labels take 174px where "Dark mode" and
+          "Light mode" take 214px — 11px past the edge, and the row does not wrap.
+          Those two figures are a reading taken once, not something a test holds
+          to; a wider font eats the margin from the same end. Both the column and
+          the buttons are rem-sized, so that ratio holds as the root font grows.
+          Both words sit in the same grid cell, so the button is the width of the
+          longer one either way and toggling cannot shift the Settings link beside
+          it. `aria-label` above already names the button, so this text is
+          decoration. */}
       <span class="sidebar-theme-label" aria-hidden="true">
         <span class={dark ? 'is-shown' : ''}>Light</span>
         <span class={dark ? '' : 'is-shown'}>Dark</span>
@@ -130,7 +138,7 @@ export function Sidebar({ folders, activeSlug }: SidebarProps) {
       <div class="sidebar-footer">
         <ThemeToggle />
         <a href="#/settings" class="sidebar-settings-link">
-          <Icon name="settings" class="folder-icon" />
+          <Icon name="settings" />
           Settings
         </a>
       </div>

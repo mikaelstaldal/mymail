@@ -962,8 +962,17 @@ On first load the UI reads `localStorage` for the last selected folder and navig
 ### Settings Navigation
 
 The sidebar footer holds two controls: a light/dark mode button, and — to its right — a gear icon that opens
-`/#/settings`. Both are drawn as outlined buttons, matching MyNotes' equivalent pair. The mode button's icon shows
-the theme it would switch *to* (a moon in light mode, a sun in dark), and it writes the same stored preference as
+`/#/settings`. Both are drawn as outlined buttons, to the geometry MyCal and MyNotes draw the same pair at, so the
+three read as one product: 4px/8px padding inside a 1px border at the shared `--border-radius`, 0.80rem text over
+a 1.5 line-height, 16px icons at full opacity (unlike the folder rows, which dim theirs), a 6px gap between the
+two buttons and a 6px gap from each icon to its label — 19.2px of line box plus 8px of padding plus 2px of border,
+so 29.2px high at the default 16px root font size. The separator above them spans the full width of the sidebar;
+the 8px the buttons are inset by is the footer's own padding. Focus is shown with a 2px `--primary` outline at a
+2px offset rather than a translucent ring: WCAG 1.4.11 (Non-text Contrast, AA) requires a focus indicator to reach
+3:1 against what it sits on, and a ring drawn tight against the button's own border cannot. The sidebar column is
+sized in `rem` for the same reason the buttons are — a fixed column would let a reader's larger browser font grow
+them out of it, which is WCAG 1.4.4 (Resize Text). The mode button's icon shows the
+theme it would switch *to* (a moon in light mode, a sun in dark), and it writes the same stored preference as
 the Preferences tab's dark mode switch. The page uses a tabbed layout:
 
 | Tab slug      | Content              |
