@@ -183,7 +183,9 @@ html, body {
    reader's browser font setting. The footer's two buttons are rem-sized by the
    shared MySuite spec, so a px column would have let them outgrow it — Chrome's
    "Large" (20px) and "Very Large" (24px) settings would push Settings over the
-   content beside it, which is WCAG 1.4.4. Both sides must scale or neither. */
+   content beside it, which is WCAG 1.4.4. The buttons do not scale purely — their
+   padding, border and 16px icons are px — but their text does, and a px column
+   would not have moved at all. */
 .app {
   display: grid;
   grid-template-rows: auto 1fr auto;
@@ -327,22 +329,28 @@ html, body {
 
 /* Outlined, and geometrically identical to the same pair in MyCal and MyNotes:
    the three apps share one spec for this footer, so the buttons must measure the
-   same in all of them. Every number below is that spec, not a local choice —
+   same in all of them. It is `spec/sidebar-footer.md` in the sibling `mysuite`
+   repo (../mysuite), which is where a change to any of this has to start:
+   changing any of this is a change in all three repositories, however local the
+   edit looks from here. Every number below is that spec, not a local choice —
    including the trailing zero in `0.80rem`, which is the shared value written the
    way all three repos write it, so a grep finds them together. It is the only
-   trailing zero in this file — `0.8rem`, the identical computed value in ordinary
-   spelling, appears ~37 times elsewhere — so the distinction is a convention and
-   nothing more. Any formatter would collapse it and no test here would notice.
+   font size spelled that way here — `0.8rem`, the identical computed value in
+   ordinary spelling, is what the rest of the file uses — so the distinction is a
+   convention and nothing more. Any formatter would collapse it and no test here
+   would notice.
    0.80rem over a 1.5 line-height is a 19.2px line box, and 4px of padding plus
    1px of border on each side makes the outer height exactly 29.2px at the
-   default 16px root size (it is rem-based, so it scales with the reader's
-   browser font setting — 29.2px is the agreed reference, not an absolute).
+   default 16px root size. Only the text is rem-based; the padding and border are
+   px, so at another root size the box does not scale proportionally — 29.2px is
+   the agreed reference measurement, not a constant.
    line-height is stated rather than inherited so the height survives a change
-   to `body`. The size is set by the narrowest of the three sidebars, not by
+   to `body`. The size was set by the narrowest of the three sidebars, not by
    this one: on MyMail's 13.75rem sidebar the pair measures 174px of the 203px
-   available at the default root and in the default UI font, where MyCal has
-   ~10px of slack. Both scale together with the root font size, so that margin
-   only grows.
+   available, at the default root and in the default UI font. Both scale
+   together with the root font size, so that margin only grows. The sibling
+   apps' budgets are in the shared spec and deliberately not repeated here — a
+   copy of a number that lives in another repo is a copy that goes stale.
    Only this pair is outlined; .sidebar-reload-btn stays a ghost button, being an
    icon-only affordance in the header rather than one of the two the spec covers. */
 .sidebar-theme-toggle,
@@ -415,9 +423,11 @@ html, body {
    `forced-colors` fallback is needed here — and one that reverted the outline
    would undo this rule rather than help it.
 
-   --focus-ring itself stays: 17 other rules in this file still use it, and they
-   have the same problem — including .folder-item a and .sidebar-reload-btn, in
-   this same sidebar, so tabbing down it watches the indicator come and go. This
+   --focus-ring itself stays: many other rules in this file still use it, and
+   they have the same problem — including .folder-item a and .sidebar-reload-btn,
+   in this same sidebar, so tabbing down it watches the indicator come and go.
+   (Count them when you need the number; a figure written here is one no test
+   can hold to.) This
    pair is what the shared MySuite spec covers; fixing the rest is not a
    find-replace, since several of those are inputs in tight containers where a 4px
    outward outline needs the same clearance check this rule got. */

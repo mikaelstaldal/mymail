@@ -962,18 +962,36 @@ On first load the UI reads `localStorage` for the last selected folder and navig
 ### Settings Navigation
 
 The sidebar footer holds two controls: a light/dark mode button, and — to its right — a gear icon that opens
-`/#/settings`. Both are drawn as outlined buttons, to the geometry MyCal and MyNotes draw the same pair at, so the
-three read as one product: 4px/8px padding inside a 1px border at the shared `--border-radius`, 0.80rem text over
-a 1.5 line-height, 16px icons at full opacity (unlike the folder rows, which dim theirs), a 6px gap between the
-two buttons and a 6px gap from each icon to its label — 19.2px of line box plus 8px of padding plus 2px of border,
-so 29.2px high at the default 16px root font size. The separator above them spans the full width of the sidebar;
-the 8px the buttons are inset by is the footer's own padding. Focus is shown with a 2px `--primary` outline at a
-2px offset rather than a translucent ring: WCAG 1.4.11 (Non-text Contrast, AA) requires a focus indicator to reach
-3:1 against what it sits on, and a ring drawn tight against the button's own border cannot. The sidebar column is
-sized in `rem` for the same reason the buttons are — a fixed column would let a reader's larger browser font grow
-them out of it, which is WCAG 1.4.4 (Resize Text). The mode button's icon shows the
-theme it would switch *to* (a moon in light mode, a sun in dark), and it writes the same stored preference as
-the Preferences tab's dark mode switch. The page uses a tabbed layout:
+`/#/settings`.
+
+**These two are a shared MySuite contract, not MyMail's to define.** MyCal, MyNotes and MyMail must render them
+identically, so that someone with all three open in browser tabs sees nothing move when switching between them.
+Their geometry, colours, hover and focus treatment, the width-stable label, and their position on screen are
+specified in **`spec/sidebar-footer.md` in the `mysuite` repository** (`../mysuite`, alongside this one — no
+remote yet, so it is referenced by path). **Changing any of this is a change in all three repositories.** The
+shared values — the box geometry, the colours, the focus treatment, the (8, 8) position — are deliberately not
+repeated here, because a second copy is what goes stale. What follows is only what is MyMail's own; where a number
+below is also in the contract, it is there as MyMail's budget rather than as the shared value.
+
+What is MyMail's own, and stays here:
+
+- The Settings control is an **`<a href="#/settings">`**, where the sibling apps use a `<button>`. It carries the
+  identical rule plus `text-decoration: none`, and takes its accessible name from its own text rather than from a
+  `title`/`aria-label` pair. One consequence is user-visible and deliberately left alone for now: with no `title`,
+  hovering it shows no native tooltip, where the sibling apps' buttons do. The accessible name is `Settings` in all
+  three either way. Tracked in the contract's open items, to be settled across all three rather than here.
+- The footer separator resolves through **`--sidebar-footer-border`**, a MyMail-local alias for `--border`, so the
+  rule does not reach past the sidebar's token layer. Its value is the contract's; the indirection is not.
+- **`--focus-ring` is still MyMail's focus token** and is used by many other rules. These two controls simply stop
+  using it; the token stays.
+- The sidebar column is **`13.75rem`**, not a pixel width: the buttons are sized in `rem`, so a fixed column would
+  let a reader's larger browser font grow them out of it — WCAG 1.4.4 (Resize Text). At the default root that
+  leaves **203px** of content box for the pair, which is MyMail's own budget and the reason a wider label does not
+  fit (see `Sidebar.tsx`).
+- The mode button writes the same stored preference as the Preferences tab's dark mode switch; either control
+  moves the other.
+
+The Settings page itself uses a tabbed layout:
 
 | Tab slug      | Content              |
 |---------------|----------------------|

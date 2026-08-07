@@ -7,6 +7,41 @@ A self-hosted personal (single-user) email client with backend storage, REST API
 Adhere to the functional requirements in `spec/REQUIREMENTS.md` and the architecture in `spec/ARCHITECTURE.md`.
 Update those when functionality is added or changed.
 
+Some UI is **not MyMail's to define**. MyMail is one of three sibling apps — MyCal, MyMail, MyNotes — that must
+look like one product, and the elements required to be identical across them are specified in the `mysuite`
+repository (`../mysuite`, alongside this one; no remote yet, so it is referenced by path). Read
+`../mysuite/AGENTS.md` before changing anything it covers, and make the change there first: **changing any of it
+is a change in all three repositories**, however local the edit looks from here. Currently binding:
+`spec/sidebar-footer.md`, the theme toggle and Settings button in the sidebar footer.
+
+### Edits that silently break that contract
+
+The rule for `.sidebar-theme-toggle, .sidebar-settings-link` in `web/static/app.css` looks like ordinary CSS with
+a verbose comment. Every declaration in it is load-bearing, nothing in this repo tests any of it, and MyMail has
+no e2e suite — so each of the following is a plausible tidy-up that breaks the suite's consistency with no test
+failing anywhere:
+
+- **Normalising `0.80rem` to `0.8rem`.** The trailing zero is the convention that makes one grep find the value in
+  all three repos. The rest of this file uses `0.8rem`, so the canonical spelling looks like the odd one out — and
+  any formatter would "fix" it unprompted.
+- **Deleting `flex-shrink: 0`, `text-align: center`, `font-weight: 400` or `font-style: normal` as redundant.**
+  They are no-ops *today*, pinned because the two controls reach the same values by different routes: the toggle
+  is a `<button>` taking them from the UA stylesheet, Settings is an `<a>` inheriting them from `body`.
+- **Adding `font-weight`, `font-style` or `font` to a base `button` rule.** That moves the toggle and not the
+  anchor — a divergence inside one app, between two controls 6px apart.
+- **Restoring `outline: none` on their `:focus-visible`,** or adding a `@media (forced-colors: active)` block
+  containing `outline: revert`. Both silently undo a WCAG 1.4.11 fix; the second looks like it is protecting it.
+- **Removing `--focus-ring` as unused.** These two controls no longer use it, but many other rules still do.
+- **Re-adding `class="folder-icon"` to the two footer icons.** It dims them to `opacity: 0.85`; the contract wants
+  full opacity.
+- **Changing `.sidebar-footer`'s padding.** It is not spacing — it *is* the buttons' (8, 8) position on screen,
+  and below 4px it starts cropping the focus outline.
+- **Folding the pair into a generic icon-button class**, or renaming either selector.
+
+Also: `web/static/` is embedded with `//go:embed`, so **a running server keeps serving the CSS it started with**.
+Rebuilding does not change what an already-running server serves, and a stale measurement looks exactly like a
+passing one. See `../mysuite/spec/measurement-protocol.md` before measuring anything here.
+
 ## Build & Development Commands
 
 **Prerequisites:** `go` must be on PATH. `build.sh` additionally needs `tsc` (TypeScript compiler), `openapi-typescript`, `ogen` (Go code generator), `golangci-lint`, and `node` (for the frontend tests). No package manager is required — jsdom is unpacked from a committed tarball with `tar`.
