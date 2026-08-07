@@ -37,6 +37,15 @@ failing anywhere:
 - **Changing `.sidebar-footer`'s padding.** It is not spacing — it *is* the buttons' (8, 8) position on screen,
   and below 4px it starts cropping the focus outline.
 - **Folding the pair into a generic icon-button class**, or renaming either selector.
+- **Retuning `--surface`.** It looks like an ordinary theme colour — it also feeds `--topbar-bg`,
+  `--surface-bg` and `.btn-ghost` — but the sidebar paints it, so it is the colour behind these two
+  controls, and the contract records that colour per app as a literal (`#ffffff` light, `#1f2937` dark).
+  Moving it is a spec change, and the margins are thin. Light has 0.334 of headroom on WCAG 1.4.3 for
+  the label: `#f9fafb` still passes at 4.626:1, `#f3f4f6` fails at 4.393:1 — which is why MyCal deviates
+  from the shared label colour rather than us sharing its backdrop. Dark has room for about two shades
+  before both gates go: lightening toward `#374151`, the label loses 1.4.3 around `#313b4a` and the
+  outline loses 1.4.11 around `#333d4c`; at `#374151` — this file's own dark border colour, so a
+  plausible pick — they are 4.060:1 and 2.803:1.
 
 Also: `web/static/` is embedded with `//go:embed`, so **a running server keeps serving the CSS it started with**.
 Rebuilding does not change what an already-running server serves, and a stale measurement looks exactly like a
