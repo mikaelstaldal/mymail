@@ -26,10 +26,16 @@ mymail/
 │   ├── repository/           # SQLite data access layer
 │   ├── sanitize/             # HTML sanitization
 │   └── service/              # Business logic
-└── web/                      # Embedded frontend assets
+├── web/                      # Embedded frontend assets
+├── e2e/                      # Playwright end-to-end tests (own package.json; not part of build.sh)
+└── test-e2e.sh               # Builds nothing; starts a fresh server and runs e2e/
 ```
 
 Web UI assets embedded in the binary via `//go:embed`.
+
+`e2e/` is deliberately outside `build.sh`: that script must keep working without a
+browser toolchain, so Playwright is installed by the CI workflow instead. The suite
+runs after the build and gates publication — see `AGENTS.md` § E2E Tests.
 
 
 ## Web UI

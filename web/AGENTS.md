@@ -9,26 +9,39 @@ paths here are written relative to the repo root, as they are there.
 ## Edits that silently break that contract
 
 The rule for `.sidebar-theme-toggle, .sidebar-settings-link` in `web/static/app.css` looks like ordinary CSS with
-a verbose comment. Every declaration in it is load-bearing, nothing in this repo tests any of it, and MyMail has
-no e2e suite — so each of the following is a plausible tidy-up that breaks the suite's consistency with no test
-failing anywhere:
+a verbose comment. Every declaration in it is load-bearing, and each of the following is a plausible tidy-up that
+breaks the suite's consistency.
+
+**`e2e/tests/sidebar-footer.spec.ts` now catches most of them**, and gates publication in CI (see the repo-root
+`AGENTS.md` § E2E Tests). It is a real change from the state this section was written in, and it is not a licence
+to stop reading: the first item below is catchable by no test at all, and a green suite bounds what was checked
+rather than what is correct. Each item says where it stands.
 
 - **Normalising `0.80rem` to `0.8rem`.** The trailing zero is the convention that makes one grep find the value in
   all three repos. The rest of this file uses `0.8rem`, so the canonical spelling looks like the odd one out — and
-  any formatter would "fix" it unprompted.
+  any formatter would "fix" it unprompted. **Not catchable by any test** — the computed *and* serialised values are
+  identical, so nothing in the CSSOM or the rendering can distinguish them. Held by review alone; the only thing
+  anywhere that sees it is `../mysuite/tools/check-contract.py`, which nobody's CI runs.
 - **Deleting `flex-shrink: 0`, `text-align: center`, `font-weight: 400` or `font-style: normal` as redundant.**
   They are no-ops *today*, pinned because the two controls reach the same values by different routes: the toggle
-  is a `<button>` taking them from the UA stylesheet, Settings is an `<a>` inheriting them from `body`.
-- **Adding `font-weight`, `font-style` or `font` to a base `button` rule.** That moves the toggle and not the
-  anchor — a divergence inside one app, between two controls 6px apart.
+  is a `<button>` taking them from the UA stylesheet, Settings is an `<a>` inheriting them from `body`. Caught by
+  *the pinned declarations are actually declared, not inherited*, which reads the rule off the CSSOM — deleting
+  any of them changes nothing the toggle renders, which is the whole reason a computed-value test cannot hold them.
+- **Adding `font-weight`, `font-style` or `font` to a base `button` rule.** That would move the toggle and not the
+  anchor — a divergence inside one app, between two controls 6px apart. The class selector outranks a bare `button`
+  rule, so the pin above is what makes this harmless: this item is the reason that one exists, not a separate risk.
 - **Restoring `outline: none` on their `:focus-visible`,** or adding a `@media (forced-colors: active)` block
   containing `outline: revert`. Both silently undo a WCAG 1.4.11 fix; the second looks like it is protecting it.
+  Caught by the two *focus indicator meets 3:1* tests and by *controls keep a focus indicator under forced colors*.
 - **Removing `--focus-ring` as unused.** These two controls no longer use it, but many other rules still do.
+  **Not covered here** — this suite asserts nothing about the rules that still read it.
 - **Re-adding `class="folder-icon"` to the two footer icons.** It dims them to `opacity: 0.85`; the contract wants
-  full opacity.
+  full opacity. Caught by *the footer icons are 16px and at full opacity*.
 - **Changing `.sidebar-footer`'s padding.** It is not spacing — it *is* the buttons' (8, 8) position on screen,
-  and below 4px it starts cropping the focus outline.
-- **Folding the pair into a generic icon-button class**, or renaming either selector.
+  and below 4px it starts cropping the focus outline. Caught by every (8, 8) test, and the floor itself by *the
+  focus outline has its 4px of clearance on the window-facing sides*.
+- **Folding the pair into a generic icon-button class**, or renaming either selector. Caught: the CSSOM test
+  matches the pair's selector text exactly, and every locator in the spec is one of the two class names.
 - **Retuning `--surface`.** It looks like an ordinary theme colour — it also feeds `--topbar-bg`,
   `--surface-bg` and `.btn-ghost` — but the sidebar paints it, so it is the colour behind these two
   controls, and the contract records that colour per app as a literal (`#ffffff` light, `#1f2937` dark).
@@ -37,11 +50,13 @@ failing anywhere:
   from the shared label colour rather than us sharing its backdrop. Dark has room for about two shades
   before both gates go: lightening toward `#374151`, the label loses 1.4.3 around `#313b4a` and the
   outline loses 1.4.11 around `#333d4c`; at `#374151` — this file's own dark border colour, so a
-  plausible pick — they are 4.060:1 and 2.803:1.
+  plausible pick — they are 4.060:1 and 2.803:1. Caught by *resting label meets 4.5:1* and *focus indicator meets
+  3:1*, in both themes — they assert the thresholds, so a retune that stays inside them passes, correctly.
 
 Also: `web/static/` is embedded with `//go:embed`, so **a running server keeps serving the CSS it started with**.
 Rebuilding does not change what an already-running server serves, and a stale measurement looks exactly like a
-passing one. See `../mysuite/spec/measurement-protocol.md` before measuring anything here.
+passing one. See `../mysuite/spec/measurement-protocol.md` before measuring anything here — and run the suite with
+`./build.sh && ./test-e2e.sh`, which does the whole sequence including the md5 served-vs-disk check.
 
 ## Build & Development Commands
 

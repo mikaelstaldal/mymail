@@ -1,0 +1,31 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "strict": true,
+    "noEmit": true,
+    // Playwright transpiles the specs without type-checking them, so this file is
+    // only worth anything if `tsc -p e2e/tsconfig.json` actually runs clean —
+    // otherwise a real error in the spec is indistinguishable from the noise and
+    // nobody looks. Measured in this tree with the MyCal-style config this
+    // started as (target ES2020, no skipLibCheck): **96 errors, none of them in
+    // tests/**. MyNotes measured 96 for its own tests; MyCal's own tree gives 100,
+    // the difference being its extra spec files.
+    //
+    // An earlier version of this comment said "~30", which was not a smaller
+    // measurement but a miscount: the run had been piped through `head -20`, so it
+    // reported the lines that fitted. Use `-p` and count the whole output — file
+    // arguments make tsc ignore this file entirely and resolve libs differently,
+    // which is a different program, not a shorter run of the same one.
+    //
+    // The noise is entirely playwright-core's own types: they reference Node
+    // globals (Buffer, fs, stream, child_process) that need @types/node, and
+    // Symbol.asyncDispose, which needs a lib above ES2020. skipLibCheck drops the
+    // first set, ES2022 the second — neither weakens checking of tests/**.
+    // @types/node is deliberately not added: it would be a second dependency in a
+    // lockfile whose being single-dependency is the reason it is reviewable.
+    "skipLibCheck": true
+  },
+  "include": ["tests/**/*.ts"]
+}

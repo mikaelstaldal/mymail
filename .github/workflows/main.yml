@@ -66,6 +66,48 @@ jobs:
       - name: Build
         run: ./build.sh
 
+      # Playwright is deliberately NOT a build.sh dependency: build.sh has to keep
+      # working for anyone who does not have a browser toolchain, so the e2e
+      # wiring lives here instead. The version comes from e2e/package-lock.json
+      # via `npm ci`, and `playwright install --with-deps` then fetches the
+      # browser build that version expects — the two are matched, so neither is
+      # pinned separately here.
+      #
+      # After ./build.sh, not before: downloading a browser costs a minute or so
+      # and nothing here depends on it, so a compile or lint failure should not
+      # pay for it.
+      - name: Install Playwright
+        working-directory: e2e
+        run: |
+          npm ci --ignore-scripts
+          npx playwright install --with-deps chromium
+
+      # Gates publishing rather than running alongside it: these assertions are
+      # this repo's whole half of the cross-repo sidebar-footer contract (see
+      # AGENTS.md), and nothing else in this repo checks any of it, so a build
+      # that breaks it must not reach Pages or the release. test-e2e.sh starts the
+      # server from the binary ./build.sh just produced — one built at a different
+      # time would embed different web/static/, and the suite would be measuring
+      # something other than this commit. 12.8s wall clock for 33 tests, read
+      # locally in this container — a runner's figure will differ.
+      - name: End-to-end tests
+        run: ./test-e2e.sh
+
+      # Without this a failure here yields only the list reporter's text, and a
+      # geometry assertion ("expected 8, received 9.5") is close to undebuggable
+      # from that alone. The suite gates Pages and the release, so a red run has
+      # to leave enough behind to diagnose it without reproducing locally.
+      - name: Upload e2e artifacts
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-results
+          path: |
+            e2e/test-results/
+            e2e/playwright-report/
+          retention-days: 7
+          if-no-files-found: ignore
+
       # base_url carries the full public URL, including a custom domain if one
       # is configured, so the bundle's <base href> matches wherever Pages
       # actually serves it.

@@ -23,10 +23,15 @@ web/static/**/*.js
 /DOING.md
 /DONE.md
 
-# End to end tests
+# End to end tests. test-e2e.sh uses a mktemp data directory it removes itself,
+# but a server started by hand from e2e/ defaults -data to ./data/.
 /e2e/node_modules/
 /e2e/test-results/
 /e2e/playwright-report/
+/e2e/data/
+/e2e/.playwright
+/e2e/.playwright-mcp
+/e2e/.playwright-cli
 
 # Vendor rebuild scratch (web/ts/vendor/rebuild.sh) — throwaway, never committed.
 # jsdom can't be bundled, so its install tree is vendored as the committed

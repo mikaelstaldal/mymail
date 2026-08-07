@@ -225,6 +225,51 @@ Each layer has its own test scope:
 
 Place tests in `_test.go` files alongside the package under test. Use table-driven tests for endpoint/edge-case coverage.
 
+## E2E Tests
+
+Playwright end-to-end tests live in `e2e/`. **Run them with `./build.sh && ./test-e2e.sh`** — that
+script is what CI runs, and it initialises a fresh database, starts the server itself, checks the
+server is actually serving the assets on disk, and tears both down afterwards. It takes the same
+arguments as `playwright test`, so `./test-e2e.sh tests/sidebar-footer.spec.ts -g "focus"` works.
+
+`tests/sidebar-footer.spec.ts` is this repo's whole half of the cross-repo sidebar-footer contract
+(see § Specification and `web/AGENTS.md`). Nothing else in this repo checks any of it, and the suite
+gates publication in CI — it runs after `./build.sh` and before the demo bundle and the release.
+
+Prefer it over starting a server by hand. The three things it exists to prevent are easy to hit and
+none of them announces itself:
+
+- **A stale server.** `web/static/` is baked into the binary with `//go:embed`, so a running
+  `./mymail` keeps serving the CSS and JS it started with — `./build.sh` alone changes nothing it
+  serves. The suite then passes or fails against assets that are not the ones you edited. When a
+  measurement disagrees with the source, check this first:
+  ```bash
+  curl -s http://localhost:8090/app.css | md5sum   # must match
+  md5sum web/static/app.css
+  ```
+- **A stale database, or someone else's server on the port.** Reusing a data directory is how an
+  "empty" run silently becomes a run against whatever the last one left behind; and if something
+  already holds 8090, a hand-started server exits on bind failure while the tests run happily
+  against the squatter.
+- **A server that never started.** MyMail will not serve from an empty data directory — `-init` has
+  to have run first, and `-init` itself requires `-identity-address`. The script does both.
+
+If you do start one by hand, `-public-url` must match the test baseURL origin
+(`http://localhost:8090`), or CSRF rejects mutating requests with 403. Not *every* mutating request:
+`go-server-common`'s `csrf.Middleware` allows a non-GET carrying neither `Origin` nor `Referer`
+("native client, allow"), so curl and Playwright's `request` fixture pass a mismatched `-public-url`
+while anything originating from the page does not. Measured against a mismatched value: no
+Origin/Referer → 201, page Origin → 403, Referer only → 403. It binds on this suite because the
+fixtures create folders with `fetch` from inside the page, and it would bite the same way for a test
+that clicked Save.
+
+You will also need `-sendmail` pointing at something that exists, since the path is resolved at
+startup.
+
+*Important:* interactively, use the `playwright-test` command from `e2e/` and nothing else —
+do not invent variants. `test-e2e.sh` falls back to `./node_modules/.bin/playwright test` when
+that wrapper is absent, which is the case in CI; that fallback is sanctioned and is the only one.
+
 ## Important Implementation Notes
 
 - **`references` quoting:** always use `"references"` (quoted) in SQL, never bare.
