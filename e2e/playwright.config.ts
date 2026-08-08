@@ -18,9 +18,12 @@ export default defineConfig({
     // `on-first-retry` captures nothing while retries are 0 — a pairing MyCal's
     // config shipped with for a while, so a CI failure there left only the list
     // reporter's text behind. These assertions are geometry ("expected 8,
-    // received 9.5"), which is near-undebuggable without a trace, and the suite
-    // gates publishing. Retries stay at 0: a flaky gate trains people to re-run
-    // red builds, and the first real failure gets re-run with them.
+    // received 9.5"), which is near-undebuggable without a trace, and the
+    // committed workflow step puts this suite before publication. (That step has
+    // never executed — the workflow triggers on push to `main` and this branch is
+    // unpushed — so the artefacts matter first for whoever runs it locally.)
+    // Retries stay at 0: a flaky gate trains people to re-run red builds, and the
+    // first real failure gets re-run with them.
     trace: 'retain-on-failure',
     screenshot: 'only-on-failure',
   },

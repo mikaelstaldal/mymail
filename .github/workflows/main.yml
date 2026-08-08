@@ -82,10 +82,18 @@ jobs:
           npm ci --ignore-scripts
           npx playwright install --with-deps chromium
 
-      # Gates publishing rather than running alongside it: these assertions are
-      # this repo's whole half of the cross-repo sidebar-footer contract (see
-      # AGENTS.md), and nothing else in this repo checks any of it, so a build
-      # that breaks it must not reach Pages or the release. test-e2e.sh starts the
+      # Placed to gate publishing rather than to run alongside it: these
+      # assertions are this repo's whole half of the cross-repo sidebar-footer
+      # contract (see AGENTS.md), and nothing else in this repo checks any of it,
+      # so a build that breaks it must not reach Pages or the release.
+      #
+      # Placed, not proven: this step has never executed. The workflow triggers on
+      # push to `main` (see `on:` above) and the branch that adds it is unpushed,
+      # so the first such push is also the first run of `npm ci`, of
+      # `playwright install`, and of the suite anywhere but a developer's machine.
+      # Do not describe it as a gate elsewhere in the repo until it has run once.
+      #
+      # test-e2e.sh starts the
       # server from the binary ./build.sh just produced — one built at a different
       # time would embed different web/static/, and the suite would be measuring
       # something other than this commit. 12.8s wall clock for 33 tests, read
@@ -95,8 +103,9 @@ jobs:
 
       # Without this a failure here yields only the list reporter's text, and a
       # geometry assertion ("expected 8, received 9.5") is close to undebuggable
-      # from that alone. The suite gates Pages and the release, so a red run has
-      # to leave enough behind to diagnose it without reproducing locally.
+      # from that alone. Once this workflow does run, the suite stands between the
+      # build and both Pages and the release, so a red run has to leave enough
+      # behind to diagnose it without reproducing locally.
       - name: Upload e2e artifacts
         if: failure()
         uses: actions/upload-artifact@v4

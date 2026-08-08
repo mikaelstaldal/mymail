@@ -34,8 +34,11 @@ mymail/
 Web UI assets embedded in the binary via `//go:embed`.
 
 `e2e/` is deliberately outside `build.sh`: that script must keep working without a
-browser toolchain, so Playwright is installed by the CI workflow instead. The suite
-runs after the build and gates publication — see `AGENTS.md` § E2E Tests.
+browser toolchain, so Playwright is installed by the CI workflow instead. The
+workflow step is committed to run after the build and before publication, but it
+**has never executed** — the workflow triggers on push to `main` and the branch
+carrying it is unpushed, so today the suite runs only when someone runs it. See
+`AGENTS.md` § E2E Tests.
 
 
 ## Web UI

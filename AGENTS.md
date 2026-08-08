@@ -230,13 +230,28 @@ Place tests in `_test.go` files alongside the package under test. Use table-driv
 ## E2E Tests
 
 Playwright end-to-end tests live in `e2e/`. **Run them with `./build.sh && ./test-e2e.sh`** from the
-repo root — that script is what CI runs, and it starts and tears down its own server and database.
+repo root — that script is the one the CI workflow invokes, and it starts and tears down its own
+server and database.
 
 `e2e/tests/sidebar-footer.spec.ts` is this repo's whole half of the cross-repo sidebar-footer
 contract (see § Specification and `web/AGENTS.md`). **Nothing else in this repo checks any of it**,
-and the suite gates publication in CI — it runs after `./build.sh` and before the demo bundle and
-the release. So a change to the sidebar footer that goes red there is not a test problem; read
-`../mysuite/spec/sidebar-footer.md` before touching the assertion.
+and — read this before relying on it — **nothing runs it automatically either.**
+
+The CI step is committed (`.github/workflows/main.yml`, after `./build.sh` and before the demo
+bundle and the release) and **has never executed**: the workflow triggers on push to `main`, and
+the branch this lands on is unpushed. `npm ci` and `playwright install` have never run anywhere.
+So the suite is *added*, not *covering* — the first push to `main` is the event that turns the
+committed step into a gate, and nothing before it does. Until then the only thing that runs this
+suite is a person typing `./build.sh && ./test-e2e.sh`.
+
+And note what that gate will and will not mean once it does run, because "gates publication" is
+the accurate claim and "prevents breakage" is not: the workflow triggers on `push` to `main`, so a
+breaking commit is already on `main` by the time the suite is red — what the gate will prevent is
+a broken contract reaching Pages or the rolling release, not the commit landing. (Wording taken
+from MyCal's `web/AGENTS.md`, where the step does run, so the three repos state this one way.)
+
+Treat a sidebar-footer change as unguarded and run it yourself. When it does go red, that is not
+a test problem; read `../mysuite/spec/sidebar-footer.md` before touching the assertion.
 
 How to run a single spec, why not to start a server by hand, and the CSRF, `-init` and `-sendmail`
 flags a hand-started server needs are in `e2e/AGENTS.md`, loaded automatically when working under

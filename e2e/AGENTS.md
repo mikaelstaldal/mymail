@@ -10,6 +10,12 @@ are in `../mysuite/spec/sidebar-footer.md`, and the list of ordinary-looking edi
 it silently is in `web/AGENTS.md`. Read those before changing an assertion; a value in this
 suite is almost never MyMail's to decide.
 
+**Nothing runs this suite but a person.** The CI step is committed and has never executed — the
+workflow triggers on push to `main` and this work is on an unpushed branch — so a change you make
+here is verified by you running it and by nothing else. That is a status fact rather than a
+mechanic, which is why it is stated in the root `AGENTS.md` too; the mechanics below are not
+repeated anywhere.
+
 ## Running one spec
 
 The root `AGENTS.md` has the command for the whole suite; it is not repeated here. What it does
