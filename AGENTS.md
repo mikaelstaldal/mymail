@@ -2,7 +2,7 @@
 
 A self-hosted personal (single-user) email client with backend storage, REST API, and embedded web UI.
 
-Frontend/web UI instructions — the TypeScript build and tests, the Preact conventions, and the CSS half of the MySuite contract — are in `web/AGENTS.md`, loaded automatically when working under `web/`.
+Frontend/web UI instructions — the TypeScript build and tests, the Preact conventions, and MyMail's half of the MySuite contracts — are in `web/AGENTS.md`, loaded automatically when working under `web/`.
 
 End-to-end test instructions — running one spec, and what a hand-started server needs before the suite will work against it — are in `e2e/AGENTS.md`, loaded automatically when working under `e2e/`.
 
@@ -17,7 +17,13 @@ repository (`../mysuite`, alongside this one — <https://github.com/mikaelstald
 because relative links resolve with the checkouts side by side, which its cross-repo check also assumes). Read
 `../mysuite/AGENTS.md` before changing anything it covers, and make the change there first: **changing any of it
 is a change in all three repositories**, however local the edit looks from here. Currently binding:
-`spec/sidebar-footer.md`, the theme toggle and Settings button in the sidebar footer.
+
+- `spec/sidebar-footer.md` — the theme toggle and Settings button in the sidebar footer.
+- `spec/app-logo.md` — the logo badge in the top left, and the mark inside it.
+
+Each has a section of its own in `web/AGENTS.md` naming the ordinary-looking edits that break it
+silently. **Read the logo's first**, because **nothing in this repository tests any of it** and its
+mark is a vendored third-party drawing that changes when the bundle does.
 
 ## Build & Development Commands
 
@@ -242,6 +248,11 @@ the release). It first executed on **2026-08-08**: runs **#11** (`0bb9773`) and 
 both push-to-`main`, both green, with `Install Playwright` and `End-to-end tests` succeeding in
 each. So the suite is *covering* rather than merely *added* — but only for what it asserts, which
 is the sidebar footer and nothing else.
+
+**This is the one place in the repo that holds those numbers**; everywhere else points here.
+Nothing in a checkout can confirm them, which is the same weakness as the claim they replaced, so
+re-derive rather than trust: `gh run list --workflow=main.yml` (or the public, unauthenticated
+`curl -s https://api.github.com/repos/mikaelstaldal/mymail/actions/runs`).
 
 > **This paragraph was wrong for a while and it is worth knowing how.** It said the step "has never
 > executed … the branch this lands on is unpushed", which was true when written and was falsified by

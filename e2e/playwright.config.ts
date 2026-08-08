@@ -21,7 +21,8 @@ export default defineConfig({
     // received 9.5"), which is near-undebuggable without a trace, and the workflow
     // step puts this suite before publication. (That step has run since 2026-08-08,
     // so these artefacts are what a red CI run leaves behind for whoever has to
-    // diagnose it without reproducing locally.)
+    // diagnose it without reproducing locally — and a local ./test-e2e.sh run
+    // leaves the same ones under e2e/test-results/.)
     // Retries stay at 0: a flaky gate trains people to re-run red builds, and the
     // first real failure gets re-run with them.
     trace: 'retain-on-failure',

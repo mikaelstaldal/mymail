@@ -10,9 +10,10 @@ are in `../mysuite/spec/sidebar-footer.md`, and the list of ordinary-looking edi
 it silently is in `web/AGENTS.md`. Read those before changing an assertion; a value in this
 suite is almost never MyMail's to decide.
 
-**CI runs this suite on every push to `main`, and first did so on 2026-08-08** (runs #11 and #12,
-both green — the evidence is in the root `AGENTS.md` § E2E Tests). Run it yourself before you push
-anyway: the trigger is `push`, so CI's answer arrives after the commit has landed. That is a status
+**CI runs this suite on every push to `main`, and first did so on 2026-08-08** — the run numbers,
+SHAs and the command to re-derive them are in the root `AGENTS.md` § E2E Tests, which is the one
+place that holds them. Run it yourself before you push anyway: the trigger is `push`, so CI's
+answer arrives after the commit has landed. That is a status
 fact rather than a mechanic, which is why it is stated in the root `AGENTS.md` too; the mechanics
 below are not repeated anywhere.
 

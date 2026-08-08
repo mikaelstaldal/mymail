@@ -87,12 +87,13 @@ jobs:
       # contract (see AGENTS.md), and nothing else in this repo checks any of it,
       # so a build that breaks it must not reach Pages or the release.
       #
-      # Proven, not merely placed: this step first executed on 2026-08-08, in runs
-      # #11 (0bb9773) and #12 (07d14cf), both push-to-`main` and both green. Until
-      # then the comment here said it had never run — true when written, falsified
-      # by a push, which produces no diff for anyone to review (../mysuite/AGENTS.md
-      # §3.5). "Gates publication" is the accurate description; it does not prevent
-      # a breaking commit landing on `main`, since that is the trigger.
+      # Proven, not merely placed: this step first executed on 2026-08-08 — the
+      # run numbers and SHAs are in AGENTS.md § E2E Tests, which is the one place
+      # that holds them. Until then the comment here said it had never run: true
+      # when written, falsified by a push, which produces no diff for anyone to
+      # review (../mysuite/AGENTS.md §3.5). "Gates publication" is the accurate
+      # description; it does not prevent a breaking commit landing on `main`,
+      # since that is the trigger.
       #
       # test-e2e.sh starts the
       # server from the binary ./build.sh just produced — one built at a different
@@ -104,9 +105,9 @@ jobs:
 
       # Without this a failure here yields only the list reporter's text, and a
       # geometry assertion ("expected 8, received 9.5") is close to undebuggable
-      # from that alone. Once this workflow does run, the suite stands between the
-      # build and both Pages and the release, so a red run has to leave enough
-      # behind to diagnose it without reproducing locally.
+      # from that alone. This suite stands between the build and both Pages and
+      # the release, so a red run has to leave enough behind to diagnose it
+      # without reproducing locally.
       - name: Upload e2e artifacts
         if: failure()
         uses: actions/upload-artifact@v4
