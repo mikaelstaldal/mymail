@@ -967,8 +967,9 @@ The sidebar footer holds two controls: a light/dark mode button, and — to its 
 **These two are a shared MySuite contract, not MyMail's to define.** MyCal, MyNotes and MyMail must render them
 identically, so that someone with all three open in browser tabs sees nothing move when switching between them.
 Their geometry, colours, hover and focus treatment, the width-stable label, and their position on screen are
-specified in **`spec/sidebar-footer.md` in the `mysuite` repository** (`../mysuite`, alongside this one — no
-remote yet, so it is referenced by path). **Changing any of this is a change in all three repositories.** The
+specified in **`spec/sidebar-footer.md` in the `mysuite` repository** (`../mysuite`, alongside this one —
+<https://github.com/mikaelstaldal/mysuite>; referenced by path because that is what resolves with both
+checkouts side by side). **Changing any of this is a change in all three repositories.** The
 shared values — the box geometry, the colours, the focus treatment, the (8, 8) position — are deliberately not
 repeated here, because a second copy is what goes stale. What follows is only what is MyMail's own; where a number
 below is also in the contract, it is there as MyMail's budget rather than as the shared value.

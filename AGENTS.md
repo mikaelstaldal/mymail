@@ -13,7 +13,8 @@ Update those when functionality is added or changed.
 
 Some UI is **not MyMail's to define**. MyMail is one of three sibling apps — MyCal, MyMail, MyNotes — that must
 look like one product, and the elements required to be identical across them are specified in the `mysuite`
-repository (`../mysuite`, alongside this one; no remote yet, so it is referenced by path). Read
+repository (`../mysuite`, alongside this one — <https://github.com/mikaelstaldal/mysuite>; referenced by path
+because relative links resolve with the checkouts side by side, which its cross-repo check also assumes). Read
 `../mysuite/AGENTS.md` before changing anything it covers, and make the change there first: **changing any of it
 is a change in all three repositories**, however local the edit looks from here. Currently binding:
 `spec/sidebar-footer.md`, the theme toggle and Settings button in the sidebar footer.
