@@ -2,19 +2,32 @@ import { test, expect, type Page } from '@playwright/test';
 
 // The sidebar footer's two controls — the light/dark toggle and Settings — are a
 // three-repo contract: they are specified to look and sit identically in MyCal,
-// MyMail and MyNotes. Nothing else enforces that (there is no shared stylesheet
-// and no cross-repo test), so these assertions are this repo's whole half of it.
+// MyMail and MyNotes. There is no shared stylesheet and no cross-repo test **that
+// runs automatically**, so these assertions are this repo's whole half of it.
+//
+// That qualifier is exact and is not a softening (`../mysuite/AGENTS.md` §2.1).
+// `../mysuite/tools/check-contract.py` *can* see cross-repo drift and is the only
+// thing that can — but nobody's CI runs it, so it guards nothing until somebody
+// chooses to run it. It and this file are complements rather than substitutes:
+// it resolves the three stylesheets' tokens and is blind to geometry, the cascade
+// and markup; this file renders one app and is blind to the other two. Neither
+// sees what the other does, so "covered" is never true of either alone.
+//
 // See the `.sidebar-theme-toggle, .sidebar-settings-link` block in
 // web/static/app.css for the derivations, and `../mysuite/spec/sidebar-footer.md`
 // for the contract itself. Bare § references below are that file.
 //
-// Ported from MyCal's e2e/tests/sidebar-footer.spec.ts, which was the only
-// machine-checkable statement of this contract anywhere. Roughly two-thirds of it
-// is app-independent and is here nearly verbatim, reasons included — the contract
-// asks that where an assertion is kept its reason is kept with it. Where MyMail
-// differs the comment says what changed and why; where MyCal covers something
-// MyMail has no counterpart for, the comment says that rather than dropping it
-// silently.
+// Ported from MyCal's e2e/tests/sidebar-footer.spec.ts, which when this was
+// written was the only *rendered* statement of this contract anywhere. Not the
+// only "machine-checkable" one — the static check above already existed by then,
+// and that phrasing was inherited from an upstream sentence that has since been
+// corrected for the same reason.
+//
+// Roughly two-thirds of it is app-independent and is here nearly verbatim,
+// reasons included — the contract asks that where an assertion is kept its reason
+// is kept with it. Where MyMail differs the comment says what changed and why;
+// where MyCal covers something MyMail has no counterpart for, the comment says
+// that rather than dropping it silently.
 test.describe('Sidebar footer contract', () => {
   test.beforeEach(async ({ page }) => {
     await page.goto('/');
