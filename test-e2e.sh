@@ -3,7 +3,7 @@
 #
 # This is the entry point CI uses, and it is the one to use locally when you
 # want the same conditions CI gets. Interactively, `playwright-test` from the
-# e2e directory is still the way to run a single spec (see AGENTS.md).
+# e2e directory is still the way to run a single spec (see e2e/AGENTS.md).
 #
 # It does not build. Run ./build.sh first — and note that the binary embeds
 # web/static/, so a server started from a stale binary serves stale assets and
@@ -191,7 +191,7 @@ fi
 
 cd e2e
 # `playwright-test` is a local wrapper for exactly this command and is the
-# interactive entry point AGENTS.md names; CI has no such wrapper, so fall
+# interactive entry point e2e/AGENTS.md names; CI has no such wrapper, so fall
 # through to the bin npm links. (Both @playwright/test and playwright declare a
 # `playwright` bin, so which package npm links is a hoisting detail — but the
 # bin is stable either way, which a hardcoded node_modules/playwright/cli.js
