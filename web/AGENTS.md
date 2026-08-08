@@ -12,17 +12,15 @@ The rule for `.sidebar-theme-toggle, .sidebar-settings-link` in `web/static/app.
 a verbose comment. Every declaration in it is load-bearing, and each of the following is a plausible tidy-up that
 breaks the suite's consistency.
 
-**`e2e/tests/sidebar-footer.spec.ts` catches most of them — but only when somebody runs it, and
-nothing runs it for you.** The CI step is committed and has never executed: the workflow triggers on push to
-`main` and the branch carrying it is unpushed (see the repo-root `AGENTS.md` § E2E Tests). So the suite existing
-is a real change from the state this section was written in; **automatic protection is not.** Do not edit the rule
-below expecting CI to catch you — run `./build.sh && ./test-e2e.sh` yourself.
+**`e2e/tests/sidebar-footer.spec.ts` catches most of them, and it now runs in CI** — the step executes on
+every push to `main` (see the repo-root `AGENTS.md` § E2E Tests for the evidence and the dates). Still run
+`./build.sh && ./test-e2e.sh` before you push: CI tells you afterwards.
 
-And it will not catch you in the way you probably mean even once it does run: the workflow triggers on `push` to
-`main`, so a breaking commit is already on `main` by the time the suite is red. What the gate will prevent is a
-broken contract reaching Pages or the rolling release — not the commit landing.
+And it does not catch you in the way you probably mean: the workflow triggers on `push` to `main`, so a
+breaking commit is already on `main` by the time the suite is red. What the gate prevents is a broken
+contract reaching Pages or the rolling release — not the commit landing.
 
-It is not a licence to stop reading either, even once it does run: the first item below is catchable by no test at
+It is not a licence to stop reading either: the first item below is catchable by no test at
 all, and a green suite bounds what was checked rather than what is correct. Each item says where it stands.
 
 - **Normalising `0.80rem` to `0.8rem`.** The trailing zero is the convention that makes one grep find the value in

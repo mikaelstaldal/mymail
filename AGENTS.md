@@ -235,24 +235,31 @@ repo root — that script is the one the CI workflow invokes, and it starts and 
 server and database.
 
 `e2e/tests/sidebar-footer.spec.ts` is this repo's whole half of the cross-repo sidebar-footer
-contract (see § Specification and `web/AGENTS.md`). **Nothing else in this repo checks any of it**,
-and — read this before relying on it — **nothing runs it automatically either.**
+contract (see § Specification and `web/AGENTS.md`). **Nothing else in this repo checks any of it.**
 
-The CI step is committed (`.github/workflows/main.yml`, after `./build.sh` and before the demo
-bundle and the release) and **has never executed**: the workflow triggers on push to `main`, and
-the branch this lands on is unpushed. `npm ci` and `playwright install` have never run anywhere.
-So the suite is *added*, not *covering* — the first push to `main` is the event that turns the
-committed step into a gate, and nothing before it does. Until then the only thing that runs this
-suite is a person typing `./build.sh && ./test-e2e.sh`.
+The CI step runs (`.github/workflows/main.yml`, after `./build.sh` and before the demo bundle and
+the release). It first executed on **2026-08-08**: runs **#11** (`0bb9773`) and **#12** (`07d14cf`),
+both push-to-`main`, both green, with `Install Playwright` and `End-to-end tests` succeeding in
+each. So the suite is *covering* rather than merely *added* — but only for what it asserts, which
+is the sidebar footer and nothing else.
 
-And note what that gate will and will not mean once it does run, because "gates publication" is
-the accurate claim and "prevents breakage" is not: the workflow triggers on `push` to `main`, so a
-breaking commit is already on `main` by the time the suite is red — what the gate will prevent is
-a broken contract reaching Pages or the rolling release, not the commit landing. (Wording taken
-from MyCal's `web/AGENTS.md`, where the step does run, so the three repos state this one way.)
+> **This paragraph was wrong for a while and it is worth knowing how.** It said the step "has never
+> executed … the branch this lands on is unpushed", which was true when written and was falsified by
+> a **push** — an act that produces no commit and no diff in this repository, so no review, grep or
+> re-read had anything to run against. `../mysuite/AGENTS.md` §3.5 is the general form. If you write
+> a claim about what does or does not run, prefer the qualifier that survives the thing being built.
 
-Treat a sidebar-footer change as unguarded and run it yourself. When it does go red, that is not
-a test problem; read `../mysuite/spec/sidebar-footer.md` before touching the assertion.
+And note what the gate does and does not mean, because "gates publication" is the accurate claim
+and "prevents breakage" is not: the workflow triggers on `push` to `main`, so a breaking commit is
+already on `main` by the time the suite is red — what the gate prevents is a broken contract
+reaching Pages or the rolling release, not the commit landing. (Wording taken from MyCal's
+`web/AGENTS.md`, so the three repos state this one way.)
+
+Run it yourself before you push anyway — CI tells you afterwards. When it goes red, that is not a
+test problem; read `../mysuite/spec/sidebar-footer.md` before touching the assertion.
+
+**The logo is a separate contract and this suite does not cover it** — see `web/AGENTS.md`
+§ "The app logo is governed from outside this repo".
 
 How to run a single spec, why not to start a server by hand, and the CSRF, `-init` and `-sendmail`
 flags a hand-started server needs are in `e2e/AGENTS.md`, loaded automatically when working under

@@ -10,11 +10,11 @@ are in `../mysuite/spec/sidebar-footer.md`, and the list of ordinary-looking edi
 it silently is in `web/AGENTS.md`. Read those before changing an assertion; a value in this
 suite is almost never MyMail's to decide.
 
-**Nothing runs this suite but a person.** The CI step is committed and has never executed — the
-workflow triggers on push to `main` and this work is on an unpushed branch — so a change you make
-here is verified by you running it and by nothing else. That is a status fact rather than a
-mechanic, which is why it is stated in the root `AGENTS.md` too; the mechanics below are not
-repeated anywhere.
+**CI runs this suite on every push to `main`, and first did so on 2026-08-08** (runs #11 and #12,
+both green — the evidence is in the root `AGENTS.md` § E2E Tests). Run it yourself before you push
+anyway: the trigger is `push`, so CI's answer arrives after the commit has landed. That is a status
+fact rather than a mechanic, which is why it is stated in the root `AGENTS.md` too; the mechanics
+below are not repeated anywhere.
 
 ## Running one spec
 

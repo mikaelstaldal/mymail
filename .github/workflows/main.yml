@@ -87,11 +87,12 @@ jobs:
       # contract (see AGENTS.md), and nothing else in this repo checks any of it,
       # so a build that breaks it must not reach Pages or the release.
       #
-      # Placed, not proven: this step has never executed. The workflow triggers on
-      # push to `main` (see `on:` above) and the branch that adds it is unpushed,
-      # so the first such push is also the first run of `npm ci`, of
-      # `playwright install`, and of the suite anywhere but a developer's machine.
-      # Do not describe it as a gate elsewhere in the repo until it has run once.
+      # Proven, not merely placed: this step first executed on 2026-08-08, in runs
+      # #11 (0bb9773) and #12 (07d14cf), both push-to-`main` and both green. Until
+      # then the comment here said it had never run — true when written, falsified
+      # by a push, which produces no diff for anyone to review (../mysuite/AGENTS.md
+      # §3.5). "Gates publication" is the accurate description; it does not prevent
+      # a breaking commit landing on `main`, since that is the trigger.
       #
       # test-e2e.sh starts the
       # server from the binary ./build.sh just produced — one built at a different
