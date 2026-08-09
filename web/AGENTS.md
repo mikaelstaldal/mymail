@@ -79,13 +79,36 @@ the change there first: **changing any of it is a change in MyCal and MyNotes to
 deliberately not repeated here (`../mysuite/AGENTS.md` §4) — a copy is a second source of truth that
 goes stale without anyone editing it.
 
-**Nothing in this repository tests any of it.** Two files mention the logo at all: the markup line
-and the CSS rule. `e2e/tests/sidebar-footer.spec.ts` asserts nothing about `.logo-icon` or
-`.sidebar-header`, the Go tests never render CSS, the `node --test` suites cover
-`web/ts/util/` and the demo backend rather than components, and `../mysuite/tools/check-contract.py`
-does not know the logo exists. So for every item below the answer to *"what catches this?"* is
-**nothing** — and that is from reading the suites, not from a run that went red. Contrast the
-sidebar footer above, where most items name a test. **This section is the only guard the logo has.**
+**`e2e/tests/logo.spec.ts` now tests some of it, and this paragraph used to say nothing did.** That
+was true when it was written; the suite was added with the `align-self: flex-start` fix below.
+Every item in this section says where it stands, and several still say *nothing*.
+
+What the suite holds: the badge's box, radius and rendered glyph size, the mark's centring inside
+it, the badge's zero padding/margin/border, the 8px gap to the label, the fill and glyph colour in
+both themes, the badge's decorative status, and `(16, 14)` at four root sizes — plus the mutation
+test that makes the last of those mean something (`app-logo.md` §4.2). It also holds MyMail's half
+of the app-name-label contract; see the next section.
+
+What it does not, and cannot:
+
+- **The mark's ink extent** (`app-logo.md` §3.3). Our mark is stroke-only, so a geometry box
+  asserted against an ink floor would pass while being the wrong statistic. The right measurement
+  is the pixel count in the Lucide-upgrade procedure below, and it belongs to the event that can
+  break it rather than to every run. The spec file records the omission as a decision.
+- **`1.1rem` → `1.10rem`, and `1.1rem` → `1.1em`.** The first is identical computed *and*
+  identical serialised; the second is identical everywhere so long as nothing between `body` and
+  the label sets a size, which nothing does. Neither is visible to any rendering, at any number of
+  roots. `../mysuite/tools/check-contract.py` compares declaration text and sees both, and
+  nobody's CI runs it. *(`1.1rem` → `17.6px` **is** caught, at the 24px root — see the label
+  section below. `app-name-label.md` §3.2 has the table of which mechanism catches which
+  substitution; do not read "a rendered suite cannot hold §3.2" as covering all three.)*
+- **Which font actually renders.** `system-ui` resolves per machine (`app-name-label.md` §3.1).
+- **Whether the three apps still agree.** This suite renders one app. `../mysuite/AGENTS.md` §2.5
+  is explicit that three per-app suites are not a cross-repo check and that adding more cannot make
+  one.
+
+So this section is no longer the only guard, and it is still the only thing that will stop most of
+the edits below — a green suite bounds what was checked, not what is correct.
 
 ### After upgrading the vendored Lucide bundle, re-measure the mark
 
@@ -129,7 +152,8 @@ stays green.
 
 - **Deleting `size={17}` because `<Icon>` has a default.** It does — 16 — so the glyph would shrink
   by 1px, which is invisible without a sibling app beside it. The contract mandates the *rendered*
-  17, not the mechanism.
+  17, not the mechanism. Caught by *badge and glyph render at contract size* — demonstrated, by
+  dropping the prop and watching those four cases go red.
 - **Adding a CSS rule that sizes the logo's SVG, to match MyCal.** MyCal does size its glyph in CSS
   and is right to; the contract sanctions both layers. But **MyMail has no CSS rule anywhere that
   sizes an SVG** (`.lucide` sets `vertical-align` and `flex-shrink` and no dimensions), and adding
@@ -141,33 +165,138 @@ stays green.
   **focus-outline colour the sidebar-footer contract holds to WCAG 1.4.11 with under one point of
   headroom** (`app-logo.md` §7.3, `sidebar-footer.md` §6.2; the operands are recorded next to the
   rule in `web/static/app.css`). A change made for the logo lands on an accessibility obligation in
-  a different contract. If you think the fill needs changing, raise it — do not change it.
+  a different contract. If you think the fill needs changing, raise it — do not change it. The
+  badge half is caught by *badge fill and glyph colour follow the theme*; **the focus-outline half
+  is not caught by that test and never will be** — it is the sidebar-footer suite's, in both themes,
+  against its own thresholds.
 - **Replacing `.logo-icon`'s `color: #fff` with `var(--on-color-fg)`**, which `.settings-badge`
   already uses on the same fill. Identical today, because `--on-color-fg` is defined once in `:root`
   and never theme-scoped. It becomes a divergence the day somebody scopes it — the harmlessness is
-  conditional and the condition lives elsewhere (`../mysuite/AGENTS.md` §3.3).
+  conditional and the condition lives elsewhere (`../mysuite/AGENTS.md` §3.3). **Not caught**: the
+  colour assertions compare resolved values, so they pass on the day of the swap and go red only on
+  the later edit that scopes the token — by which time the swap is not what anyone is looking at.
 - **Touching `gap` on `.sidebar-header`.** It is the badge-to-app-name gap, pinned by
-  `app-logo.md` §3.4, and load-bearing twice: MyNotes' sidebar width was sized against it
-  (`app-logo.md` §10.1). It is not spacing you may tune.
+  `app-logo.md` §3.4, and load-bearing three times over: MyNotes' sidebar width was sized against it
+  (`app-logo.md` §10.1), and it is a term in the label's `x`, which `app-name-label.md` §3.3 checks
+  as a consequence of that pin rather than pinning separately. It is not spacing you may tune.
+  Caught by *badge and glyph render at contract size*, which measures the gap from a `Range` over
+  the label text rather than reading the `gap` property back.
 - **Looking for a selector for the app name and "fixing" its absence.** MyMail's app name is a
   **bare text node** inside `.sidebar-header`, with no element and no class. That is recorded in
-  `app-logo.md` §1 on purpose, so a blank cell there does not read as an oversight — and the label's
-  typography is out of scope for the contract by an explicit ruling (§2). Wrapping it in a `<span>`
-  is a change to a row the contract measures.
+  `app-logo.md` §1 on purpose, so a blank cell there does not read as an oversight. **The label's
+  font, size and placement are now governed by `../mysuite/spec/app-name-label.md`** — see the next
+  section — and that contract deliberately mandates **no** selector, because two of the three apps
+  have no element for the label and requiring one would make things worse (`app-name-label.md`
+  §8.4). So the advice stands and its reason has changed: leave it a bare text node. Caught, in the
+  sense that matters — wrapping it is layout-neutral, so nothing sees the wrap itself, but
+  `e2e/tests/logo.spec.ts` records which element the label's values were read from and fails with a
+  message telling you to re-derive them.
 - **Changing `.sidebar-header`'s `padding`.** It *is* the badge's on-screen position, the same way
-  `.sidebar-footer`'s padding is the footer buttons' (8, 8). The difference is that moving the
-  footer's fails fourteen of the e2e tests, and moving this one fails nothing. Note that `app-logo.md` §4 deliberately
-  does **not** pin window coordinates — so this is not a contract violation, but it is the kind of
-  change to make on purpose rather than while tidying.
+  `.sidebar-footer`'s padding is the footer buttons' (8, 8) — and it is the label's `x` and the top
+  edge of the row the label is centred in as well. `app-logo.md` §4 pins the badge at `(16, 14)`
+  from the window, so moving this **is** a contract violation. *(This bullet said §4 "deliberately
+  does not pin window coordinates" until 2026-08-09. That was written before §4 existed in its
+  current form and was simply false; it is the second thing in this file to have been falsified by
+  an edit in another repository — `../mysuite/AGENTS.md` §3.5.)* Caught by the four
+  `badge sits 16px from the left and 14px from the top` cases in `e2e/tests/logo.spec.ts`.
 - **Wrapping the badge in a link, or giving it an `aria-label`.** It is specified as decorative
   (`app-logo.md` §8), and that ruling holds *because* the visible app name sits beside it. Removing
-  the visible label is what would give the badge a naming obligation.
+  the visible label is what would give the badge a naming obligation. Caught by *the badge is
+  decorative and the label carries the identity*, which asserts both halves — the `aria-hidden` and
+  the label's existence — for that reason.
 
 Two things worth knowing that are **not** MyMail's to fix, both recorded as open items in the
 contract: the badge scrolls out of the window with the sidebar under content overflow (§9.1 — the
 footer beside it does not, because it is sticky and the header is not), and the badge is `px` while
 the label around it is `rem`, so it reads undersized at large browser font settings (§9.2). Both are
 shared with MyCal. Do not fix either locally.
+
+## The app name beside the logo is governed from outside this repo
+
+The word **MyMail** to the right of the badge — a bare text node in `.sidebar-header`, written at
+`web/ts/layout/Sidebar.tsx` — is a three-repo contract of its own, specified in
+**`../mysuite/spec/app-name-label.md`**. Its font, its size and its placement are **values MyMail
+does not get to choose**. Read that document before changing any of them, and make the change there
+first: **changing any of it is a change in MyCal and MyNotes too.** The values are deliberately not
+repeated here (`../mysuite/AGENTS.md` §4).
+
+**This supersedes the ruling that used to put the label out of scope.** `app-logo.md` §2 recorded
+the owner's decision to exclude the label because MyNotes' was smaller and its top-left was
+crowded — with the condition *"for now, since space there is crowded"* attached. The owner has
+reopened it: MyNotes bought the crowding out by widening its column, and the label is now specified
+across all three. `app-name-label.md` §2.1 is the ruling. Nothing about MyMail's label changed.
+
+**MyMail's half is `e2e/tests/logo.spec.ts`**, which holds the same file as the badge because the
+two are one row and most of the edits below move both. Every item was demonstrated red before being
+claimed as caught.
+
+### The edits that break it silently
+
+- **Adding `line-height: 1` to `.sidebar-header`.** The likeliest edit on this list —
+  `.sidebar-reload-btn` seventy lines below already has it, and it is the standard idiom for a
+  header row. **It sits at the intersection of the two contracts and it moves both:**
+  - it would **freeze the badge at `y = 14` at every root font size**, which is what
+    `app-logo.md` §4.2 wants — but reached by accident rather than authored;
+  - and it would **move the app-name label from `y = 14.797` to `19.203`**, breaking
+    `app-name-label.md` §4.1. (The contract quotes `19.2`, which is the closed form
+    `14 + (28 − 17.6)/2`; the page renders `19.203`. Same 1/128px LayoutUnit snapping §4.1.1
+    records for `14.8047` against a measured `14.797`, and quoted here the way that section
+    asks — what the mutation measured, not what the arithmetic says.)
+
+  One edit, satisfying one contract and violating the other, and neither document can see that
+  on its own — it is recorded in both. The badge's half is fixed properly instead, by
+  `align-self: flex-start` on `.logo-icon`, the declaration MyCal and MyNotes already carried.
+  Caught by the three label-placement cases; **measured: the badge's own cases all stay green**,
+  which is the whole point of the item.
+- **Padding or resizing `.sidebar-reload-btn`.** It is in the same flex row, and
+  `app-name-label.md` §4.1 states the rule against **the row's tallest item** — not against the
+  badge — precisely because MyCal's and MyMail's rows contain this button. Grow it past the badge
+  and the label moves, in a rule that has nothing to do with the brand. **Measured here, not carried
+  over from MyCal:** `.sidebar-reload-btn { padding: 20px }` takes the button from 26px to 56px, the
+  header from 55 to 83, and **the label from `y = 14.797` to `28.797` — 14px — while the badge does
+  not move at all.** `app-name-label.md` §4.2 has MyCal's own table, and it is the same 14px by
+  coincidence of geometry rather than by transfer. The badge is protected from this by
+  its `align-self`; **the label is not, deliberately** — §4.3 records the label's position rather
+  than mandating it, because a declaration would move three working apps ~0.8px to defend a value
+  that is currently correct everywhere. Caught at the default root by *the label sits at 14.797*.
+- **Editing `body`'s font stack in `web/static/app.css`.** It **is** the label's font: nothing
+  nearer the label declares one, and `app-name-label.md` §3.1 mandates the declared stack. A change
+  made for message bodies is a change to this contract and will not look like one. Caught by *the
+  label resolves the contract font stack* — which asserts the string only, because `system-ui`
+  resolves per machine and no test anywhere can hold the rendered face (§3.1, §7.3).
+- **Normalising `1.1rem` on `.sidebar-header`.** To `17.6px`: identical at a 16px root and frozen
+  at every other, so it agrees with the siblings exactly where every test looks and diverges
+  everywhere else. To `1.10rem`: identical computed **and** identical serialised. To `1.1em`:
+  identical today, divergent the moment an ancestor sets a size. **Partly caught, and the split is
+  the point** — the suite asserts two roots, so the `px` conversion goes red at 24px (demonstrated:
+  red there, green at 16px). The other two are invisible to any rendering at any number of roots;
+  `../mysuite/tools/check-contract.py` compares declaration text and sees them, and nobody's CI
+  runs it. `app-name-label.md` §3.2 tabulates which mechanism catches which — and note its §7.1 is
+  *"the only thing that compares the three apps"*, which is a claim about comparison and **not**
+  about being the only thing that can see a given edit.
+- **Giving the label a `<span>` with its own `font-size`.** Worth stating separately from the
+  bullet above, because in **MyMail** it is the gap between the two guards: the cross-repo check
+  reads the declaration on the row, so a declaration nearer the label beats it silently, and unlike
+  MyCal there is no `.brand-name` for it to check instead. Caught here only by the flag recording
+  which element the values were read from — mutation-tested, and the flag is not a tautology: with
+  the label wrapped, the recorded host reads `SPAN.brand-name` where it otherwise reads
+  `DIV.sidebar-header`. **That flag is the only guard this app has against this edit.**
+- **Moving `font-size` or `font-weight` off `.sidebar-header` onto a wrapper around the label**, or
+  the reverse. Renders identically today. The suite reads both values from whichever element the
+  text actually inherits from, resolved at runtime (`app-name-label.md` §6.1), so the values stay
+  green — what fails is the flag recording *which* element they came from, with a message telling
+  you to re-derive them. That is the intended behaviour, not a gap.
+- **Removing `align-self: flex-start` from `.logo-icon`.** It is what stops the badge's `y` being a
+  remainder of the label's line box. Deleting it looks like removing a redundant line: at the
+  default root it changes nothing at all. Caught by the 20 / 24 / 32px placement cases and both
+  line-height mutation cases — **and not by the 16px case**, which stays green, which is why the
+  suite asserts four roots rather than one.
+
+Three things worth knowing that are **not** MyMail's to fix: the label scrolls off the window with
+the badge under content overflow (`app-name-label.md` §4.5 — the same open item as `app-logo.md`
+§9.1); MyCal hides its label below 600px and MyMail has no width breakpoint at all, which is
+recorded rather than harmonised (§4.4); and how the label degrades under a long name differs
+between the three and is deliberately not mandated (§8.5). Do not fix any of them locally.
 
 ## Build & Development Commands
 

@@ -4,11 +4,20 @@ Instructions for working under `e2e/`: the Playwright suite and the `test-e2e.sh
 runs it. The repo-root `AGENTS.md` is always loaded as well and covers everything else. File
 paths here are written relative to the repo root, as they are there.
 
-`tests/sidebar-footer.spec.ts` is this repo's whole half of the cross-repo sidebar-footer
-contract. **The rules that say which of its values may change, and why, are not here** — they
-are in `../mysuite/spec/sidebar-footer.md`, and the list of ordinary-looking edits that break
-it silently is in `web/AGENTS.md`. Read those before changing an assertion; a value in this
-suite is almost never MyMail's to decide.
+**Both specs here hold cross-repo contracts, and neither owns the values it asserts.** The rules
+that say which of those values may change, and why, are not in this directory:
+
+| Spec | Contract | The edits that break it silently |
+|---|---|---|
+| `tests/sidebar-footer.spec.ts` | `../mysuite/spec/sidebar-footer.md` | `web/AGENTS.md` § "The sidebar footer …" |
+| `tests/logo.spec.ts` | `../mysuite/spec/app-logo.md` **and** `../mysuite/spec/app-name-label.md` | `web/AGENTS.md` § "The app logo …" and § "The app name …" |
+
+Read the contract a failing assertion names before changing it; a value in either suite is almost
+never MyMail's to decide. `logo.spec.ts` names its document on every § reference for that reason —
+four files in `mysuite/spec/` now have a §2, §3 and §4, so a bare § is ambiguous.
+
+`tests/sidebar-footer.spec.ts` is this repo's whole half of the sidebar-footer contract, and
+nothing else here checks any of it.
 
 **CI runs this suite on every push to `main`, and first did so on 2026-08-08** — the run numbers,
 SHAs and the command to re-derive them are in the root `AGENTS.md` § E2E Tests, which is the one

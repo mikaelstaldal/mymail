@@ -230,6 +230,16 @@ html, body {
   border-radius: 6px;
   display: flex; align-items: center; justify-content: center;
   flex-shrink: 0;
+  /* Opts the badge out of .sidebar-header's own `align-items: center`, and it
+     is load-bearing rather than tidy. Without it the badge is centred against
+     whichever of it and the app-name label is taller, so its distance from the
+     window's top edge is a *remainder* of the label's line box rather than the
+     header's padding: it lands on the offset ../mysuite/spec/app-logo.md §4
+     mandates only while the badge out-measures the label, and drifts at every
+     root font size above that. Measured, not reasoned — see the badge-position
+     items in web/AGENTS.md. MyCal and MyNotes each carry this declaration for
+     the same reason; MyMail was the last of the three without it. */
+  align-self: flex-start;
 }
 
 .sidebar-section-label {

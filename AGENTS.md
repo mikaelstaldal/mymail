@@ -20,10 +20,19 @@ is a change in all three repositories**, however local the edit looks from here.
 
 - `spec/sidebar-footer.md` — the theme toggle and Settings button in the sidebar footer.
 - `spec/app-logo.md` — the logo badge in the top left, and the mark inside it.
+- `spec/app-name-label.md` — the app name beside that badge: its font, size and placement. It
+  **supersedes** `app-logo.md` §2, which had put the label out of scope while MyNotes' top-left was
+  crowded; the owner reopened it once MyNotes bought the crowding out.
 
 Each has a section of its own in `web/AGENTS.md` naming the ordinary-looking edits that break it
-silently. **Read the logo's first**, because **nothing in this repository tests any of it** and its
-mark is a vendored third-party drawing that changes when the bundle does.
+silently. **Read the logo's first**: its mark is a vendored third-party drawing that changes when
+the bundle does, and that is the one thing here no test can catch.
+
+*(This paragraph said "**nothing in this repository tests any of it**" until 2026-08-09, when
+`e2e/tests/logo.spec.ts` was added. Two of the three now have a rendered suite — `web/AGENTS.md`
+says per item which, and what those suites still cannot see. The false version is worth leaving
+visible because it failed in the reassuring direction: it told a reader not to look for the guard
+that would have caught them.)*
 
 ## Build & Development Commands
 
@@ -267,10 +276,15 @@ reaching Pages or the rolling release, not the commit landing. (Wording taken fr
 `web/AGENTS.md`, so the three repos state this one way.)
 
 Run it yourself before you push anyway — CI tells you afterwards. When it goes red, that is not a
-test problem; read `../mysuite/spec/sidebar-footer.md` before touching the assertion.
+test problem; read the contract the failing spec names before touching the assertion —
+`../mysuite/spec/sidebar-footer.md` for `sidebar-footer.spec.ts`, and `app-logo.md` or
+`app-name-label.md` for `logo.spec.ts`, which holds assertions from both.
 
-**The logo is a separate contract and this suite does not cover it** — see `web/AGENTS.md`
-§ "The app logo is governed from outside this repo".
+**`e2e/tests/logo.spec.ts` covers the badge and the app-name label**, added 2026-08-09 with the
+`align-self: flex-start` fix it exists to defend. *(This said "**the logo is a separate contract and
+this suite does not cover it**" until then.)* What it holds and — in four bullets — what it cannot
+are in `web/AGENTS.md` § "The app logo is governed from outside this repo"; the label's own edits
+are in the section after it.
 
 How to run a single spec, why not to start a server by hand, and the CSRF, `-init` and `-sendmail`
 flags a hand-started server needs are in `e2e/AGENTS.md`, loaded automatically when working under
