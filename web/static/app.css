@@ -926,6 +926,38 @@ html, body {
 .import-cal-btn:hover:not(:disabled) { background: var(--list-item-hover); }
 .import-cal-btn:disabled { opacity: 0.7; cursor: default; }
 
+/* A calendar link found in the body wears .attachment-link's chrome without
+   being one — it is a URL to read, not to follow — so the hover the real
+   download links carry is undone here.
+
+   Stacked rather than side by side: the URL is shown in full and never
+   truncated (its query commonly carries the ids the endpoint needs, and the
+   point of showing it is to be read before clicking), so it is routinely long
+   enough to wrap over several lines. */
+.attachment-link-static {
+  cursor: default;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  max-width: 60ch;
+}
+.attachment-link-static:hover { background: var(--list-bg); }
+
+.calendar-link-row {
+  display: flex;
+  align-items: flex-start;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+/* Both halves are sender-controlled and can be arbitrarily long, so they break
+   rather than widening the row. */
+.calendar-link-label,
+.calendar-link-url {
+  overflow-wrap: anywhere;
+  max-width: 100%;
+}
+
 .import-cal-error {
   color: var(--danger);
   font-size: 0.75rem;

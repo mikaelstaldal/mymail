@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'preact/hooks';
+import { useState, useEffect, useRef, useMemo } from 'preact/hooks';
 import { api, NotFoundError } from '../api/client.js';
 import { navigate } from '../router.js';
 import { showToast } from '../util/toast.js';
@@ -6,6 +6,7 @@ import { confirmDialog } from '../util/confirm.js';
 import { getMycalUrl, isDemo } from '../util/config.js';
 import { formatDateFull, formatDateAdaptive } from '../util/date.js';
 import { hasValidRecipient } from '../util/address.js';
+import { findIcsLinks } from '../util/icslinks.js';
 import { Icon } from '../components/Icon.js';
 import type { components } from '../api/types.js';
 
@@ -47,6 +48,12 @@ function isIcs(a: AttachmentMeta): boolean {
     || a.content_type === 'application/ics'
     || a.filename.toLowerCase().endsWith('.ics');
 }
+
+// Keys into icsImportStatus. An event can be imported from an attachment or
+// from a link in the HTML body, and the two share one status map — the prefixes
+// keep an attachment id from colliding with a URL.
+const attachmentKey = (id: number): string => `att:${id}`;
+const linkKey = (url: string): string => `link:${url}`;
 
 function senderName(addr: string): string {
   const m = addr.match(/^([^<>]+?)\s*<[^>]+>$/);
@@ -206,11 +213,20 @@ export function MessageDetail({ id, folders }: MessageDetailProps) {
   const [rescheduleOpen, setRescheduleOpen] = useState(false);
   const [rescheduleValue, setRescheduleValue] = useState('');
   const [actionInFlight, setActionInFlight] = useState(false);
-  const [icsImportStatus, setIcsImportStatus] = useState<Record<number, 'loading' | 'success' | string>>({});
+  const [icsImportStatus, setIcsImportStatus] = useState<Record<string, 'loading' | 'success' | string>>({});
   const msgDetailRef = useRef<HTMLDivElement>(null);
   const threadStripRef = useRef<HTMLDivElement>(null);
   const [threadHeight, setThreadHeight] = useState<number | null>(null);
   const [scheduleTick, setScheduleTick] = useState(0);
+
+  // Parsing the body is not free, and it depends on nothing else in this view.
+  // Skipped entirely with no MyCal configured, which is most deployments — the
+  // pref is read here as well as at render, so a message opened before it was
+  // set picks the links up when the route brings this view back.
+  const calendarLinks = useMemo(
+    () => msg === null || getMycalUrl() === '' ? [] : findIcsLinks(msg.body_html),
+    [msg?.body_html],
+  );
 
   useEffect(() => {
     let cancelled = false;
@@ -229,6 +245,9 @@ export function MessageDetail({ id, folders }: MessageDetailProps) {
     setAllHeaders(null);
     setMoveTo('');
     setSnoozeOpen(false);
+    // Keyed by attachment id and by link URL, and a URL can recur across
+    // messages — an "Imported" from the previous message must not carry over.
+    setIcsImportStatus({});
 
     api.messages.get(id).then(m => {
       if (cancelled) return;
@@ -540,36 +559,59 @@ export function MessageDetail({ id, folders }: MessageDetailProps) {
     }
   };
 
-  const importToMycal = async (attachmentId: number) => {
+  /**
+   * Runs one import against MyCal and records its outcome under `key`.
+   *
+   * `post` receives MyCal's base URL and does the POST — the two callers differ
+   * only in what they send: an attachment's bytes, or a URL for MyCal to fetch
+   * itself. Everything after the response is the same for both.
+   */
+  const runIcsImport = async (key: string, post: (base: string) => Promise<Response>) => {
     const base = getMycalUrl().replace(/\/$/, '');
     if (!base) return;
-    setIcsImportStatus(prev => ({ ...prev, [attachmentId]: 'loading' }));
+    setIcsImportStatus(prev => ({ ...prev, [key]: 'loading' }));
     try {
-      const dataResp = await fetch(`api/v1/attachments/${attachmentId}`);
-      if (!dataResp.ok) throw new Error(`Failed to fetch attachment (${dataResp.status})`);
-      const blob = await dataResp.blob();
-      const importResp = await fetch(`${base}/api/v1/import-single`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'text/calendar' },
-        body: blob,
-      });
+      const importResp = await post(base);
       if (importResp.status === 201) {
-        setIcsImportStatus(prev => ({ ...prev, [attachmentId]: 'success' }));
+        setIcsImportStatus(prev => ({ ...prev, [key]: 'success' }));
       } else {
         let errMsg = `Error ${importResp.status}`;
         try {
           const body = await importResp.json() as { error?: string };
           if (body.error) errMsg = body.error;
         } catch { /* ignore */ }
-        setIcsImportStatus(prev => ({ ...prev, [attachmentId]: errMsg }));
+        setIcsImportStatus(prev => ({ ...prev, [key]: errMsg }));
       }
     } catch (e) {
       setIcsImportStatus(prev => ({
         ...prev,
-        [attachmentId]: e instanceof Error ? e.message : 'Import failed',
+        [key]: e instanceof Error ? e.message : 'Import failed',
       }));
     }
   };
+
+  const importToMycal = (attachmentId: number) =>
+    runIcsImport(attachmentKey(attachmentId), async base => {
+      const dataResp = await fetch(`api/v1/attachments/${attachmentId}`);
+      if (!dataResp.ok) throw new Error(`Failed to fetch attachment (${dataResp.status})`);
+      const blob = await dataResp.blob();
+      return fetch(`${base}/api/v1/import-single`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'text/calendar' },
+        body: blob,
+      });
+    });
+
+  // The bytes are never fetched here: MyCal's import-single takes a URL and
+  // fetches it itself, size-capped. That is also the only way this can work
+  // from a page — reading a response from an arbitrary sender's host would need
+  // that host to grant us CORS, which no calendar link does.
+  const importLinkToMycal = (url: string) =>
+    runIcsImport(linkKey(url), base => fetch(`${base}/api/v1/import-single`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ url }),
+    }));
 
   if (loading) return <div class="msg-detail-status">Loading…</div>;
   if (notFound) return <div class="msg-detail-status msg-detail-not-found">Not found</div>;
@@ -822,7 +864,7 @@ export function MessageDetail({ id, folders }: MessageDetailProps) {
             <span class="msg-detail-label">Attachments</span>
             <ul class="attachment-list">
               {msg.attachments.map(a => {
-                const status = icsImportStatus[a.id];
+                const status = icsImportStatus[attachmentKey(a.id)];
                 return (
                   <li key={a.id}>
                     <a
@@ -846,6 +888,56 @@ export function MessageDetail({ id, folders }: MessageDetailProps) {
                       </button>
                     )}
                     {isIcs(a) && status && status !== 'loading' && status !== 'success' && (
+                      <span class="import-cal-error">{status}</span>
+                    )}
+                  </li>
+                );
+              })}
+            </ul>
+          </div>
+        )}
+
+        {/*
+          Calendar links found in the HTML body. They cannot get a button beside
+          them where they appear: the body renders in a sandboxed iframe, so the
+          list is repeated here instead.
+        */}
+        {calendarLinks.length > 0 && getMycalUrl() && (
+          <div class="msg-detail-field msg-detail-attachments">
+            <span class="msg-detail-label">Calendar links</span>
+            <ul class="attachment-list">
+              {calendarLinks.map(link => {
+                const status = icsImportStatus[linkKey(link.url)];
+                return (
+                  <li key={link.url} class="calendar-link-row">
+                    {/* Deliberately not an <a>: this is a URL from an
+                        unauthenticated sender, shown so it can be read.
+                        The URL shown is the one that would be fetched, not the
+                        href it was found as — those differ for a webcal link,
+                        and the point of showing it is to be read before
+                        clicking. The title names the other one when they
+                        differ. */}
+                    <span
+                      class="attachment-link attachment-link-static"
+                      title={link.original === link.url ? undefined : `Link in message: ${link.original}`}
+                    >
+                      <span class="calendar-link-label">{link.label}</span>
+                      <span class="attachment-size calendar-link-url">{link.url}</span>
+                    </span>
+                    <button
+                      class="import-cal-btn"
+                      disabled={status === 'loading' || status === 'success'}
+                      onClick={() => void importLinkToMycal(link.url)}
+                      // No aria-label naming the link: it would override the
+                      // button's text, and that text is the only thing that
+                      // announces "Importing…" / "Imported". An ambiguous name
+                      // among rows costs less than a state change nobody hears.
+                      title="Import this event into MyCal"
+                    >
+                      {status === 'loading' ? 'Importing…' : status === 'success' ? 'Imported'
+                        : <><Icon name="calendar-plus" size={14} /> Import to Calendar</>}
+                    </button>
+                    {status && status !== 'loading' && status !== 'success' && (
                       <span class="import-cal-error">{status}</span>
                     )}
                   </li>

@@ -207,7 +207,8 @@ export function Preferences() {
         <div class="pref-row-info">
           <div class="pref-label">MyCal URL</div>
           <div class="pref-description">
-            Base URL of your MyCal instance. When set, .ics email attachments can be imported directly into MyCal.
+            Base URL of your MyCal instance. When set, .ics email attachments and calendar links in an HTML message
+            can be imported directly into MyCal.
             {serverMycalUrl && !localStorage.getItem('mycalUrl') && (
               <span> Auto-configured from server.</span>
             )}

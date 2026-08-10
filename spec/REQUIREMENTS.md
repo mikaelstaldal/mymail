@@ -700,6 +700,50 @@ On first load the UI reads `localStorage` for the last selected folder and navig
    and the thread strip. When the thread is truncated at the 1000-message cap (`truncated: true` in the API response),
    a "thread too long" indicator is shown in place of the missing entries.
 
+   **Importing an event into MyCal.** When the **MyCal URL** preference resolves to a non-empty value (see Settings →
+   Preferences), the message detail offers an **Import to Calendar** action for each iCalendar event it can find in the
+   message. Both forms POST to `{mycal}/api/v1/import-single` from the browser — MyMail's backend is not involved, and
+   the two apps are assumed to be same-origin behind one auth realm, which is what makes that request possible without
+   CORS. A `201` is reported as **Imported**; any other status shows the `error` field of the response body beside the
+   button. The state is per item and is reset when another message is opened.
+
+   - **From an attachment.** Any attachment whose content type is `text/calendar` or `application/ics`, or whose file
+     name ends in `.ics`. The attachment bytes are fetched from MyMail and sent as the `text/calendar` request body.
+   - **From a link in the HTML body.** The `<a href>` links of `body_html` are parsed (as a document, not by regex) and
+     those pointing at iCalendar data are listed in a **Calendar links** block below the attachments, each with its
+     text and its URL. An `http:`/`https:` link qualifies on any of three tests, all applied to the path or the query
+     and never to the fragment, all case-insensitive:
+
+     1. the URL **path** ends in `.ics` — the static-file case;
+     2. a whole **path segment** is `ics`, `ical` or `icalendar` — `…/api/Events/<id>/iCalendar`, `…/events/7/ical`,
+        `…/download/ics`. Extensionless endpoints of this shape are what bulk-mail platforms generate, so rule 1 alone
+        misses most real invitations. The comparison is against a whole segment, so `/medical/`, `/basics` and
+        `/icalendars/` do not match;
+     3. a **format parameter** — `format`, `type`, `fmt`, `output` or `calendar` — whose *value* is exactly one of
+        those three words: `?format=ical`, `?type=ics`.
+
+     A file name in the query (`?file=e.ics`) does **not** qualify: it says nothing about what the response will be.
+     Link *text* is never consulted — "Add to calendar" is unbounded and differs per language.
+
+     The two errors are not equally costly, which is why the rules are generous: a false positive is cheap and visible
+     (MyCal fetches, fails to parse, answers 400, and the error appears beside the button the user pressed), while a
+     false negative is invisible — no button, and nothing to indicate one was owed.
+
+     A `webcal:` link qualifies on its scheme alone, and is rewritten to `https:` before being sent, since MyCal
+     fetches over HTTP. **A `webcal:` link cannot currently reach
+     this**: HTML sanitization allows `http://`, `https://` and `mailto:` hrefs only, so an inbound `webcal:` link is
+     stored with its `<a>` unwrapped. Allowing that scheme would be a change to the sanitization allowlist (see § HTML
+     Sanitization), not to this rule. Every other scheme is ignored, including
+     `mailto:`, `javascript:` and `data:`, as is any URL carrying embedded credentials (`https://user:pass@…`), which
+     would otherwise have MyCal fetch with a sender's password. Relative hrefs are skipped rather than resolved: a mail
+     body has no base URL, and MyMail's own origin is not one. Links are deduplicated by the rewritten URL, since the
+     same event commonly appears as both a button and a visible URL, and it is that rewritten URL — the one that would
+     be fetched — that is displayed, in full: the query commonly carries the identifiers the endpoint needs, so nothing
+     in the display path may truncate or rewrite it. The request body is `{"url": "…"}` as JSON: MyMail never fetches
+     the link itself, and does not attempt to judge the host either — MyCal fetches and parses it server-side, under
+     its own SSRF guard and size cap (see § Calendar Import in `ARCHITECTURE.md`). Only the HTML body is scanned;
+     calendar URLs in a plain-text body are not detected.
+
 3. **Compose / Reply / Reply All / Forward** — Form with From selector, To/Cc/Bcc/Reply-To fields (To/Cc/Bcc offer
    address autocomplete), Subject, rich-text body editor (Quill), file upload for attachments. For Reply / Reply All /
    Forward, a read-only quoted-text block sits below the editor (see Body quoting). A **Send later** toggle reveals a
@@ -1169,8 +1213,14 @@ bug.
   server that is not there. In demo mode the page fetches the document and
   passes it as `srcdoc`; the demo's response repeats its CSP in a `<meta>`,
   since response headers are lost on that path.
-- **No MyCal integration.** Demo mode has no server to relay an import through,
-  so the "Import to Calendar" action is never offered.
+- **No MyCal integration.** A demo build injects no MyCal URL — `__serverConfig`
+  carries `demo` and nothing else — so neither "Import to Calendar" action is
+  offered: not on an `.ics` attachment, and not on a calendar link in the body.
+  *(This said the action "is never offered", which overstates it: the MyCal URL
+  field is still shown in Preferences, and setting it there brings both actions
+  back. Neither needs a MyMail backend — the attachment bytes come from the
+  service worker, and the link form is a URL handed to MyCal, which fetches it
+  itself — so against a reachable MyCal they would work.)*
 - **Schema-violation messages are worded differently.** Where a request breaks a
   constraint declared in `openapi.yaml` rather than one a handler checks — an
   over-long `q` or `from_addr`, a non-numeric `limit` — the server relays the

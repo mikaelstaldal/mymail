@@ -310,7 +310,7 @@ tsc --project web/ts/tsconfig.json --noEmit
 # Run the frontend tests (needs web/static/*.js compiled first; unpack.sh is a
 # no-op once web/ts/vendor/test/node_modules/ exists)
 web/ts/vendor/test/unpack.sh
-node --test web/ts/quotetext.test.mjs web/ts/wrap.test.mjs web/ts/address.test.mjs web/ts/signature.test.mjs web/ts/confirm.test.mjs web/ts/demo.test.mjs
+node --test web/ts/quotetext.test.mjs web/ts/wrap.test.mjs web/ts/address.test.mjs web/ts/signature.test.mjs web/ts/confirm.test.mjs web/ts/icslinks.test.mjs web/ts/demo.test.mjs
 
 # Run a single frontend test
 node --test --test-name-pattern 'depth cap' web/ts/quotetext.test.mjs
@@ -392,6 +392,24 @@ everything above the store is real code answering real `Request` objects, so the
 parity rules (which folders refuse a move, what deleting does where, how threads
 close over References) are asserted against the code that implements them rather
 than a paraphrase of it.
+
+`icslinks.test.mjs` does need a DOM. `web/ts/util/icslinks.ts` decides which
+links in an incoming HTML body get an "Import to Calendar" button, and every
+rule in it is a decision about markup an unauthenticated sender wrote — which is
+why it is a function taking a string rather than something MessageDetail does
+inline. The scheme allowlist is the load-bearing part: it is what keeps a
+`javascript:` or `data:` href out of the URL that gets POSTed to MyCal, and what
+stops a relative href being resolved against MyMail's own origin.
+
+The detection rules themselves lean **generous**, and the reason is worth
+keeping in mind before tightening one: a false positive is cheap and visible
+(MyCal fetches, fails to parse, 400, and the error lands beside the button the
+user pressed), while a false negative is invisible — no button, and nothing to
+say one was owed. So a whole path segment of `ics`/`ical`/`icalendar` qualifies
+as well as an `.ics` suffix, because extensionless endpoints are what bulk-mail
+platforms send. What keeps that principled is that every test is equality
+against a whole segment or a whole parameter value, never a substring, and
+never against the link's text.
 
 ## Important Implementation Notes
 

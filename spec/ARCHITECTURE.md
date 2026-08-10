@@ -107,6 +107,28 @@ Bulk endpoints return 404 if any ID is missing — all-or-nothing, no partial su
 ### Web UI: No Bundler
 TypeScript compiled with `tsc` only. ES6 modules + import maps. Preact, Quill and Lucide vendored. All assets embedded in the binary.
 
+### Calendar Import Talks to MyCal from the Browser
+"Import to Calendar" — for an `.ics` attachment and for a calendar link in an HTML body — POSTs to
+`{mycal}/api/v1/import-single` from the page. No MyMail endpoint is involved in either, and the Go side has no
+knowledge of the feature beyond injecting the configured MyCal URL into `__serverConfig`. The sibling apps are assumed
+to share an origin and an auth realm, which is why the cross-app request needs no CORS handling in MyCal.
+
+For the link form this is also a security boundary: **MyMail never fetches a URL taken from a message.** MyCal's
+`import-single` already accepts `{"url": …}` and fetches it itself, so the alternative — a fetching proxy endpoint in
+MyMail — would mean a *second* implementation of the same server-side fetch, and MyMail has none of the machinery that
+makes one safe. What the frontend does instead is decide which links qualify (`util/icslinks.ts`), which is where the
+scheme allowlist lives.
+
+Note what that does and does not do about SSRF. The URL is still attacker-chosen — it comes from mail — and
+`util/icslinks.ts` is **not** a filter against it: a page cannot resolve DNS or re-check at dial time, so a loopback or
+link-local URL is deliberately offered rather than silently dropped. The control this design depends on is MyCal's, and
+it is a real one: `httputil.ValidateExternalURL` rejects `localhost`, loopback, private, link-local and unspecified
+addresses before the request; `SafeDialContext` resolves and re-checks at dial time, which is what defeats DNS
+rebinding; `SafeCheckRedirect(10)` re-validates every hop and bounds the chain; and `maxImportSize` (10 MiB) caps the
+body. Reaching any of it still takes an explicit click on a named link. **If that guard is ever weakened, this feature
+is what points at it** — a change on MyCal's side, in a repository where nothing records that MyMail hands it URLs
+from strangers.
+
 ### Authentication
 HTTP Basic Auth via htpasswd file (bcrypt). CSRF protection via Origin/Referer validation middleware.
 
