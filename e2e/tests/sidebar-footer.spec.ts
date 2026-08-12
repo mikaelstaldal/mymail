@@ -28,6 +28,67 @@ import { test, expect, type Page } from '@playwright/test';
 // is kept with it. Where MyMail differs the comment says what changed and why;
 // where MyCal covers something MyMail has no counterpart for, the comment says
 // that rather than dropping it silently.
+//
+// ===========================================================================
+// COVERAGE MAP — which silent breakage each case actually catches
+// ===========================================================================
+//
+// web/AGENTS.md § "The sidebar footer is governed from outside this repo" names
+// the plausible tidy-ups to the `.sidebar-theme-toggle, .sidebar-settings-link`
+// rule in web/static/app.css that break the contract while changing nothing you
+// can see in MyMail alone. **This is the record of which of them a test here
+// catches**, and it is not repeated there.
+//
+//   THE EDIT                                    CAUGHT BY
+//   ------------------------------------------  --------------------------------
+//   Deleting `flex-shrink: 0`, `text-align:      the pinned declarations are
+//   center`, `font-weight: 400` or               actually declared, not inherited
+//   `font-style: normal` as redundant            — it reads the rule off the
+//                                                CSSOM, which is the only way to
+//                                                see a no-op declaration go
+//   Adding `font-weight`, `font-style` or        the same case. The class
+//   `font` to a base `button` rule               selector outranks a bare
+//                                                `button` rule, so that pin is
+//                                                what makes this harmless — this
+//                                                edit is the REASON the pin
+//                                                exists, not a separate risk
+//   Restoring `outline: none` on their           the two focus indicator meets
+//   `:focus-visible`, or adding a                3:1 cases, and controls keep a
+//   `@media (forced-colors: active)` block       focus indicator under forced
+//   containing `outline: revert`                 colors. Both silently undo a
+//                                                WCAG 1.4.11 fix; the second
+//                                                looks like it is protecting it
+//   Re-adding `class="folder-icon"` to the       the footer icons are 16px and at
+//   two footer icons (it dims to opacity .85)    full opacity
+//   Changing `.sidebar-footer`'s padding —       every (8, 8) case; and the 4px
+//   it is not spacing, it IS the buttons'        floor itself by the focus
+//   (8, 8) position on screen                    outline has its 4px of clearance
+//                                                on the window-facing sides
+//   Folding the pair into a generic              the CSSOM case matches the
+//   icon-button class, or renaming either        pair's selector text exactly,
+//   selector                                     and every locator in this file
+//                                                is one of the two class names
+//   Retuning `--surface`                         resting label meets 4.5:1 and
+//                                                focus indicator meets 3:1, in
+//                                                both themes — see the margins
+//                                                recorded beside those cases
+//
+// **What nothing here catches.** Two, and the first is catchable by no test
+// anywhere:
+//
+//   - **Normalising `0.80rem` to `0.8rem`.** The trailing zero is the convention
+//     that makes one grep find the value in all three repos — and the rest of
+//     app.css uses `0.8rem`, so the canonical spelling looks like the odd one
+//     out and any formatter would "fix" it unprompted. The computed AND the
+//     serialised values are identical, so nothing in the CSSOM or the rendering
+//     can distinguish them. Held by review alone; the only thing anywhere that
+//     sees it is `../mysuite/tools/check-contract.py`, which nobody's CI runs.
+//   - **Removing `--focus-ring` as unused.** These two controls no longer use
+//     it, but many other rules still do. Not covered here — this suite asserts
+//     nothing about the rules that still read it.
+//
+// And the standing one, stated at the top of this header: this suite renders one
+// app and says nothing about whether the three still agree.
 test.describe('Sidebar footer contract', () => {
   test.beforeEach(async ({ page }) => {
     await page.goto('/');
@@ -966,6 +1027,25 @@ test.describe('Sidebar footer contract', () => {
     //
     // Asserted against the token rather than a literal so the palette stays the
     // single source of the value; the ratios below are what pin the value itself.
+    //
+    // **`--surface` looks like an ordinary theme colour and is not.** It also
+    // feeds `--topbar-bg`, `--surface-bg` and `.btn-ghost`, so a retune reads as
+    // a palette tweak — but the sidebar paints it, which makes it the colour
+    // behind these two controls, and the contract records that colour per app as
+    // a literal. Moving it is a spec change, and these are the margins:
+    //
+    //   Light has 0.334 of headroom on WCAG 1.4.3 for the label. `#f9fafb` still
+    //   passes at 4.626:1; `#f3f4f6` fails at 4.393:1 — which is why MyCal
+    //   deviates from the shared label colour rather than us sharing its
+    //   backdrop.
+    //
+    //   Dark has room for about two shades before both gates go. Lightening
+    //   toward `#374151`, the label loses 1.4.3 around `#313b4a` and the outline
+    //   loses 1.4.11 around `#333d4c`; at `#374151` — this stylesheet's own dark
+    //   border colour, so a plausible pick — they are 4.060:1 and 2.803:1.
+    //
+    // The cases below assert the *thresholds*, so a retune that stays inside them
+    // passes, correctly. They are a floor, not a licence to move the value.
     test(`controls sit on the sidebar surface in ${mode} mode`, async ({ page }) => {
       if (dark) await useDarkTheme(page);
       const backdrop = await backdropOf(page, SETTINGS);

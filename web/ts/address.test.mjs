@@ -1,7 +1,27 @@
+// node:test coverage for web/ts/util/address.ts (exercised via its compiled
+// output, web/static/util/address.js). Run via build.sh or directly:
+//   node --test web/ts/address.test.mjs
+//
+// This module decides whether the Send button is offered at all — in
+// ComposeForm, and on a draft in MessageDetail — by answering ahead of time the
+// question the server answers with a 400: is there at least one recipient, and
+// is every address list well-formed. It is a pre-flight check and never the
+// authority; a list it lets through that the server rejects still surfaces the
+// 400 inline, so the cost of being wrong is asymmetric and the tests below are
+// about not refusing to send something that would have sent.
+//
+// **Its parser is a third copy of the same rules**, alongside
+// service.ParseAddressList on the server and web/ts/demo/text.ts in the demo
+// backend. That is unavoidable rather than an oversight — the demo files are
+// classic worker scripts with no imports to share with — and the three must
+// move together. A rule changed here and nowhere else is a Send button that
+// disagrees with the server that answers it.
+//
+// No DOM is involved: this is pure string handling, so there is no jsdom
+// install here.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-// Pure string handling — no DOM needed, so no jsdom install here.
 const {
   isValidAddressList, hasValidRecipient, isValidAddress, splitAddressList, formatAddress,
   normalizeAddressEntry,

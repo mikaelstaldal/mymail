@@ -19,6 +19,11 @@
 // behaviour that carries a parity rule: which folders refuse a move, what
 // deleting does in Trash versus Inbox, how threads close over References, and
 // the demo's own auto-reply.
+//
+// Parity with internal/handler and internal/repository is a contract (see the
+// root AGENTS.md § Demo mode), and running the real endpoints here is what makes
+// these assertions statements about the code that implements it rather than
+// about a paraphrase of it.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';

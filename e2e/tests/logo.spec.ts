@@ -46,6 +46,83 @@ import { test, expect, type Page } from '@playwright/test';
 // specifically: its glyph is sized by an SVG attribute from `<Icon size={17}>`,
 // which any author CSS rule matching that SVG would silently outrank
 // (`app-logo.md` §5).
+//
+// ===========================================================================
+// COVERAGE MAP — which silent breakage each case actually catches
+// ===========================================================================
+//
+// web/AGENTS.md's two contract sections name the ordinary-looking edits that
+// break either contract while changing nothing visible in MyMail alone. **This
+// is the record of which of them a test here catches**, and it is not repeated
+// there. Every "caught" below was demonstrated red before being claimed.
+//
+// A green suite bounds what was checked, not what is correct — so read the
+// second list as carefully as the first.
+//
+//   THE EDIT                                    CAUGHT BY
+//   ------------------------------------------  --------------------------------
+//   Deleting `size={17}` (Icon defaults to 16)   badge and glyph render at
+//                                                contract size — 4 cases red
+//   Changing `.sidebar-header`'s padding         the badge sits 16px from the
+//                                                left and 14px from the top — 4×
+//   Touching `gap` on `.sidebar-header`          the badge is 8px from the label
+//   Retuning `--primary` (the badge half only)   badge fill and glyph colour
+//                                                follow the theme
+//   Wrapping the badge in a link, or giving      the badge is decorative and the
+//   it an `aria-label`                           label carries the identity
+//   Editing `body`'s font stack in app.css       the label resolves the contract
+//                                                font stack
+//   `1.1rem` → `17.6px` on `.sidebar-header`     the label is 1.1rem/600 — at the
+//                                                24px root only; green at 16px
+//   Wrapping the label in a `<span>`, or         the `labelParentIsHeader` flag in
+//   moving font-size/weight onto a wrapper       that same case. The values stay
+//                                                green; the flag is what fails,
+//                                                and that is intended
+//   Removing `align-self: flex-start` from       the 20/24/32px placement cases
+//   `.logo-icon`                                 and both line-height mutations —
+//                                                **not** the 16px case
+//   Adding `line-height: 1` to                   three of the label-placement
+//   `.sidebar-header`                            cases. Measured: the badge's own
+//                                                cases all stay green, which is
+//                                                the whole point of that item
+//   Padding or resizing `.sidebar-reload-btn`    the label sits at 14.797, at the
+//                                                default root
+//
+// **What nothing here catches.** Four of these are invisible to any rendering,
+// so no amount of assertion would reach them:
+//
+//   - **`1.1rem` → `1.10rem`, and `1.1rem` → `1.1em`.** The first is identical
+//     computed AND identical serialised; the second is identical so long as
+//     nothing between `body` and the label sets a size, which nothing does.
+//     `../mysuite/tools/check-contract.py` compares declaration text and sees
+//     both — and nobody's CI runs it. (`17.6px` above IS caught; do not read
+//     "a rendered suite cannot hold §3.2" as covering all three substitutions.
+//     `app-name-label.md` §3.2 tabulates which mechanism catches which.)
+//   - **Replacing `.logo-icon`'s `color: #fff` with `var(--on-color-fg)`**,
+//     which `.settings-badge` already uses on the same fill. Identical today,
+//     because `--on-color-fg` is defined once in `:root` and never
+//     theme-scoped. The colour assertions compare *resolved* values, so they
+//     pass on the day of the swap and would go red only on the later edit that
+//     scopes the token — by which time the swap is not what anyone is looking
+//     at. The harmlessness is conditional and the condition lives elsewhere
+//     (`../mysuite/AGENTS.md` §3.3).
+//   - **Adding a CSS rule that sizes the logo's SVG, to match MyCal.** The
+//     rendered size stays 17, so everything here stays green — but the rule
+//     outranks the attribute, and the next edit to `size=` becomes a silent
+//     no-op. MyMail has no CSS rule anywhere that sizes an SVG (`.lucide` sets
+//     `vertical-align` and `flex-shrink` and no dimensions). Change the prop,
+//     not the stylesheet.
+//   - **Retuning `--primary`, the focus-outline half.** `badge fill and glyph
+//     colour follow the theme` covers the badge and never will cover this:
+//     `--primary` is also the focus-outline colour that the sidebar-footer
+//     contract holds to WCAG 1.4.11 with under one point of headroom
+//     (`app-logo.md` §7.3, `sidebar-footer.md` §6.2). That half belongs to
+//     sidebar-footer.spec.ts, in both themes, against its own thresholds.
+//
+// Plus the two named at the top of this header — the mark's ink extent
+// (`app-logo.md` §3.3, and see the note above the placement tests), and which
+// font actually renders — and the standing one: this suite renders one app and
+// says nothing about whether the three still agree.
 test.describe('App logo and app-name label contracts', () => {
   const BADGE = '.sidebar-header .logo-icon';
   const HEADER = '.sidebar-header';

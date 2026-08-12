@@ -29,10 +29,10 @@ silently. **Read the logo's first**: its mark is a vendored third-party drawing 
 the bundle does, and that is the one thing here no test can catch.
 
 *(This paragraph said "**nothing in this repository tests any of it**" until 2026-08-09, when
-`e2e/tests/logo.spec.ts` was added. Two of the three now have a rendered suite — `web/AGENTS.md`
-says per item which, and what those suites still cannot see. The false version is worth leaving
-visible because it failed in the reassuring direction: it told a reader not to look for the guard
-that would have caught them.)*
+`e2e/tests/logo.spec.ts` was added. Two of the three now have a rendered suite — each spec's header
+carries a coverage map saying per item which edit it catches, and what it still cannot see. The
+false version is worth leaving visible because it failed in the reassuring direction: it told a
+reader not to look for the guard that would have caught them.)*
 
 ## Build & Development Commands
 
@@ -282,9 +282,9 @@ test problem; read the contract the failing spec names before touching the asser
 
 **`e2e/tests/logo.spec.ts` covers the badge and the app-name label**, added 2026-08-09 with the
 `align-self: flex-start` fix it exists to defend. *(This said "**the logo is a separate contract and
-this suite does not cover it**" until then.)* What it holds and — in four bullets — what it cannot
-are in `web/AGENTS.md` § "The app logo is governed from outside this repo"; the label's own edits
-are in the section after it.
+this suite does not cover it**" until then.)* What it holds, and what it cannot, is the coverage map
+in its own header; the edits that break either contract are in `web/AGENTS.md` § "The app logo is
+governed from outside this repo" and the section after it.
 
 How to run a single spec, why not to start a server by hand, and the CSRF, `-init` and `-sendmail`
 flags a hand-started server needs are in `e2e/AGENTS.md`, loaded automatically when working under

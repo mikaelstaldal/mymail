@@ -12,10 +12,29 @@
 // or snoozed time can be in the past while the once-a-minute scheduler catches
 // up with it.
 //
+// The symmetry the both-directions cases rest on is a property of the function
+// and not merely of the test: formatDateSchedule's weekday branch is
+// `Math.abs(daysAgo) <= 6`, so a value four days behind gets the same named day
+// one four days ahead does. **If you narrow that guard, narrow the claim here
+// too** — these cases would then be asserting a symmetry the code no longer has.
+//
+// The file also covers formatDateAdaptive, which the Scheduled/Snoozed work did
+// not add but did put at risk: the two now share fullTitle, timeOfDay and
+// calendarDaysAgo, so its own ladder is asserted here rather than left to the
+// e2e suite. The one place they deliberately disagree — a year-old message drops
+// its time, a year-away schedule keeps it — is asserted as a pair, since that is
+// the kind of difference a later tidy-up would erase.
+//
 // No DOM is involved. Assertions avoid the parts that vary with the host
 // locale (weekday and month names, and the time separator): what is asserted is
 // the prefix that names the day and the presence of the time of day, never the
 // spelling of either.
+//
+// Nor is the wiring covered, since it is not reachable from a function: nothing
+// here checks that FolderView asks for `send_at` in folder 5 and `snoozed_until`
+// in folder 6, or that MessageList renders the column at all. That is the
+// component-rendering gap every test in web/ts/ works within, not one specific
+// to these two formatters.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { fileURLToPath } from 'node:url';

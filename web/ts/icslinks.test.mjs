@@ -4,8 +4,23 @@
 //
 // findIcsLinks decides which links in an incoming HTML mail body get an
 // "Import to Calendar" button — so every case here is a decision about markup
-// that arrived from outside. The scheme allowlist in particular is the reason
-// `javascript:` and `data:` hrefs never reach a fetch.
+// that an unauthenticated sender wrote, which is why it is a function taking a
+// string rather than something MessageDetail does inline. The scheme allowlist
+// is the load-bearing part: it is what keeps a `javascript:` or `data:` href out
+// of the URL that gets POSTed to MyCal, and what stops a relative href being
+// resolved against MyMail's own origin.
+//
+// **The detection rules lean generous, deliberately**, and that is worth
+// knowing before tightening one. A false positive is cheap and visible — MyCal
+// fetches, fails to parse, returns 400, and the error lands beside the button
+// the user pressed. A false negative is invisible: no button, and nothing
+// anywhere to say one was owed. So a whole path segment of `ics` / `ical` /
+// `icalendar` qualifies as well as an `.ics` suffix, because extensionless
+// endpoints are what bulk-mail platforms send.
+//
+// What keeps that principled rather than merely loose is the shape of every
+// test below: equality against a **whole** segment or a **whole** parameter
+// value, never a substring, and never against the link's text.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { fileURLToPath } from 'node:url';

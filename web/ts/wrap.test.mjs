@@ -11,9 +11,15 @@
 // — that a break moves rather than accumulating, and that a break the author
 // typed is never dissolved.
 //
+// This is deliberately the **whole** of the wrapping logic. Anything about
+// where a line breaks belongs in wrap.ts, where it can be tested; ComposeForm
+// only turns the resulting edits into a Quill delta and decides which breaks
+// are the editor's own. If a wrapping decision starts being made in the view,
+// it has left the only place that can hold it.
+//
 // No DOM is involved, so unlike quotetext.test.mjs this needs no jsdom. What
-// cannot be reached from here is the Quill wiring in ComposeForm: which breaks
-// count as the editor's own, and how the edits become a delta.
+// cannot be reached from here is that Quill wiring: which breaks count as the
+// editor's own, and how the edits become a delta.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { fileURLToPath } from 'node:url';

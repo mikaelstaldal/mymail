@@ -10,63 +10,62 @@ gets a `##` section below of its own. They exist for the same reason — they na
 ordinary-looking edits that break a cross-repo contract while changing nothing you can see in
 MyMail alone.
 
+**What a test catches is recorded with the test, not here.** Each of the three sections points at a
+coverage map in the spec file that holds its half of the contract; those maps say, item by item,
+which case goes red and which items nothing anywhere can see. They are deliberately not duplicated
+into this file — a copy is a second source of truth that goes stale without anyone editing it
+(`../mysuite/AGENTS.md` §4). A green suite bounds what was checked, not what is correct, so read the
+map before assuming an edit below is safe.
+
 ## The sidebar footer is governed from outside this repo
 
-The rule for `.sidebar-theme-toggle, .sidebar-settings-link` in `web/static/app.css` looks like ordinary CSS with
-a verbose comment. Every declaration in it is load-bearing, and each of the following is a plausible tidy-up that
-breaks the suite's consistency.
+The rule for `.sidebar-theme-toggle, .sidebar-settings-link` in `web/static/app.css` looks like
+ordinary CSS with a verbose comment. Every declaration in it is load-bearing, and the contract is
+`../mysuite/spec/sidebar-footer.md`. Each of the following is a plausible tidy-up that breaks the
+three apps' consistency:
 
-**`e2e/tests/sidebar-footer.spec.ts` catches most of them, and it now runs in CI** — the step executes on
-every push to `main` (see the repo-root `AGENTS.md` § E2E Tests for the evidence and the dates). Still run
-`./build.sh && ./test-e2e.sh` before you push: CI tells you afterwards.
-
-And it does not catch you in the way you probably mean: the workflow triggers on `push` to `main`, so a
-breaking commit is already on `main` by the time the suite is red. What the gate prevents is a broken
-contract reaching Pages or the rolling release — not the commit landing.
-
-It is not a licence to stop reading either: the first item below is catchable by no test at
-all, and a green suite bounds what was checked rather than what is correct. Each item says where it stands.
-
-- **Normalising `0.80rem` to `0.8rem`.** The trailing zero is the convention that makes one grep find the value in
-  all three repos. The rest of this file uses `0.8rem`, so the canonical spelling looks like the odd one out — and
-  any formatter would "fix" it unprompted. **Not catchable by any test** — the computed *and* serialised values are
-  identical, so nothing in the CSSOM or the rendering can distinguish them. Held by review alone; the only thing
-  anywhere that sees it is `../mysuite/tools/check-contract.py`, which nobody's CI runs.
-- **Deleting `flex-shrink: 0`, `text-align: center`, `font-weight: 400` or `font-style: normal` as redundant.**
-  They are no-ops *today*, pinned because the two controls reach the same values by different routes: the toggle
-  is a `<button>` taking them from the UA stylesheet, Settings is an `<a>` inheriting them from `body`. Caught by
-  *the pinned declarations are actually declared, not inherited*, which reads the rule off the CSSOM — deleting
-  any of them changes nothing the toggle renders, which is the whole reason a computed-value test cannot hold them.
-- **Adding `font-weight`, `font-style` or `font` to a base `button` rule.** That would move the toggle and not the
-  anchor — a divergence inside one app, between two controls 6px apart. The class selector outranks a bare `button`
-  rule, so the pin above is what makes this harmless: this item is the reason that one exists, not a separate risk.
-- **Restoring `outline: none` on their `:focus-visible`,** or adding a `@media (forced-colors: active)` block
-  containing `outline: revert`. Both silently undo a WCAG 1.4.11 fix; the second looks like it is protecting it.
-  Caught by the two *focus indicator meets 3:1* tests and by *controls keep a focus indicator under forced colors*.
-- **Removing `--focus-ring` as unused.** These two controls no longer use it, but many other rules still do.
-  **Not covered here** — this suite asserts nothing about the rules that still read it.
-- **Re-adding `class="folder-icon"` to the two footer icons.** It dims them to `opacity: 0.85`; the contract wants
-  full opacity. Caught by *the footer icons are 16px and at full opacity*.
-- **Changing `.sidebar-footer`'s padding.** It is not spacing — it *is* the buttons' (8, 8) position on screen,
-  and below 4px it starts cropping the focus outline. Caught by every (8, 8) test, and the floor itself by *the
-  focus outline has its 4px of clearance on the window-facing sides*.
-- **Folding the pair into a generic icon-button class**, or renaming either selector. Caught: the CSSOM test
-  matches the pair's selector text exactly, and every locator in the spec is one of the two class names.
+- **Normalising `0.80rem` to `0.8rem`.** The trailing zero is the convention that makes one grep find
+  the value in all three repos. The rest of this stylesheet uses `0.8rem`, so the canonical spelling
+  looks like the odd one out — and any formatter would "fix" it unprompted.
+- **Deleting `flex-shrink: 0`, `text-align: center`, `font-weight: 400` or `font-style: normal` as
+  redundant.** They are no-ops *today*, pinned because the two controls reach the same values by
+  different routes: the toggle is a `<button>` taking them from the UA stylesheet, Settings is an
+  `<a>` inheriting them from `body`.
+- **Adding `font-weight`, `font-style` or `font` to a base `button` rule.** That would move the
+  toggle and not the anchor — a divergence inside one app, between two controls 6px apart. The class
+  selector outranks a bare `button` rule, so the pin above is what makes this harmless: this item is
+  the reason that one exists, not a separate risk.
+- **Restoring `outline: none` on their `:focus-visible`,** or adding a
+  `@media (forced-colors: active)` block containing `outline: revert`. Both silently undo a WCAG
+  1.4.11 fix; the second looks like it is protecting it.
+- **Removing `--focus-ring` as unused.** These two controls no longer use it, but many other rules
+  still do.
+- **Re-adding `class="folder-icon"` to the two footer icons.** It dims them to `opacity: 0.85`; the
+  contract wants full opacity.
+- **Changing `.sidebar-footer`'s padding.** It is not spacing — it *is* the buttons' (8, 8) position
+  on screen, and below 4px it starts cropping the focus outline.
+- **Folding the pair into a generic icon-button class**, or renaming either selector.
 - **Retuning `--surface`.** It looks like an ordinary theme colour — it also feeds `--topbar-bg`,
   `--surface-bg` and `.btn-ghost` — but the sidebar paints it, so it is the colour behind these two
-  controls, and the contract records that colour per app as a literal (`#ffffff` light, `#1f2937` dark).
-  Moving it is a spec change, and the margins are thin. Light has 0.334 of headroom on WCAG 1.4.3 for
-  the label: `#f9fafb` still passes at 4.626:1, `#f3f4f6` fails at 4.393:1 — which is why MyCal deviates
-  from the shared label colour rather than us sharing its backdrop. Dark has room for about two shades
-  before both gates go: lightening toward `#374151`, the label loses 1.4.3 around `#313b4a` and the
-  outline loses 1.4.11 around `#333d4c`; at `#374151` — this file's own dark border colour, so a
-  plausible pick — they are 4.060:1 and 2.803:1. Caught by *resting label meets 4.5:1* and *focus indicator meets
-  3:1*, in both themes — they assert the thresholds, so a retune that stays inside them passes, correctly.
+  controls, and the contract records that colour per app as a literal (`#ffffff` light, `#1f2937`
+  dark). Moving it is a spec change, and the margins are thin; the shade-by-shade figures are
+  recorded beside the contrast cases in the spec.
 
-Also: `web/static/` is embedded with `//go:embed`, so **a running server keeps serving the CSS it started with**.
-Rebuilding does not change what an already-running server serves, and a stale measurement looks exactly like a
-passing one. See `../mysuite/spec/measurement-protocol.md` before measuring anything here — and run the suite with
-`./build.sh && ./test-e2e.sh`, which does the whole sequence including the md5 served-vs-disk check.
+**`e2e/tests/sidebar-footer.spec.ts` is this repo's whole half of the contract, and its header
+carries the coverage map for the list above** — including the two items nothing here catches, one of
+which is catchable by no test at all.
+
+The suite runs in CI on every push to `main` (root `AGENTS.md` § E2E Tests has the evidence and the
+dates). Run `./build.sh && ./test-e2e.sh` before you push anyway, and note what the gate does and
+does not mean: the workflow triggers on `push`, so a breaking commit is already on `main` by the time
+the suite is red. What it prevents is a broken contract reaching Pages or the rolling release — not
+the commit landing.
+
+Also: `web/static/` is embedded with `//go:embed`, so **a running server keeps serving the CSS it
+started with**. Rebuilding does not change what an already-running server serves, and a stale
+measurement looks exactly like a passing one. See `../mysuite/spec/measurement-protocol.md` before
+measuring anything here — and run the suite with `./build.sh && ./test-e2e.sh`, which does the whole
+sequence including the md5 served-vs-disk check.
 
 ## The app logo is governed from outside this repo
 
@@ -76,39 +75,14 @@ three-repo contract, specified in **`../mysuite/spec/app-logo.md`**. Its box, ra
 size, the mark's minimum extent, the gap to the app name and the badge's decorative status are all
 **values MyMail does not get to choose**. Read that document before changing any of them, and make
 the change there first: **changing any of it is a change in MyCal and MyNotes too.** The values are
-deliberately not repeated here (`../mysuite/AGENTS.md` §4) — a copy is a second source of truth that
-goes stale without anyone editing it.
+deliberately not repeated here (`../mysuite/AGENTS.md` §4).
 
-**`e2e/tests/logo.spec.ts` now tests some of it, and this paragraph used to say nothing did.** That
-was true when it was written; the suite was added with the `align-self: flex-start` fix below.
-Every item in this section says where it stands, and several still say *nothing*.
-
-What the suite holds: the badge's box, radius and rendered glyph size, the mark's centring inside
-it, the badge's zero padding/margin/border, the 8px gap to the label, the fill and glyph colour in
-both themes, the badge's decorative status, and `(16, 14)` at four root sizes — plus the mutation
-test that makes the last of those mean something (`app-logo.md` §4.2). It also holds MyMail's half
-of the app-name-label contract; see the next section.
-
-What it does not, and cannot:
-
-- **The mark's ink extent** (`app-logo.md` §3.3). Our mark is stroke-only, so a geometry box
-  asserted against an ink floor would pass while being the wrong statistic. The right measurement
-  is the pixel count in the Lucide-upgrade procedure below, and it belongs to the event that can
-  break it rather than to every run. The spec file records the omission as a decision.
-- **`1.1rem` → `1.10rem`, and `1.1rem` → `1.1em`.** The first is identical computed *and*
-  identical serialised; the second is identical everywhere so long as nothing between `body` and
-  the label sets a size, which nothing does. Neither is visible to any rendering, at any number of
-  roots. `../mysuite/tools/check-contract.py` compares declaration text and sees both, and
-  nobody's CI runs it. *(`1.1rem` → `17.6px` **is** caught, at the 24px root — see the label
-  section below. `app-name-label.md` §3.2 has the table of which mechanism catches which
-  substitution; do not read "a rendered suite cannot hold §3.2" as covering all three.)*
-- **Which font actually renders.** `system-ui` resolves per machine (`app-name-label.md` §3.1).
-- **Whether the three apps still agree.** This suite renders one app. `../mysuite/AGENTS.md` §2.5
-  is explicit that three per-app suites are not a cross-repo check and that adding more cannot make
-  one.
-
-So this section is no longer the only guard, and it is still the only thing that will stop most of
-the edits below — a green suite bounds what was checked, not what is correct.
+**MyMail's half is `e2e/tests/logo.spec.ts`**, which holds this contract and the app-name-label one
+below in the same file, because the two are one row and most of the edits move both. Its header
+carries the coverage map: which case catches which of the edits below, and the several things
+nothing catches. *(This section said nothing tested any of it until 2026-08-09, when
+that suite was added with the `align-self: flex-start` fix. The false version is worth remembering
+because it failed in the reassuring direction.)*
 
 ### After upgrading the vendored Lucide bundle, re-measure the mark
 
@@ -152,8 +126,7 @@ stays green.
 
 - **Deleting `size={17}` because `<Icon>` has a default.** It does — 16 — so the glyph would shrink
   by 1px, which is invisible without a sibling app beside it. The contract mandates the *rendered*
-  17, not the mechanism. Caught by *badge and glyph render at contract size* — demonstrated, by
-  dropping the prop and watching those four cases go red.
+  17, not the mechanism.
 - **Adding a CSS rule that sizes the logo's SVG, to match MyCal.** MyCal does size its glyph in CSS
   and is right to; the contract sanctions both layers. But **MyMail has no CSS rule anywhere that
   sizes an SVG** (`.lucide` sets `vertical-align` and `flex-shrink` and no dimensions), and adding
@@ -165,45 +138,32 @@ stays green.
   **focus-outline colour the sidebar-footer contract holds to WCAG 1.4.11 with under one point of
   headroom** (`app-logo.md` §7.3, `sidebar-footer.md` §6.2; the operands are recorded next to the
   rule in `web/static/app.css`). A change made for the logo lands on an accessibility obligation in
-  a different contract. If you think the fill needs changing, raise it — do not change it. The
-  badge half is caught by *badge fill and glyph colour follow the theme*; **the focus-outline half
-  is not caught by that test and never will be** — it is the sidebar-footer suite's, in both themes,
-  against its own thresholds.
+  a different contract. If you think the fill needs changing, raise it — do not change it.
 - **Replacing `.logo-icon`'s `color: #fff` with `var(--on-color-fg)`**, which `.settings-badge`
   already uses on the same fill. Identical today, because `--on-color-fg` is defined once in `:root`
   and never theme-scoped. It becomes a divergence the day somebody scopes it — the harmlessness is
-  conditional and the condition lives elsewhere (`../mysuite/AGENTS.md` §3.3). **Not caught**: the
-  colour assertions compare resolved values, so they pass on the day of the swap and go red only on
-  the later edit that scopes the token — by which time the swap is not what anyone is looking at.
+  conditional and the condition lives elsewhere (`../mysuite/AGENTS.md` §3.3).
 - **Touching `gap` on `.sidebar-header`.** It is the badge-to-app-name gap, pinned by
   `app-logo.md` §3.4, and load-bearing three times over: MyNotes' sidebar width was sized against it
   (`app-logo.md` §10.1), and it is a term in the label's `x`, which `app-name-label.md` §3.3 checks
   as a consequence of that pin rather than pinning separately. It is not spacing you may tune.
-  Caught by *badge and glyph render at contract size*, which measures the gap from a `Range` over
-  the label text rather than reading the `gap` property back.
 - **Looking for a selector for the app name and "fixing" its absence.** MyMail's app name is a
   **bare text node** inside `.sidebar-header`, with no element and no class. That is recorded in
   `app-logo.md` §1 on purpose, so a blank cell there does not read as an oversight. **The label's
-  font, size and placement are now governed by `../mysuite/spec/app-name-label.md`** — see the next
+  font, size and placement are governed by `../mysuite/spec/app-name-label.md`** — see the next
   section — and that contract deliberately mandates **no** selector, because two of the three apps
   have no element for the label and requiring one would make things worse (`app-name-label.md`
-  §8.4). So the advice stands and its reason has changed: leave it a bare text node. Caught, in the
-  sense that matters — wrapping it is layout-neutral, so nothing sees the wrap itself, but
-  `e2e/tests/logo.spec.ts` records which element the label's values were read from and fails with a
-  message telling you to re-derive them.
+  §8.4). So the advice stands and its reason has changed: leave it a bare text node.
 - **Changing `.sidebar-header`'s `padding`.** It *is* the badge's on-screen position, the same way
   `.sidebar-footer`'s padding is the footer buttons' (8, 8) — and it is the label's `x` and the top
   edge of the row the label is centred in as well. `app-logo.md` §4 pins the badge at `(16, 14)`
   from the window, so moving this **is** a contract violation. *(This bullet said §4 "deliberately
   does not pin window coordinates" until 2026-08-09. That was written before §4 existed in its
   current form and was simply false; it is the second thing in this file to have been falsified by
-  an edit in another repository — `../mysuite/AGENTS.md` §3.5.)* Caught by the four
-  `badge sits 16px from the left and 14px from the top` cases in `e2e/tests/logo.spec.ts`.
+  an edit in another repository — `../mysuite/AGENTS.md` §3.5.)*
 - **Wrapping the badge in a link, or giving it an `aria-label`.** It is specified as decorative
   (`app-logo.md` §8), and that ruling holds *because* the visible app name sits beside it. Removing
-  the visible label is what would give the badge a naming obligation. Caught by *the badge is
-  decorative and the label carries the identity*, which asserts both halves — the `aria-hidden` and
-  the label's existence — for that reason.
+  the visible label is what would give the badge a naming obligation.
 
 Two things worth knowing that are **not** MyMail's to fix, both recorded as open items in the
 contract: the badge scrolls out of the window with the sidebar under content overflow (§9.1 — the
@@ -226,9 +186,8 @@ crowded — with the condition *"for now, since space there is crowded"* attache
 reopened it: MyNotes bought the crowding out by widening its column, and the label is now specified
 across all three. `app-name-label.md` §2.1 is the ruling. Nothing about MyMail's label changed.
 
-**MyMail's half is `e2e/tests/logo.spec.ts`**, which holds the same file as the badge because the
-two are one row and most of the edits below move both. Every item was demonstrated red before being
-claimed as caught.
+**MyMail's half is `e2e/tests/logo.spec.ts`**, the same file as the badge; its coverage map covers
+the list below too, and every item in it was demonstrated red before being claimed as caught.
 
 ### The edits that break it silently
 
@@ -246,8 +205,6 @@ claimed as caught.
   One edit, satisfying one contract and violating the other, and neither document can see that
   on its own — it is recorded in both. The badge's half is fixed properly instead, by
   `align-self: flex-start` on `.logo-icon`, the declaration MyCal and MyNotes already carried.
-  Caught by the three label-placement cases; **measured: the badge's own cases all stay green**,
-  which is the whole point of the item.
 - **Padding or resizing `.sidebar-reload-btn`.** It is in the same flex row, and
   `app-name-label.md` §4.1 states the rule against **the row's tallest item** — not against the
   badge — precisely because MyCal's and MyMail's rows contain this button. Grow it past the badge
@@ -255,42 +212,30 @@ claimed as caught.
   over from MyCal:** `.sidebar-reload-btn { padding: 20px }` takes the button from 26px to 56px, the
   header from 55 to 83, and **the label from `y = 14.797` to `28.797` — 14px — while the badge does
   not move at all.** `app-name-label.md` §4.2 has MyCal's own table, and it is the same 14px by
-  coincidence of geometry rather than by transfer. The badge is protected from this by
-  its `align-self`; **the label is not, deliberately** — §4.3 records the label's position rather
-  than mandating it, because a declaration would move three working apps ~0.8px to defend a value
-  that is currently correct everywhere. Caught at the default root by *the label sits at 14.797*.
+  coincidence of geometry rather than by transfer. The badge is protected from this by its
+  `align-self`; **the label is not, deliberately** — §4.3 records the label's position rather than
+  mandating it, because a declaration would move three working apps ~0.8px to defend a value that is
+  currently correct everywhere.
 - **Editing `body`'s font stack in `web/static/app.css`.** It **is** the label's font: nothing
   nearer the label declares one, and `app-name-label.md` §3.1 mandates the declared stack. A change
-  made for message bodies is a change to this contract and will not look like one. Caught by *the
-  label resolves the contract font stack* — which asserts the string only, because `system-ui`
-  resolves per machine and no test anywhere can hold the rendered face (§3.1, §7.3).
-- **Normalising `1.1rem` on `.sidebar-header`.** To `17.6px`: identical at a 16px root and frozen
-  at every other, so it agrees with the siblings exactly where every test looks and diverges
-  everywhere else. To `1.10rem`: identical computed **and** identical serialised. To `1.1em`:
-  identical today, divergent the moment an ancestor sets a size. **Partly caught, and the split is
-  the point** — the suite asserts two roots, so the `px` conversion goes red at 24px (demonstrated:
-  red there, green at 16px). The other two are invisible to any rendering at any number of roots;
-  `../mysuite/tools/check-contract.py` compares declaration text and sees them, and nobody's CI
-  runs it. `app-name-label.md` §3.2 tabulates which mechanism catches which — and note its §7.1 is
+  made for message bodies is a change to this contract and will not look like one. Note that no test
+  anywhere can hold the rendered *face* — `system-ui` resolves per machine (§3.1, §7.3).
+- **Normalising `1.1rem` on `.sidebar-header`.** Three substitutions, and they are not equivalent.
+  To `17.6px`: identical at a 16px root and frozen at every other, so it agrees with the siblings
+  exactly where a test would look and diverges everywhere else. To `1.10rem`: identical computed
+  **and** identical serialised. To `1.1em`: identical today, divergent the moment an ancestor sets a
+  size. `app-name-label.md` §3.2 tabulates which mechanism catches which — and note its §7.1 is
   *"the only thing that compares the three apps"*, which is a claim about comparison and **not**
   about being the only thing that can see a given edit.
 - **Giving the label a `<span>` with its own `font-size`.** Worth stating separately from the
   bullet above, because in **MyMail** it is the gap between the two guards: the cross-repo check
   reads the declaration on the row, so a declaration nearer the label beats it silently, and unlike
-  MyCal there is no `.brand-name` for it to check instead. Caught here only by the flag recording
-  which element the values were read from — mutation-tested, and the flag is not a tautology: with
-  the label wrapped, the recorded host reads `SPAN.brand-name` where it otherwise reads
-  `DIV.sidebar-header`. **That flag is the only guard this app has against this edit.**
+  MyCal there is no `.brand-name` for it to check instead.
 - **Moving `font-size` or `font-weight` off `.sidebar-header` onto a wrapper around the label**, or
-  the reverse. Renders identically today. The suite reads both values from whichever element the
-  text actually inherits from, resolved at runtime (`app-name-label.md` §6.1), so the values stay
-  green — what fails is the flag recording *which* element they came from, with a message telling
-  you to re-derive them. That is the intended behaviour, not a gap.
+  the reverse. Renders identically today, which is the whole difficulty.
 - **Removing `align-self: flex-start` from `.logo-icon`.** It is what stops the badge's `y` being a
   remainder of the label's line box. Deleting it looks like removing a redundant line: at the
-  default root it changes nothing at all. Caught by the 20 / 24 / 32px placement cases and both
-  line-height mutation cases — **and not by the 16px case**, which stays green, which is why the
-  suite asserts four roots rather than one.
+  default root it changes nothing at all.
 
 Three things worth knowing that are **not** MyMail's to fix: the label scrolls off the window with
 the badge under content overflow (`app-name-label.md` §4.5 — the same open item as `app-logo.md`
@@ -329,122 +274,38 @@ node --test --test-name-pattern 'depth cap' web/ts/quotetext.test.mjs
 
 ### Frontend (TypeScript)
 
-Plain `node --test` with `node:assert/strict` — no test framework, no package
-manager. Tests are `web/ts/*.test.mjs` and import the **compiled** output from
-`web/static/`, not the `.ts` sources, so `tsc` must have run first (`build.sh`
-orders it that way).
+Plain `node --test` with `node:assert/strict` — no test framework, no package manager. Tests are
+`web/ts/*.test.mjs` and import the **compiled** output from `web/static/`, not the `.ts` sources, so
+`tsc` must have run first (`build.sh` orders it that way).
 
-DOM-dependent code gets a DOM from jsdom, imported via
-`web/ts/vendor/test/jsdom.js` and installed on `globalThis` *before* the module
-under test is imported — a module reading `DOMParser`/`Node` at load time would
-otherwise see nothing. Use a dynamic `await import()` for that ordering.
+DOM-dependent code gets a DOM from jsdom, imported via `web/ts/vendor/test/jsdom.js` and installed
+on `globalThis` *before* the module under test is imported — a module reading `DOMParser`/`Node` at
+load time would otherwise see nothing. Use a dynamic `await import()` for that ordering.
 
-jsdom is vendored as one deterministic `jsdom-node_modules.tar.gz` (it can't be
-bundled: it reads data files from its own package dir at runtime).
-`web/ts/vendor/test/unpack.sh` extracts it with `tar` alone and is idempotent;
-`web/ts/vendor/rebuild.sh` regenerates the tarball and is maintainer-only (it is
-the only thing here that needs npm).
+jsdom is vendored as one deterministic `jsdom-node_modules.tar.gz` (it can't be bundled: it reads
+data files from its own package dir at runtime). `web/ts/vendor/test/unpack.sh` extracts it with
+`tar` alone and is idempotent; `web/ts/vendor/rebuild.sh` regenerates the tarball and is
+maintainer-only (it is the only thing here that needs npm).
 
-Only logic reachable from a plain function is covered this way — component
-rendering and Quill interaction are not tested. That means a function worth
-testing generally belongs in `web/ts/util/`, exported, rather than kept private
-inside a `.tsx` view (this is why `quoteHtmlToText` lives in
+**Only logic reachable from a plain function is covered this way** — component rendering and Quill
+interaction are not tested. That means a function worth testing generally belongs in `web/ts/util/`,
+exported, rather than kept private inside a `.tsx` view (this is why `quoteHtmlToText` lives in
 `web/ts/util/quotetext.ts` and not in `ComposeForm.tsx`).
 
-`wrap.test.mjs` needs no DOM — `web/ts/util/wrap.ts` is pure string handling —
-so it skips the jsdom install entirely. It is deliberately the whole of the
-wrapping logic: `ComposeForm` only turns its edits into a Quill delta and
-decides which breaks are the editor's own. Anything about *where* a line breaks
-belongs in `wrap.ts`, where it can be tested; the Quill wiring cannot be.
+**Each test file's header comment says what it covers, why that code was factored out to be testable
+at all, and what it deliberately leaves unasserted.** Those explanations live with the tests rather
+than here — read the header before the cases.
 
-`address.test.mjs` needs no DOM either. `web/ts/util/address.ts` decides whether
-the Send button is offered at all — in ComposeForm and on a draft in
-MessageDetail — by answering the question the server answers with a 400: is
-there at least one recipient, and is every address list well-formed. It is a
-pre-flight check, never the authority; the server's 400 still surfaces inline.
-Its parser is a third copy of the same rules (`service.ParseAddressList`,
-`demo/text.ts`), unavoidably so — the demo backend has no imports to share with
-— and the three must move together.
-
-`signature.test.mjs` needs no DOM either. `web/ts/util/signature.ts` is the
-arithmetic behind the signature mark — ops in, a span or a set of ops out — kept
-apart from ComposeForm's Quill wiring so it can be exercised without a Quill.
-The ops in that test are shapes the vendored Quill actually produces, so a
-change in what Quill does to a `<br>`, an `<hr>` or a split block shows up as a
-test that no longer describes reality rather than as a silently wrong span.
-
-`confirm.test.mjs` needs no DOM either. `web/ts/util/confirm.ts` is the store
-behind every confirmation the UI asks for, holding the promise a caller is
-awaiting; the dialog that renders it (`components/ConfirmDialog.tsx`) is not
-reachable from here. What the test pins is the two ways an answer could go
-missing — a question superseded before it was answered resolves `false` rather
-than stranding its caller's `await`, and answering a stale id is ignored instead
-of resolving the question that replaced it. A stranded promise is a button that
-silently stops working, with nothing in the console to say so.
-
-`demo.test.mjs` needs no DOM either, but it does something the other four do not:
-the demo backend is a set of classic worker scripts sharing one global scope, so
-the test evaluates them into *this* realm with `vm.runInThisContext`, exactly as
-`importScripts` would, and reads the declarations back out. `store.js` is the
-one file left out — it is nothing but IndexedDB — and a stub for its five entry
-points is evaluated in its place. That is what makes `api.js` testable here:
-everything above the store is real code answering real `Request` objects, so the
-parity rules (which folders refuse a move, what deleting does where, how threads
-close over References) are asserted against the code that implements them rather
-than a paraphrase of it.
-
-`icslinks.test.mjs` does need a DOM. `web/ts/util/icslinks.ts` decides which
-links in an incoming HTML body get an "Import to Calendar" button, and every
-rule in it is a decision about markup an unauthenticated sender wrote — which is
-why it is a function taking a string rather than something MessageDetail does
-inline. The scheme allowlist is the load-bearing part: it is what keeps a
-`javascript:` or `data:` href out of the URL that gets POSTed to MyCal, and what
-stops a relative href being resolved against MyMail's own origin.
-
-The detection rules themselves lean **generous**, and the reason is worth
-keeping in mind before tightening one: a false positive is cheap and visible
-(MyCal fetches, fails to parse, 400, and the error lands beside the button the
-user pressed), while a false negative is invisible — no button, and nothing to
-say one was owed. So a whole path segment of `ics`/`ical`/`icalendar` qualifies
-as well as an `.ics` suffix, because extensionless endpoints are what bulk-mail
-platforms send. What keeps that principled is that every test is equality
-against a whole segment or a whole parameter value, never a substring, and
-never against the link's text.
-
-`date.test.mjs` needs no DOM either, and covers only `formatDateSchedule` —
-the Scheduled and Snoozed columns' formatter. It is a separate function from
-`formatDateAdaptive` because that one measures *elapsed* time: a future
-timestamp gives it a negative difference, which lands in its under-an-hour
-branch and renders every scheduled send as "1 minute ago". So the sign is the
-first thing the test pins. The rest is the boundaries — within the hour, named
-day, weekday, date, date with year — asserted in **both** directions, because a
-`send_at` or `snoozed_until` in the past is a normal state rather than a bug:
-the scheduler polls once a minute, and a scheduled send that keeps failing is
-retried with the original time left in place. That symmetry is a property of
-the function and not just of the test: `formatDateSchedule`'s weekday branch is
-`Math.abs(daysAgo) <= 6`, so a value four days behind gets the same named day
-one four days ahead does. If you narrow that guard, narrow the claim here too.
-
-Two boundaries in it are easy to reintroduce, and both are pinned: the wording
-is chosen by the *sign* of the difference and the number by its magnitude
-separately, or a time half a minute ahead rounds to zero and is worded "ago";
-and the magnitude is **floored**, or the last seconds before the hour read as
-"in 60 minutes".
-
-The file also covers `formatDateAdaptive`, which the change did not add but did
-put at risk: the two now share `fullTitle`, `timeOfDay` and `calendarDaysAgo`,
-so its own ladder is asserted here rather than left to the e2e suite. The one
-place they deliberately disagree — a year-old message drops its time, a
-year-away schedule keeps it — is asserted as a pair, since that is the kind of
-difference a later tidy-up would erase.
-
-What the tests deliberately do not assert: anything the host locale spells
-(weekday and month names, the time separator), since `toLocaleString` output is
-not ours to pin — and the wiring, since it is not reachable from a function.
-Nothing here checks that `FolderView` asks for `send_at` in folder 5 and
-`snoozed_until` in folder 6, or that `MessageList` renders the column at all;
-that is the component-rendering gap this whole section works within, not a
-gap specific to these two.
+| Test | Under test | DOM |
+|---|---|---|
+| `quotetext.test.mjs` | `util/quotetext.ts` — the text/plain half of a reply or forward | yes |
+| `icslinks.test.mjs` | `util/icslinks.ts` — which links in an incoming body get an "Import to Calendar" button | yes |
+| `wrap.test.mjs` | `util/wrap.ts` — every line break a composed message gets | no |
+| `address.test.mjs` | `util/address.ts` — whether the Send button is offered at all | no |
+| `signature.test.mjs` | `util/signature.ts` — the identity signature as a region of the Quill document | no |
+| `confirm.test.mjs` | `util/confirm.ts` — the store behind every confirmation the UI asks for | no |
+| `date.test.mjs` | `util/date.ts` — the Date, Scheduled and Snoozed columns' formatters | no |
+| `demo.test.mjs` | `web/ts/demo/*.ts` — the demo backend, evaluated as the worker scripts they are | no |
 
 ## Important Implementation Notes
 

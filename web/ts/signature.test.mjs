@@ -1,12 +1,17 @@
 // Tests for web/ts/util/signature.ts — the identity signature as a region of the
-// Quill document. No DOM: everything here is ops in, ops or positions out.
+// Quill document. No DOM: everything here is ops in, ops or positions out. The
+// module is kept apart from ComposeForm's Quill wiring precisely so this
+// arithmetic can be exercised without a Quill.
 //
 // The ops in these tests are the shapes Quill actually produces, taken from
 // driving the vendored Quill 2.0.3 under jsdom: a `<br>` becomes a block break,
 // a `-- ` delimiter's `<hr>` becomes two empty blocks, and a block that the
 // wrapper splits keeps its formats only on the half that inherits the old
-// newline. ComposeForm's Quill wiring is what turns these into edits; what is
-// pinned here is the arithmetic it depends on.
+// newline. That sourcing is the point of them: when a Quill upgrade changes what
+// it does to a `<br>`, an `<hr>` or a split block, it shows up here as a test
+// that no longer describes reality — rather than as a silently wrong span in a
+// message somebody sent. ComposeForm's Quill wiring is what turns these into
+// edits; what is pinned here is the arithmetic it depends on.
 
 import test from 'node:test';
 import assert from 'node:assert/strict';

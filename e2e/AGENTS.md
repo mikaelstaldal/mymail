@@ -16,6 +16,11 @@ Read the contract a failing assertion names before changing it; a value in eithe
 never MyMail's to decide. `logo.spec.ts` names its document on every § reference for that reason —
 four files in `mysuite/spec/` now have a §2, §3 and §4, so a bare § is ambiguous.
 
+**The other direction — which of those edits each case actually catches — is a coverage map in each
+spec's own header**, and it is the only place that holds it. Each also names the items nothing here
+catches, including the ones catchable by no test at all. Keep the map current when you add, remove
+or retarget an assertion: `web/AGENTS.md` sends readers to it and no longer duplicates any of it.
+
 `tests/sidebar-footer.spec.ts` is this repo's whole half of the sidebar-footer contract, and
 nothing else here checks any of it.
 
