@@ -39,7 +39,7 @@ run tsc --project web/ts/demo/tsconfig.json
 # then run the frontend tests against the compiled output in web/static/.
 # tar only; no npm/npx/yarn — see web/ts/vendor/test/unpack.sh.
 run web/ts/vendor/test/unpack.sh
-run node --test web/ts/quotetext.test.mjs web/ts/wrap.test.mjs web/ts/address.test.mjs web/ts/signature.test.mjs web/ts/confirm.test.mjs web/ts/demo.test.mjs web/ts/icslinks.test.mjs 
+run node --test web/ts/quotetext.test.mjs web/ts/wrap.test.mjs web/ts/address.test.mjs web/ts/signature.test.mjs web/ts/confirm.test.mjs web/ts/demo.test.mjs web/ts/icslinks.test.mjs web/ts/date.test.mjs
 
 run go generate ./...
 run go build -trimpath -buildvcs=true -tags netgo -o "$OUTPUT_DIR/mymail" .

@@ -1,10 +1,22 @@
 import { useRef, useEffect } from 'preact/hooks';
-import { formatDateAdaptive } from '../util/date.js';
+import { formatDateAdaptive, formatDateSchedule } from '../util/date.js';
 import { Icon } from './Icon.js';
 import type { components } from '../api/types.js';
 
 type MessageSummary = components['schemas']['MessageSummary'];
 type Folder = components['schemas']['Folder'];
+
+/**
+ * The extra time column the Scheduled and Snoozed folders get, keyed by the
+ * summary field it reads. Both fields are non-null only inside their own
+ * folder, so the column is offered per folder rather than always.
+ */
+export type ScheduleColumn = 'send_at' | 'snoozed_until';
+
+const SCHEDULE_HEADERS: Record<ScheduleColumn, string> = {
+  send_at: 'Send at',
+  snoozed_until: 'Snoozed until',
+};
 
 export interface MessageListProps {
   items: MessageSummary[];
@@ -14,6 +26,7 @@ export interface MessageListProps {
   onRowClick: (id: number) => void;
   snippets?: Record<number, string>;
   folders?: Folder[];
+  scheduleColumn?: ScheduleColumn;
 }
 
 function renderSnippet(text: string) {
@@ -79,6 +92,7 @@ export function MessageList({
   onRowClick,
   snippets,
   folders,
+  scheduleColumn,
 }: MessageListProps) {
   const allSelected = items.length > 0 && items.every(m => selectedIds.has(m.id));
   const someSelected = selectedIds.size > 0;
@@ -99,12 +113,20 @@ export function MessageList({
           <th class="col-from">From</th>
           <th class="col-subject">Subject</th>
           {folderMap && <th class="col-folder">Folder</th>}
+          {scheduleColumn && (
+            <th class="col-schedule">{SCHEDULE_HEADERS[scheduleColumn]}</th>
+          )}
           <th class="col-date">Date</th>
         </tr>
       </thead>
       <tbody>
         {items.map(msg => {
           const { display, title } = formatDateAdaptive(msg.date);
+          // Null is possible even in the folder that owns the field: a message
+          // whose snooze has just expired is moved out by the scheduler, and a
+          // listing fetched mid-move would otherwise render "Invalid Date".
+          const scheduled = scheduleColumn ? msg[scheduleColumn] : null;
+          const scheduledAt = scheduled ? formatDateSchedule(scheduled) : null;
           const selected = selectedIds.has(msg.id);
           return (
             <tr
@@ -141,6 +163,11 @@ export function MessageList({
               </td>
               {folderMap && (
                 <td class="col-folder">{folderMap.get(msg.folder_id) ?? ''}</td>
+              )}
+              {scheduleColumn && (
+                <td class="col-schedule" title={scheduledAt?.title}>
+                  {scheduledAt?.display ?? ''}
+                </td>
               )}
               <td class="col-date" title={title}>{display}</td>
             </tr>

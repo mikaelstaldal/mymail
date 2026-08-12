@@ -310,7 +310,7 @@ tsc --project web/ts/tsconfig.json --noEmit
 # Run the frontend tests (needs web/static/*.js compiled first; unpack.sh is a
 # no-op once web/ts/vendor/test/node_modules/ exists)
 web/ts/vendor/test/unpack.sh
-node --test web/ts/quotetext.test.mjs web/ts/wrap.test.mjs web/ts/address.test.mjs web/ts/signature.test.mjs web/ts/confirm.test.mjs web/ts/icslinks.test.mjs web/ts/demo.test.mjs
+node --test web/ts/quotetext.test.mjs web/ts/wrap.test.mjs web/ts/address.test.mjs web/ts/signature.test.mjs web/ts/confirm.test.mjs web/ts/icslinks.test.mjs web/ts/demo.test.mjs web/ts/date.test.mjs
 
 # Run a single frontend test
 node --test --test-name-pattern 'depth cap' web/ts/quotetext.test.mjs
@@ -410,6 +410,41 @@ as well as an `.ics` suffix, because extensionless endpoints are what bulk-mail
 platforms send. What keeps that principled is that every test is equality
 against a whole segment or a whole parameter value, never a substring, and
 never against the link's text.
+
+`date.test.mjs` needs no DOM either, and covers only `formatDateSchedule` —
+the Scheduled and Snoozed columns' formatter. It is a separate function from
+`formatDateAdaptive` because that one measures *elapsed* time: a future
+timestamp gives it a negative difference, which lands in its under-an-hour
+branch and renders every scheduled send as "1 minute ago". So the sign is the
+first thing the test pins. The rest is the boundaries — within the hour, named
+day, weekday, date, date with year — asserted in **both** directions, because a
+`send_at` or `snoozed_until` in the past is a normal state rather than a bug:
+the scheduler polls once a minute, and a scheduled send that keeps failing is
+retried with the original time left in place. That symmetry is a property of
+the function and not just of the test: `formatDateSchedule`'s weekday branch is
+`Math.abs(daysAgo) <= 6`, so a value four days behind gets the same named day
+one four days ahead does. If you narrow that guard, narrow the claim here too.
+
+Two boundaries in it are easy to reintroduce, and both are pinned: the wording
+is chosen by the *sign* of the difference and the number by its magnitude
+separately, or a time half a minute ahead rounds to zero and is worded "ago";
+and the magnitude is **floored**, or the last seconds before the hour read as
+"in 60 minutes".
+
+The file also covers `formatDateAdaptive`, which the change did not add but did
+put at risk: the two now share `fullTitle`, `timeOfDay` and `calendarDaysAgo`,
+so its own ladder is asserted here rather than left to the e2e suite. The one
+place they deliberately disagree — a year-old message drops its time, a
+year-away schedule keeps it — is asserted as a pair, since that is the kind of
+difference a later tidy-up would erase.
+
+What the tests deliberately do not assert: anything the host locale spells
+(weekday and month names, the time separator), since `toLocaleString` output is
+not ours to pin — and the wiring, since it is not reachable from a function.
+Nothing here checks that `FolderView` asks for `send_at` in folder 5 and
+`snoozed_until` in folder 6, or that `MessageList` renders the column at all;
+that is the component-rendering gap this whole section works within, not a
+gap specific to these two.
 
 ## Important Implementation Notes
 

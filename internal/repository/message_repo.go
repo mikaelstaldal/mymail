@@ -93,22 +93,63 @@ func splitNL(s string) []string {
 
 // const columns selected for MessageSummary scans.
 const summaryColumns = `m.id, m.folder_id, m.message_id, m.from_addr, m.to_addr,
-	m.subject, m.date, m.read, m.flagged, m.has_attachments, m.send_failure_count, m.created_at`
+	m.subject, m.date, m.read, m.flagged, m.has_attachments, m.send_failure_count,
+	m.send_at, m.snoozed_until, m.created_at`
+
+// parseNullTime converts a nullable RFC 3339 column into sql.NullTime. An empty
+// string counts as NULL: send_at and snoozed_until are cleared by writing one
+// in some paths and a real NULL in others, and both mean "not set".
+func parseNullTime(ns sql.NullString, field string) (sql.NullTime, error) {
+	if !ns.Valid || ns.String == "" {
+		return sql.NullTime{}, nil
+	}
+	t, err := time.Parse(time.RFC3339, ns.String)
+	if err != nil {
+		return sql.NullTime{}, fmt.Errorf("parse %s %q: %w", field, ns.String, err)
+	}
+	return sql.NullTime{Time: t, Valid: true}, nil
+}
+
+// parseNilDateTime is the same column read straight into the API's nullable
+// type, for the scans that build an oas value rather than a model.DBMessage.
+func parseNilDateTime(ns sql.NullString, field string) (oas.NilDateTime, error) {
+	var n oas.NilDateTime
+	nt, err := parseNullTime(ns, field)
+	if err != nil {
+		return n, err
+	}
+	if nt.Valid {
+		n.SetTo(nt.Time)
+	} else {
+		n.SetToNull()
+	}
+	return n, nil
+}
 
 // scanMessageSummary scans a row with summaryColumns into oas.MessageSummary.
 func scanMessageSummary(scan func(...any) error) (oas.MessageSummary, error) {
 	var (
-		s            oas.MessageSummary
-		messageID    sql.NullString
-		dateStr      string
-		readInt      int
-		flaggedInt   int
-		hasAttInt    int
-		sendFailCnt  int
-		createdAtStr string
+		s               oas.MessageSummary
+		messageID       sql.NullString
+		dateStr         string
+		readInt         int
+		flaggedInt      int
+		hasAttInt       int
+		sendFailCnt     int
+		sendAtStr       sql.NullString
+		snoozedUntilStr sql.NullString
+		createdAtStr    string
 	)
 	if err := scan(&s.ID, &s.FolderID, &messageID, &s.FromAddr, &s.ToAddr,
-		&s.Subject, &dateStr, &readInt, &flaggedInt, &hasAttInt, &sendFailCnt, &createdAtStr); err != nil {
+		&s.Subject, &dateStr, &readInt, &flaggedInt, &hasAttInt, &sendFailCnt,
+		&sendAtStr, &snoozedUntilStr, &createdAtStr); err != nil {
+		return oas.MessageSummary{}, err
+	}
+	var err error
+	if s.SendAt, err = parseNilDateTime(sendAtStr, "send_at"); err != nil {
+		return oas.MessageSummary{}, err
+	}
+	if s.SnoozedUntil, err = parseNilDateTime(snoozedUntilStr, "snoozed_until"); err != nil {
 		return oas.MessageSummary{}, err
 	}
 	if messageID.Valid {
@@ -168,20 +209,11 @@ func scanDBMessage(scan func(...any) error) (model.DBMessage, error) {
 	}
 	m.Date = t
 
-	if sendAtStr.Valid && sendAtStr.String != "" {
-		st, err := time.Parse(time.RFC3339, sendAtStr.String)
-		if err != nil {
-			return model.DBMessage{}, fmt.Errorf("parse send_at %q: %w", sendAtStr.String, err)
-		}
-		m.SendAt = sql.NullTime{Time: st, Valid: true}
+	if m.SendAt, err = parseNullTime(sendAtStr, "send_at"); err != nil {
+		return model.DBMessage{}, err
 	}
-
-	if snoozedUntilStr.Valid && snoozedUntilStr.String != "" {
-		su, err := time.Parse(time.RFC3339, snoozedUntilStr.String)
-		if err != nil {
-			return model.DBMessage{}, fmt.Errorf("parse snoozed_until %q: %w", snoozedUntilStr.String, err)
-		}
-		m.SnoozedUntil = sql.NullTime{Time: su, Valid: true}
+	if m.SnoozedUntil, err = parseNullTime(snoozedUntilStr, "snoozed_until"); err != nil {
+		return model.DBMessage{}, err
 	}
 
 	cat, err := time.Parse(time.RFC3339, createdAtStr)
@@ -248,20 +280,11 @@ func scanDBMessageNoRaw(scan func(...any) error) (model.DBMessage, error) {
 	}
 	m.Date = t
 
-	if sendAtStr.Valid && sendAtStr.String != "" {
-		st, err := time.Parse(time.RFC3339, sendAtStr.String)
-		if err != nil {
-			return model.DBMessage{}, fmt.Errorf("parse send_at %q: %w", sendAtStr.String, err)
-		}
-		m.SendAt = sql.NullTime{Time: st, Valid: true}
+	if m.SendAt, err = parseNullTime(sendAtStr, "send_at"); err != nil {
+		return model.DBMessage{}, err
 	}
-
-	if snoozedUntilStr.Valid && snoozedUntilStr.String != "" {
-		su, err := time.Parse(time.RFC3339, snoozedUntilStr.String)
-		if err != nil {
-			return model.DBMessage{}, fmt.Errorf("parse snoozed_until %q: %w", snoozedUntilStr.String, err)
-		}
-		m.SnoozedUntil = sql.NullTime{Time: su, Valid: true}
+	if m.SnoozedUntil, err = parseNullTime(snoozedUntilStr, "snoozed_until"); err != nil {
+		return model.DBMessage{}, err
 	}
 
 	cat, err := time.Parse(time.RFC3339, createdAtStr)
@@ -1373,7 +1396,8 @@ func (r *MessageRepository) SearchMessages(
 	// full body of every returned row, which is catastrophically slow for large
 	// messages and can exceed the request timeout.
 	mainSQL := `SELECT m.id, m.folder_id, m.message_id, m.from_addr, m.to_addr,
-		m.subject, m.date, m.read, m.flagged, m.has_attachments, m.send_failure_count, m.created_at,
+		m.subject, m.date, m.read, m.flagged, m.has_attachments, m.send_failure_count,
+		m.send_at, m.snoozed_until, m.created_at,
 		substr(m.body_text, 1, ` + fmt.Sprint(snippetSourceLimit) + `)
 	FROM messages_fts JOIN messages m ON messages_fts.rowid = m.id
 	WHERE ` + whereClause + ` ORDER BY rank LIMIT ? OFFSET ?`
@@ -1388,21 +1412,31 @@ func (r *MessageRepository) SearchMessages(
 	var items []oas.MessagesSearchGetOKItemsItem
 	for rows.Next() {
 		var (
-			item         oas.MessagesSearchGetOKItemsItem
-			messageID    sql.NullString
-			dateStr      string
-			readInt      int
-			flaggedInt   int
-			hasAttInt    int
-			sendFailCnt  int
-			createdAtStr string
-			bodyPrefix   sql.NullString
+			item            oas.MessagesSearchGetOKItemsItem
+			messageID       sql.NullString
+			dateStr         string
+			readInt         int
+			flaggedInt      int
+			hasAttInt       int
+			sendFailCnt     int
+			sendAtStr       sql.NullString
+			snoozedUntilStr sql.NullString
+			createdAtStr    string
+			bodyPrefix      sql.NullString
 		)
 		if err := rows.Scan(
 			&item.ID, &item.FolderID, &messageID, &item.FromAddr, &item.ToAddr,
-			&item.Subject, &dateStr, &readInt, &flaggedInt, &hasAttInt, &sendFailCnt, &createdAtStr,
+			&item.Subject, &dateStr, &readInt, &flaggedInt, &hasAttInt, &sendFailCnt,
+			&sendAtStr, &snoozedUntilStr, &createdAtStr,
 			&bodyPrefix,
 		); err != nil {
+			return nil, 0, err
+		}
+		var err error
+		if item.SendAt, err = parseNilDateTime(sendAtStr, "send_at"); err != nil {
+			return nil, 0, err
+		}
+		if item.SnoozedUntil, err = parseNilDateTime(snoozedUntilStr, "snoozed_until"); err != nil {
 			return nil, 0, err
 		}
 		if messageID.Valid {

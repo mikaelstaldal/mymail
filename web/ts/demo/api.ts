@@ -90,6 +90,8 @@ function toSummaryDTO(msg: DemoMessage): unknown {
     flagged: msg.flagged,
     has_attachments: msg.hasAttachments,
     send_failed: msg.sendFailureCount > 0 && msg.folderId !== FOLDER_TRASH,
+    send_at: msg.sendAt,
+    snoozed_until: msg.snoozedUntil,
     created_at: msg.createdAt,
   };
 }

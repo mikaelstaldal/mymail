@@ -662,6 +662,11 @@ html, body {
   width: 120px;
   white-space: nowrap;
 }
+/* Scheduled send / snooze expiry — the Scheduled and Snoozed folders only. */
+.col-schedule {
+  width: 140px;
+  white-space: nowrap;
+}
 .col-date {
   width: 120px;
   text-align: right;

@@ -76,6 +76,8 @@ func (m *DBMessage) ToOASMessageSummary() *oas.MessageSummary {
 		Flagged:        m.Flagged,
 		HasAttachments: m.HasAttachments,
 		SendFailed:     m.SendFailureCount > 0,
+		SendAt:         nullTimeToNilDateTime(m.SendAt),
+		SnoozedUntil:   nullTimeToNilDateTime(m.SnoozedUntil),
 		CreatedAt:      m.CreatedAt,
 	}
 }

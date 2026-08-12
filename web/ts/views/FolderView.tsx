@@ -3,7 +3,7 @@ import { api } from '../api/client.js';
 import { navigate } from '../router.js';
 import { showToast } from '../util/toast.js';
 import { confirmDialog } from '../util/confirm.js';
-import { MessageList } from '../components/MessageList.js';
+import { MessageList, type ScheduleColumn } from '../components/MessageList.js';
 import { Icon } from '../components/Icon.js';
 import type { components } from '../api/types.js';
 
@@ -13,9 +13,17 @@ type MessageSummary = components['schemas']['MessageSummary'];
 const PAGE_SIZE = 50;
 const DRAFTS_ID = 3;
 const TRASH_ID = 4;
+const SCHEDULED_ID = 5;
+const SNOOZED_ID = 6;
 const JUNK_ID = 7;
 // Drafts (3), Scheduled (5), Snoozed (6) cannot be move targets
 const NO_MOVE_IDS = new Set([3, 5, 6]);
+
+// The two folders that are defined by a future time carry a column showing it.
+const SCHEDULE_COLUMNS: Partial<Record<number, ScheduleColumn>> = {
+  [SCHEDULED_ID]: 'send_at',
+  [SNOOZED_ID]: 'snoozed_until',
+};
 
 interface FolderViewProps {
   folder: Folder;
@@ -266,6 +274,7 @@ export function FolderView({ folder, folders }: FolderViewProps) {
             onToggleSelect={toggleSelect}
             onToggleSelectAll={toggleSelectAll}
             onRowClick={(id) => navigate(`#/message/${id}`)}
+            scheduleColumn={SCHEDULE_COLUMNS[folder.id]}
           />
         </div>
       )}

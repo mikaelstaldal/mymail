@@ -676,6 +676,20 @@ On first load the UI reads `localStorage` for the last selected folder and navig
 1. **Folder view** — Paginated message list. Unread messages shown in bold. **Mark all as read** button marks all
    messages in the folder as read.
 
+   The **Scheduled** and **Snoozed** folders carry one extra column between Subject and Date, showing the time that
+   defines the folder: **Send at** (`send_at`) in Scheduled, **Snoozed until** (`snoozed_until`) in Snoozed. Both are
+   read from the message summary, so the listing needs no per-message fetch. The exact local time is in the cell's
+   tooltip; the cell itself is written relative to now and, unlike the Date column, reads in the *future* direction:
+   under an hour → "in 20 minutes"; same day → "Today 09:00"; the next day → "Tomorrow 09:00"; within a week →
+   "Thu 09:00"; further → "Mar 3, 09:00", gaining the year ("Mar 3, 2027, 09:00") when it is not the current one.
+   The time of day is kept at every distance, unlike the Date column which drops it beyond a year.
+
+   A value already in the past takes the same ladder mirrored — "20 minutes ago", "Yesterday 09:00", "Thu 09:00",
+   "Mar 3, 09:00" — rather than being treated as an error: the scheduler polls once a minute, so a due message is
+   listed with its time behind it, and a failing scheduled send is retried with its original `send_at`. The cell is
+   empty when the field is null, which a listing fetched while the scheduler is moving a message out of the folder
+   can still see.
+
 2. **Message detail** — Full headers, sanitized HTML body in a sandboxed iframe (or plain-text fallback), attachment
    download links. Reply/Reply All/Forward/Move/Delete/Snooze/Mark as junk buttons. An **All headers** toggle button (
    hidden for drafts) fetches and displays the raw RFC 5322 header block via `GET /messages/{id}/headers`; clicking

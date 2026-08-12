@@ -529,6 +529,23 @@ test('folder listing is newest first and paginates', async () => {
   assert.deepEqual(res.body.items.map((m) => m.id), [2, 3]);
 });
 
+test('a listing carries send_at and snoozed_until, as the summary projection does', async () => {
+  // The Scheduled and Snoozed columns read these off the listing rather than
+  // fetching each message, so a summary without them is a demo that silently
+  // renders two empty columns. repository.summaryColumns selects both.
+  const state = newState([
+    message({ id: 1, folderId: 5, sendAt: '2030-04-01T09:00:00Z' }),
+    message({ id: 2, folderId: 6, snoozedUntil: '2030-04-02T09:00:00Z', snoozeFolder: 1 }),
+  ]);
+  const scheduled = (await call(state, 'GET', '/folders/5/messages')).body.items[0];
+  assert.equal(scheduled.send_at, '2030-04-01T09:00:00Z');
+  assert.equal(scheduled.snoozed_until, null);
+
+  const snoozed = (await call(state, 'GET', '/folders/6/messages')).body.items[0];
+  assert.equal(snoozed.snoozed_until, '2030-04-02T09:00:00Z');
+  assert.equal(snoozed.send_at, null);
+});
+
 test('a message in Trash is deleted for good, one in Inbox is moved there', async () => {
   const state = newState([message({ id: 1 }), message({ id: 2, folderId: 4 })]);
   assert.equal((await call(state, 'DELETE', '/messages/1')).status, 204);

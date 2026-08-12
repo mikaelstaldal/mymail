@@ -80,10 +80,26 @@ components:
             - In the Drafts folder: show a red error badge (message was moved from Scheduled after exhausting all retries).
             - In the Trash folder (folder_id=4): suppress this badge — send_failure_count is
               intentionally preserved in Trash but the message is no longer actionable.
+        send_at:
+          type: string
+          format: date-time
+          nullable: true
+          description: |
+            Non-null only for messages in the Scheduled folder (same invariant as
+            `MessageDetail.send_at`). Carried in the summary so the Scheduled folder listing can
+            show a "Send at" column without fetching each message.
+        snoozed_until:
+          type: string
+          format: date-time
+          nullable: true
+          description: |
+            Non-null only for messages in the Snoozed folder (same invariant as
+            `MessageDetail.snoozed_until`). Carried in the summary so the Snoozed folder listing
+            can show a "Snoozed until" column without fetching each message.
         created_at:
           type: string
           format: date-time
-      required: [id, folder_id, message_id, from_addr, to_addr, subject, date, read, flagged, has_attachments, send_failed, created_at]
+      required: [id, folder_id, message_id, from_addr, to_addr, subject, date, read, flagged, has_attachments, send_failed, send_at, snoozed_until, created_at]
 
     AttachmentMeta:
       type: object

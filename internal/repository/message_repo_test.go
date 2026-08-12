@@ -101,6 +101,51 @@ func TestListMessages(t *testing.T) {
 	assert.True(t, items[0].Date.After(items[1].Date), "expected descending date order")
 }
 
+// The Scheduled and Snoozed listings show their own time in a column, which is
+// only possible because the summary carries send_at and snoozed_until — the
+// listing never fetches a message detail.
+func TestListMessagesCarriesScheduleTimes(t *testing.T) {
+	ctx := context.Background()
+	db := openTestDB(t)
+	r := NewMessageRepository(db)
+
+	sendAt := time.Now().UTC().Add(2 * time.Hour).Truncate(time.Second)
+	scheduled := makeMsg(5, "scheduled")
+	scheduled.SendAt = sql.NullTime{Time: sendAt, Valid: true}
+	_, err := r.InsertMessage(ctx, scheduled)
+	require.NoError(t, err)
+
+	items, _, err := r.ListMessages(ctx, 5, 10, 0, nil, nil)
+	require.NoError(t, err)
+	require.Len(t, items, 1)
+	assert.False(t, items[0].SendAt.Null)
+	assert.True(t, sendAt.Equal(items[0].SendAt.Value), "got %v", items[0].SendAt.Value)
+	assert.True(t, items[0].SnoozedUntil.Null)
+
+	until := time.Now().UTC().Add(5 * time.Minute).Truncate(time.Second)
+	inboxID, err := r.InsertMessage(ctx, makeMsg(1, "to-snooze"))
+	require.NoError(t, err)
+	_, err = r.SnoozeMessage(ctx, inboxID, until)
+	require.NoError(t, err)
+
+	items, _, err = r.ListMessages(ctx, 6, 10, 0, nil, nil)
+	require.NoError(t, err)
+	require.Len(t, items, 1)
+	assert.False(t, items[0].SnoozedUntil.Null)
+	assert.True(t, until.Equal(items[0].SnoozedUntil.Value), "got %v", items[0].SnoozedUntil.Value)
+	assert.True(t, items[0].SendAt.Null)
+
+	// An ordinary message has neither, and null is what the column renders as
+	// empty rather than as a zero date.
+	_, err = r.InsertMessage(ctx, makeMsg(1, "plain"))
+	require.NoError(t, err)
+	items, _, err = r.ListMessages(ctx, 1, 10, 0, nil, nil)
+	require.NoError(t, err)
+	require.NotEmpty(t, items)
+	assert.True(t, items[0].SendAt.Null)
+	assert.True(t, items[0].SnoozedUntil.Null)
+}
+
 func TestUpdateMessage(t *testing.T) {
 	ctx := context.Background()
 	db := openTestDB(t)
