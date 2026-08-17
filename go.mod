@@ -1,6 +1,6 @@
 module github.com/mikaelstaldal/mymail
 
-go 1.26.4
+go 1.26.6
 
 require (
 	github.com/emersion/go-maildir v0.6.0
@@ -14,7 +14,7 @@ require (
 	github.com/ogen-go/ogen v1.22.0
 	github.com/stretchr/testify v1.11.1
 	golang.org/x/net v0.56.0
-	golang.org/x/text v0.38.0
+	golang.org/x/text v0.39.0
 	modernc.org/sqlite v1.52.0
 )
 
