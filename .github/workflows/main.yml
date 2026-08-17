@@ -47,12 +47,14 @@ jobs:
       # AGENTS.md). Every version is pinned, and --ignore-scripts keeps npm from
       # running install hooks. ogen's version is read from go.mod so the
       # generator always matches the runtime library the generated code links
-      # against.
+      # against. govulncheck is not a build.sh tool, it is run by
+      # the next step, but its pin belongs with the others.
       - name: Install build tools
         run: |
           go install "github.com/ogen-go/ogen/cmd/ogen@$(go list -m -f '{{.Version}}' github.com/ogen-go/ogen)"
           go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.12.2
           npm install -g --ignore-scripts typescript@7.0.2 openapi-typescript@7.13.0
+          go install golang.org/x/vuln/cmd/govulncheck@v1.7.0
 
       # Resolves where the site will be served from, so the demo can be built
       # for that path. Requires Pages to be enabled with "GitHub Actions" as its
@@ -65,6 +67,15 @@ jobs:
       # non-zero, which fails the job before anything is published.
       - name: Build
         run: ./build.sh
+
+      # Ahead of the release step, so a build with a known vulnerability reachable
+      # from this code is never published. In the default source mode only
+      # reachable symbols fail the job; a vulnerability in a module we merely
+      # require is reported and ignored. This catches new advisories against
+      # unchanged code too, but only when something is pushed, which is why the
+      # weekly scan in govulncheck.yml exists alongside it.
+      - name: Check for known vulnerabilities
+        run: govulncheck ./...
 
       # Playwright is deliberately NOT a build.sh dependency: build.sh has to keep
       # working for anyone who does not have a browser toolchain, so the e2e
