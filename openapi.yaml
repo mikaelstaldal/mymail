@@ -700,7 +700,8 @@ paths:
     get:
       summary: List messages in folder
       description: |
-        List messages in a folder, ordered by date descending. When both `unread` and `flagged`
+        List messages in a folder, ordered by date descending, ties broken by ascending `id` so
+        that paging is over a fully determined order. When both `unread` and `flagged`
         query parameters are provided, they are combined with AND semantics (only messages that
         are both unread AND flagged are returned).
 

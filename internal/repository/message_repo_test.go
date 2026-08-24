@@ -102,6 +102,63 @@ func TestListMessages(t *testing.T) {
 	assert.True(t, items[0].Date.After(items[1].Date), "expected descending date order")
 }
 
+// Paging a folder whose messages all share one date: every message must appear
+// on exactly one page, in the declared ascending-id order.
+//
+// **This test passes with and without the `, m.id ASC` it exists to defend, and
+// that is worth knowing before trusting it.** It was written to demonstrate the
+// bug and does not: removing the clause and re-running leaves it green, for the
+// unfiltered, unread-filtered and flagged-filtered listings alike. The reason is
+// idx_messages_folder_date — (folder_id, date DESC) — which every reachable plan
+// for this query uses, and an index scan already returns ascending rowid within
+// equal keys. So SQLite's incidental behaviour today matches the clause exactly.
+//
+// It is kept because what it pins is still real: the *declared* order, so that a
+// later edit to that ORDER BY (dropping it as redundant, or mirroring it to
+// m.id DESC to match the date direction) is a failing test rather than a silent
+// change. What it cannot do is prove the clause is load-bearing — nothing here
+// can, because on this schema and this SQLite it is not, yet. Do not cite it as
+// evidence that the ordering is enforced.
+//
+// Same-second dates are not contrived: an import assigns them freely, and a Date
+// header has only second resolution to begin with.
+func TestListMessagesPagingIsStableAcrossTies(t *testing.T) {
+	ctx := context.Background()
+	db := openTestDB(t)
+	r := NewMessageRepository(db)
+
+	const n = 40
+	const page = 10
+	same := time.Date(2026, 5, 4, 3, 2, 1, 0, time.UTC)
+	for range n {
+		msg := makeMsg(1, "tied")
+		msg.Date = same
+		_, err := r.InsertMessage(ctx, msg)
+		require.NoError(t, err)
+	}
+
+	var paged []int
+	for off := 0; off < n; off += page {
+		items, total, err := r.ListMessages(ctx, 1, page, off, nil, nil)
+		require.NoError(t, err)
+		require.Equal(t, n, total)
+		require.Len(t, items, page, "page at offset %d", off)
+		for _, it := range items {
+			paged = append(paged, it.ID)
+		}
+	}
+
+	seen := make(map[int]bool, n)
+	for _, id := range paged {
+		assert.False(t, seen[id], "id %d returned on more than one page", id)
+		seen[id] = true
+	}
+	assert.Len(t, seen, n, "paging did not cover every message exactly once")
+
+	// And the order is the declared one: ascending id within the tie.
+	assert.IsIncreasing(t, paged, "tied rows must come back in ascending id order")
+}
+
 // The Scheduled and Snoozed listings show their own time in a column, which is
 // only possible because the summary carries send_at and snoozed_until — the
 // listing never fetches a message detail.

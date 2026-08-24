@@ -790,7 +790,21 @@ function listFolderMessages(state: DemoState, folderId: number, url: URL): Respo
   });
 }
 
-/** `ORDER BY date DESC`, with the row id as SQLite's stable tiebreak. */
+/**
+ * `ORDER BY m.date DESC, m.id ASC` — the folder listing's order, and the search
+ * sort's descending half.
+ *
+ * The id tiebreak is the server's own declared clause, not something SQLite
+ * supplies. This comment used to say "SQLite's stable tiebreak", which was wrong
+ * twice over: SQLite defines no order for tied rows, and ListMessages was a bare
+ * ORDER BY m.date DESC at the time, so the demo was the *stricter* of the two
+ * and the parity it claimed did not exist. Both now declare it.
+ *
+ * The server's order did in fact match this before the clause was added — its
+ * index scan yields ascending rowid within equal dates — so the demo was never
+ * observably out of step. It was matching an accident rather than a contract,
+ * which is the part that has changed.
+ */
 function compareDateDesc(a: DemoMessage, b: DemoMessage): number {
   if (a.date === b.date) return a.id - b.id;
   return a.date < b.date ? 1 : -1;

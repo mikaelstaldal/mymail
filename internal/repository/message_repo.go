@@ -307,8 +307,31 @@ func scanDBMessageNoRaw(scan func(...any) error) (model.DBMessage, error) {
 	return m, nil
 }
 
-// ListMessages returns paginated messages in a folder ordered by date DESC, plus total count.
+// ListMessages returns paginated messages in a folder ordered by date DESC,
+// ties broken by ascending id, plus total count.
 // unread and flagged are optional filters; nil means no filter for that field.
+//
+// The id tiebreak makes the order of tied rows *declared* rather than
+// incidental. Same-second dates are not exotic here: an import assigns them
+// freely, and a Date header has only second resolution to begin with.
+//
+// Be precise about what this fixes, because it is easy to oversell. Every plan
+// this query can reach today uses idx_messages_folder_date — (folder_id, date
+// DESC) — and an index scan already yields ascending rowid within equal keys, so
+// the order was correct before the clause was added. What it was not is
+// *specified*: SQLite leaves tied rows in an undefined order, and the behaviour
+// relied on was an artifact of which index the planner happened to choose. A new
+// index, a filter that changes the plan to a temp B-tree sort, or a different
+// SQLite version could change it, and nothing would have said it was wrong.
+// Measured, not assumed: with the clause removed, the unfiltered, unread and
+// flagged listings all still come back ascending — see
+// TestListMessagesPagingIsStableAcrossTies, which is honest about passing either
+// way.
+//
+// Ascending id matches SearchSort.orderBy and the demo backend's
+// compareDateDesc, so all three order a tie the same way. The search sorts need
+// their clause more than this one does: they sort through a temp B-tree, where
+// no index is imposing an order to fall back on.
 func (r *MessageRepository) ListMessages(ctx context.Context, folderID int64, limit, offset int, unread, flagged *bool) ([]oas.MessageSummary, int, error) {
 	conditions := []string{"m.folder_id = ?"}
 	filterArgs := []any{folderID}
@@ -339,7 +362,7 @@ func (r *MessageRepository) ListMessages(ctx context.Context, folderID int64, li
 
 	listArgs := append(filterArgs, limit, offset)
 	rows, err := r.db.QueryContext(ctx,
-		`SELECT `+summaryColumns+` FROM messages m WHERE `+where+` ORDER BY m.date DESC LIMIT ? OFFSET ?`,
+		`SELECT `+summaryColumns+` FROM messages m WHERE `+where+` ORDER BY m.date DESC, m.id ASC LIMIT ? OFFSET ?`,
 		listArgs...,
 	)
 	if err != nil {
@@ -1345,9 +1368,12 @@ const (
 // chosen because it is the simplest thing to state and to mirror, and the demo
 // backend mirrors it exactly.
 //
-// Note this makes the two date sorts stricter than the folder listing above,
-// which is a bare ORDER BY m.date DESC and so has the tie problem this clause
-// exists to avoid. That is a pre-existing gap, not a rule being followed here.
+// ListMessages above breaks its tie the same way, so the two paged listings
+// agree. Its need is weaker, though: it is driven by idx_messages_folder_date,
+// whose scan already yields ascending rowid within equal keys, so the clause
+// there makes an incidental order a declared one. Here there is no such
+// fallback — the sort runs through a temp B-tree (below), which imposes no
+// order of its own on tied rows.
 //
 // Sorting m.date as text is chronological because every date is stored as UTC
 // RFC 3339 — a fixed-width YYYY-MM-DDTHH:MM:SSZ — by every write path
