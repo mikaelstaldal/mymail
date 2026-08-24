@@ -1006,8 +1006,19 @@ On first load the UI reads `localStorage` for the last selected folder and navig
    the Date column shows. It is not a refinement and so is not part of the form: it applies on change rather than on
    submit, against the last submitted refinements, and returns to the first page — the same offset under a new
    ordering is a different slice. It survives a resubmit of the form and resets to Relevance with the refinements,
-   when a new query arrives from the toolbar. It is shown from the first search onwards, including while one is in
-   flight and when one returns no results, so that it never disappears at the moment a user reaches for it.
+   when a new query arrives from the toolbar. If the search it triggers fails, the dropdown returns to the ordering
+   the results are actually in, rather than naming one they are not.
+
+   It is shown from the first *completed* search onwards — so it is absent during the very first search of a freshly
+   opened search view, and stays absent if that search fails — and from then on remains visible while later searches
+   are in flight and when one returns no results, so that it never disappears at the moment a user reaches for it.
+   Note the sort is not carried in the URL: opening a result and navigating back re-opens the search view at
+   Relevance, page 1, as it does for the refinements and the page offset.
+
+   The date orderings cost materially more than Relevance on a large mailbox. Relevance streams out of the FTS5
+   index, while a date ordering has to materialise and sort the whole match set before paging it, so a broad query
+   can exceed the search timeout under a date sort while succeeding under Relevance. The timeout message offers
+   sorting by relevance as a remedy when a date sort is in effect.
 
 6. **Filter management** — CRUD UI with drag-to-reorder. The `match_to` field is labelled "To / Cc".
 

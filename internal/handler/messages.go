@@ -85,9 +85,13 @@ func (h *Handler) MessagesSearchGet(ctx context.Context, params api.MessagesSear
 	// unconditional rather than defaulted so that a member added to the enum but
 	// not to searchSorts is a missing key rather than a silent relevance search;
 	// TestSearchSortsCoverTheEnum turns that into a failing test.
-	sort, ok := searchSorts[params.Sort.Or(api.MessagesSearchGetSortRelevance)]
+	// Returned as an error, not an api.Error: this endpoint renders the latter
+	// as 400, and a wire value with no entry here is our wiring gap, not a
+	// malformed request. A 500 attributes it to the side that has to fix it.
+	wireSort := params.Sort.Or(api.MessagesSearchGetSortRelevance)
+	sort, ok := searchSorts[wireSort]
 	if !ok {
-		return &api.Error{Error: "unsupported sort"}, nil
+		return nil, fmt.Errorf("no repository sort for %q; searchSorts is missing an entry", wireSort)
 	}
 
 	items, total, err := h.messages.SearchMessages(ctx, q, folderID, dateFrom, dateTo, fromAddr, toAddr, sort, limit, offset)
@@ -95,8 +99,18 @@ func (h *Handler) MessagesSearchGet(ctx context.Context, params api.MessagesSear
 		// A search that exceeds the repository's internal timeout returns a
 		// deadline error; surface it as a clean client error rather than a
 		// generic 500. (Caller-cancelled requests use a different context error.)
+		//
+		// A date sort is the likelier one to get here and has a remedy of its
+		// own, so it is offered: relevance streams out of the FTS index, while a
+		// date ordering materialises and sorts the whole match set first (see
+		// SearchSort.orderBy). Telling someone to narrow a query that already
+		// works under Relevance would be the wrong advice.
 		if errors.Is(err, context.DeadlineExceeded) {
-			return &api.Error{Error: "search timed out; please use a more specific query"}, nil
+			msg := "search timed out; please use a more specific query"
+			if sort != repository.SortRelevance {
+				msg += " or sort by relevance"
+			}
+			return &api.Error{Error: msg}, nil
 		}
 		return nil, err
 	}

@@ -661,6 +661,30 @@ test('search rejects an empty query', async () => {
   assert.equal((await call(newState(), 'GET', '/messages/search?q=%20%20')).status, 400);
 });
 
+// The demo's SEARCH_SORTS is hand-maintained against openapi.yaml — worker code
+// takes no imports, so it cannot read the generated union the way api/client.ts
+// does. That is what this closes, and it is the direction the demo's own comment
+// admits nothing covered: a sort *added* to the schema and not to the demo.
+//
+// The enum is read out of web/ts/api/types.ts, which build.sh regenerates from
+// openapi.yaml immediately before these tests run, so the schema is the source
+// either way. Then each value is driven through the real endpoint, mirroring
+// TestSearchSortsCoverTheEnum on the Go side: a value the demo does not know is
+// a 400 where the server answers 200.
+test('the demo accepts every sort in the openapi enum', async () => {
+  const types = readFileSync(path.resolve(__dirname, 'api/types.ts'), 'utf8');
+  const m = types.match(/\n\s*sort\?: ([^;]+);/);
+  assert.ok(m, 'no sort parameter found in the generated types — did openapi.yaml change?');
+  const sorts = [...m[1].matchAll(/"([^"]+)"/g)].map((x) => x[1]);
+  assert.ok(sorts.length >= 3, `expected the sort enum, got ${JSON.stringify(sorts)}`);
+
+  const state = newState([message({ id: 1, bodyText: 'the needle is here' })]);
+  for (const sort of sorts) {
+    const res = await call(state, 'GET', `/messages/search?q=needle&sort=${sort}`);
+    assert.equal(res.status, 200, `demo rejected sort=${sort}, which the schema allows`);
+  }
+});
+
 // The date orderings are the half of the search sort that is NOT a divergence:
 // relevance stands in for bm25, but these mirror SearchSort.orderBy exactly,
 // ascending-id tiebreak included. The bodies differ in how well they match so a

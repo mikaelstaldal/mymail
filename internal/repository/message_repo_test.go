@@ -735,6 +735,21 @@ func TestSearchMessagesSnippetLargeBody(t *testing.T) {
 	assert.Less(t, len(snip), 1024, "snippet must be a bounded excerpt, not the whole body")
 }
 
+// Every SearchSort must have a clause. numSearchSorts sizes searchSortClauses,
+// so adding a sort to the enum grows the array with an empty entry and fails
+// here — the check the handler's TestSearchSortsCoverTheEnum performs for the
+// wire enum, done for the repository's own.
+func TestSearchSortClausesAreComplete(t *testing.T) {
+	for s := SearchSort(0); s < numSearchSorts; s++ {
+		assert.NotEmpty(t, searchSortClauses[s], "SearchSort(%d) has no ORDER BY clause", int(s))
+		assert.Equal(t, searchSortClauses[s], s.orderBy(), "orderBy disagrees with the table for %d", int(s))
+	}
+	// The fallback, so the unreachable branch is at least pinned rather than
+	// merely asserted to be unreachable.
+	assert.Equal(t, searchSortClauses[SortRelevance], SearchSort(-1).orderBy())
+	assert.Equal(t, searchSortClauses[SortRelevance], numSearchSorts.orderBy())
+}
+
 // TestSearchMessagesSnippetLargeBody covers one enormous body; this covers the
 // other axis, many matching rows, which is the one the date sorts make
 // expensive. They cannot use idx_messages_date — the FTS5 MATCH drives the

@@ -99,11 +99,21 @@ export function SearchView({ query, folders }: SearchViewProps) {
   // Which search is the current one. Responses can arrive out of order — two
   // quick changes of the Sort dropdown are enough — and the later request is
   // the one the controls now describe, so an earlier response landing after it
-  // must be dropped rather than painted. Without this the list can end up
-  // showing one ordering while the dropdown reads the other.
+  // must be dropped rather than painted. Without this a slower earlier response
+  // can overwrite a faster later one, leaving the list in an ordering the
+  // dropdown does not name.
+  //
+  // This covers out-of-order *successes* only. A sort change that fails is a
+  // separate case, handled by handleSortChange putting the dropdown back.
   const latestRequest = useRef(0);
 
-  const runSearch = useCallback(async (q: string, r: Refinements, off: number, s: SearchSort) => {
+  // 'stale' is not 'error': a superseded request must not make the caller undo
+  // anything, because the request that superseded it is still deciding.
+  type SearchOutcome = 'ok' | 'error' | 'stale';
+
+  const runSearch = useCallback(async (
+    q: string, r: Refinements, off: number, s: SearchSort,
+  ): Promise<SearchOutcome> => {
     const request = ++latestRequest.current;
     setLoading(true);
     setError(null);
@@ -121,7 +131,7 @@ export function SearchView({ query, folders }: SearchViewProps) {
       if (fromAddr) opts.from_addr = fromAddr;
       if (toAddr) opts.to_addr = toAddr;
       const result = await api.messages.search(q, opts);
-      if (request !== latestRequest.current) return;
+      if (request !== latestRequest.current) return 'stale';
       setItems(result.items);
       const map: Record<number, string> = {};
       for (const item of result.items) {
@@ -131,9 +141,11 @@ export function SearchView({ query, folders }: SearchViewProps) {
       setTotal(result.total);
       setOffset(off);
       setHasSearched(true);
+      return 'ok';
     } catch (e) {
-      if (request !== latestRequest.current) return;
+      if (request !== latestRequest.current) return 'stale';
       setError(e instanceof Error ? e.message : 'Search failed');
+      return 'error';
     } finally {
       // Only the newest request owns the spinner: an older one finishing must
       // not clear it while the newer is still in flight.
@@ -176,12 +188,20 @@ export function SearchView({ query, folders }: SearchViewProps) {
   }
 
   function handleSortChange(next: SearchSort) {
+    const previous = sort;
     setSort(next);
     // Back to the first page: the same offset means a different slice under a
     // new ordering, so keeping it would drop the user somewhere arbitrary.
     // Re-runs the last *submitted* refinements, like the pagination buttons —
     // unsubmitted form edits must not take effect through the sort control.
-    void runSearch(activeQ, active, 0, next);
+    void runSearch(activeQ, active, 0, next).then(outcome => {
+      // The dropdown moved before the request was made, so a failure would
+      // otherwise leave it naming an ordering the list is not in — beside an
+      // error banner, with nothing to say the two disagree. Only on 'error':
+      // a 'stale' outcome means a newer change is still in flight and owns the
+      // control.
+      if (outcome === 'error') setSort(previous);
+    });
   }
 
   const hasPrev = offset > 0;
@@ -271,56 +291,58 @@ export function SearchView({ query, folders }: SearchViewProps) {
         <div class="search-blank" />
       ) : (
         <>
-          {/* Present from the first result onwards, including while a later
-              search is in flight and when one returns nothing. Unmounting it
-              would destroy the control the user just operated — moving keyboard
-              focus to the body mid-interaction, which for the Sort dropdown
-              means you cannot pick a second option without navigating back to
-              it. Gating on hasSearched rather than items.length is what covers
-              the empty case: Sort must not vanish at the moment a user reaches
-              for it to widen a search that found nothing. The counts read the
-              previous page's numbers while loading; the re-render corrects
-              them. */}
+          {/* Present from the first *completed* search onwards — hasSearched is
+              set when a response lands, so the toolbar is absent during the
+              first search of a mounted view, and stays absent if that first
+              search fails. Later searches keep it, which is the point:
+              unmounting it would destroy the control the user just operated,
+              moving keyboard focus to the body mid-interaction, and for the
+              Sort dropdown that means being unable to pick a second option
+              without navigating back to it. Gating on hasSearched rather than
+              items.length is what covers the empty case: Sort must not vanish
+              at the moment a user reaches for it to widen a search that found
+              nothing. The counts read the previous page's numbers while
+              loading; the re-render corrects them. */}
           {hasSearched && (
-          <div class="folder-toolbar">
-            <div class="search-field">
-              <label class="search-field-label" htmlFor="search-sort">Sort</label>
-              <select
-                id="search-sort"
-                class="search-sort-select"
-                value={sort}
-                onChange={(e) => handleSortChange((e.target as HTMLSelectElement).value as SearchSort)}
-                aria-label="Sort results"
+            <div class="folder-toolbar">
+              <div class="search-field">
+                <label class="search-field-label" htmlFor="search-sort">Sort</label>
+                <select
+                  id="search-sort"
+                  class="search-sort-select"
+                  value={sort}
+                  onChange={(e) => handleSortChange((e.target as HTMLSelectElement).value as SearchSort)}
+                  aria-label="Sort results"
+                >
+                  {SORT_OPTIONS.map(([value, label]) => (
+                    <option key={value} value={value}>{label}</option>
+                  ))}
+                </select>
+              </div>
+              <span class="ml-auto" />
+              <span class="pagination-info">{pageStart}–{pageEnd} of {total}</span>
+              {/* Disabled while loading, unlike the Sort dropdown beside them:
+                  `offset` only advances when a response lands, so a second click
+                  mid-flight would re-request the page already being fetched and
+                  appear to do nothing. The dropdown has no such state to outrun,
+                  and keeping it operable is the point of the mounted toolbar. */}
+              <button
+                class="btn btn-ghost btn-sm btn-icon"
+                disabled={!hasPrev || loading}
+                onClick={() => void runSearch(activeQ, active, offset - PAGE_SIZE, sort)}
+                aria-label="Previous page"
               >
-                {SORT_OPTIONS.map(([value, label]) => (
-                  <option key={value} value={value}>{label}</option>
-                ))}
-              </select>
+                <Icon name="chevron-left" />
+              </button>
+              <button
+                class="btn btn-ghost btn-sm btn-icon"
+                disabled={!hasNext || loading}
+                onClick={() => void runSearch(activeQ, active, offset + PAGE_SIZE, sort)}
+                aria-label="Next page"
+              >
+                <Icon name="chevron-right" />
+              </button>
             </div>
-            <span class="ml-auto" />
-            <span class="pagination-info">{pageStart}–{pageEnd} of {total}</span>
-            {/* Disabled while loading, unlike the Sort dropdown beside them:
-                `offset` only advances when a response lands, so a second click
-                mid-flight would re-request the page already being fetched and
-                appear to do nothing. The dropdown has no such state to outrun,
-                and keeping it operable is the point of the mounted toolbar. */}
-            <button
-              class="btn btn-ghost btn-sm btn-icon"
-              disabled={!hasPrev || loading}
-              onClick={() => void runSearch(activeQ, active, offset - PAGE_SIZE, sort)}
-              aria-label="Previous page"
-            >
-              <Icon name="chevron-left" />
-            </button>
-            <button
-              class="btn btn-ghost btn-sm btn-icon"
-              disabled={!hasNext || loading}
-              onClick={() => void runSearch(activeQ, active, offset + PAGE_SIZE, sort)}
-              aria-label="Next page"
-            >
-              <Icon name="chevron-right" />
-            </button>
-          </div>
           )}
           {loading ? (
             <div class="folder-status">Searching…</div>

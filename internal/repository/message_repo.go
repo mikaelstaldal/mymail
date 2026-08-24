@@ -1354,7 +1354,7 @@ func buildSnippet(body, query string) string {
 
 // SearchSort selects the ordering of a search result page. It is an enum rather
 // than a string so no caller can hand SearchMessages an ORDER BY fragment: the
-// clause is chosen by the switch in orderBy below and never interpolated from
+// clause is looked up in searchSortClauses below and never interpolated from
 // input.
 type SearchSort int
 
@@ -1365,6 +1365,13 @@ const (
 	SortDateAsc
 	// SortDateDesc orders by message date, newest first.
 	SortDateDesc
+
+	// numSearchSorts must stay last: it sizes searchSortClauses, so adding a
+	// sort above it grows that array and leaves the new entry empty, which
+	// TestSearchSortClausesAreComplete then fails on. A switch with a default
+	// could not do that — it would silently serve relevance for the new member,
+	// and the handler's own guard covers the *wire* enum, not this one.
+	numSearchSorts
 )
 
 // orderBy returns the ORDER BY clause for this sort.
@@ -1394,21 +1401,23 @@ const (
 // LIMIT/OFFSET, rather than streamed. On a large mailbox and a common term this
 // is the ordering that reaches searchTimeout first, and the user sees a query
 // that works under Relevance time out under Newest first.
+// A fixed-size array indexed by the enum, so its length tracks numSearchSorts
+// and a new sort shows up as an empty entry rather than as a missing switch case.
+var searchSortClauses = [numSearchSorts]string{
+	SortRelevance: "rank",
+	SortDateAsc:   "m.date ASC, m.id ASC",
+	SortDateDesc:  "m.date DESC, m.id ASC",
+}
+
 func (s SearchSort) orderBy() string {
-	switch s {
-	case SortRelevance:
-		return "rank"
-	case SortDateAsc:
-		return "m.date ASC, m.id ASC"
-	case SortDateDesc:
-		return "m.date DESC, m.id ASC"
+	// Out of range is unreachable: SearchSort is closed, and handler.searchSorts
+	// maps the wire enum onto it, refusing anything it cannot map before it gets
+	// here. Relevance is the least surprising fallback, being the endpoint's own
+	// default — and an empty clause would be invalid SQL besides.
+	if s < 0 || s >= numSearchSorts || searchSortClauses[s] == "" {
+		return searchSortClauses[SortRelevance]
 	}
-	// Unreachable: SearchSort is closed, and handler.searchSorts is what maps
-	// the wire enum onto it — a value with no entry there is refused before it
-	// reaches this method, so this branch cannot silently serve relevance for a
-	// sort someone forgot to wire up. Relevance is nonetheless the least
-	// surprising answer, being the endpoint's own default.
-	return "rank"
+	return searchSortClauses[s]
 }
 
 // SearchMessages performs FTS5 phrase-match search with optional folder, date
