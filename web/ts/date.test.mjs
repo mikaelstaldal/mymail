@@ -18,6 +18,14 @@
 // one four days ahead does. **If you narrow that guard, narrow the claim here
 // too** — these cases would then be asserting a symmetry the code no longer has.
 //
+// The third formatter, formatDateFull, is the unabbreviated form: the message
+// detail's Date row, a thread entry's tooltip, and the snoozed-until and
+// scheduled-for lines. Its cases pin the one thing that distinguishes it from
+// the two ladders — that no field is ever left implicit — because it had been
+// omitting the year, which made a message from a previous year read as a day in
+// no year at all. Since the tooltip form wants the same fields, the two are
+// asserted equal, which is what stops them drifting apart again.
+//
 // The file also covers formatDateAdaptive, which the Scheduled/Snoozed work did
 // not add but did put at risk: the two now share fullTitle, timeOfDay and
 // calendarDaysAgo, so its own ladder is asserted here rather than left to the
@@ -42,7 +50,7 @@ import path from 'node:path';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
-const { formatDateSchedule, formatDateAdaptive } = await import(
+const { formatDateSchedule, formatDateAdaptive, formatDateFull } = await import(
   path.resolve(__dirname, '../static/util/date.js')
 );
 
@@ -243,6 +251,32 @@ test('the rest of the past week is a weekday, then a date', () => {
 
   const older = noonInDays(-30);
   assert.ok(formatDateAdaptive(older).display.endsWith(`, ${hhmm(older)}`));
+});
+
+// ---------------------------------------------------------------------------
+// formatDateFull — the unabbreviated form, which abbreviates nothing
+// ---------------------------------------------------------------------------
+
+test('the full date carries the year however old the message is', () => {
+  // The bug this pins: a message from a previous year read as "22 Nov, 10:07
+  // CET", a day in no particular year and indistinguishable from one this year.
+  for (const yearsBack of [0, 1, 5]) {
+    const d = new Date();
+    d.setFullYear(d.getFullYear() - yearsBack, 10, 22);
+    d.setHours(10, 7, 0, 0);
+    const iso = d.toISOString();
+    const full = formatDateFull(iso);
+    assert.ok(full.includes(String(d.getFullYear())), `${yearsBack} years back: ${full}`);
+    assert.ok(full.includes(hhmm(iso)), full);
+  }
+});
+
+test('the full date and the tooltip are the same string', () => {
+  // Both want every field, so they share one implementation; asserting it here
+  // is what keeps a later edit to one from reintroducing the disagreement.
+  const iso = noonInDays(-400);
+  assert.equal(formatDateFull(iso), formatDateAdaptive(iso).title);
+  assert.equal(formatDateFull(iso), formatDateSchedule(iso).title);
 });
 
 test('a message from another year drops the time, unlike the schedule column', () => {

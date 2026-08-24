@@ -1074,8 +1074,17 @@ All timestamps displayed in the browser's local timezone. Display format is adap
 | 7 days – same year | Short date + time          | "Apr 3, 14:32"    |
 | Previous years     | Short date with year       | "Apr 3, 2023"     |
 
-Message detail always shows the full "Apr 3, 14:32 CEST" form with timezone abbreviation.
-Simple timestamps have a tooltip with the full form.
+Message detail always shows the full "Apr 3, 2023, 14:32 CEST" form: short date, **year**, time and
+short timezone name. The year is present at every age, a message from the current year included —
+this is the unabbreviated timestamp, and the adaptive ladder above is where a field is left implicit.
+Omitting it made a message from a previous year read as a day in no particular year.
+
+The same form is the tooltip on every adaptive timestamp, including the Scheduled and Snoozed
+columns. Detail and tooltip are one format by definition rather than two that happen to agree.
+
+(The exact spelling is the browser locale's, so the field order and the zone's name vary — under
+`en-US` the same instant reads "Apr 3, 2023, 14:32 GMT+2", which is why the zone is specified as a
+short name rather than an abbreviation. What is specified is which fields are present.)
 
 ### Confirmation Dialogs
 

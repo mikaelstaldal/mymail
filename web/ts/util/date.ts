@@ -1,3 +1,15 @@
+/**
+ * Every field, including the year, at every distance — the form used both as
+ * the tooltip behind an abbreviated display and, via `formatDateFull`, as a
+ * date shown in its own right.
+ *
+ * The year is unconditional rather than dropped for the current one. This is
+ * the unabbreviated form: the two ladders below are where a field is left
+ * implicit, and the reader reaches this one precisely when they want the date
+ * spelled out. Omitting the year here left a message from a previous year
+ * reading as "22 Nov, 10:07 CET", which names a day in no particular year and
+ * is indistinguishable from one this year.
+ */
 function fullTitle(date: Date): string {
   return date.toLocaleString(undefined, {
     year: 'numeric',
@@ -107,13 +119,15 @@ export function formatDateSchedule(dateStr: string): { display: string; title: s
   return { display, title };
 }
 
+/**
+ * The full date, for the places that show one outright rather than abbreviating
+ * it: the message-detail header, a thread entry's tooltip, and the snoozed-until
+ * and scheduled-for lines.
+ *
+ * Identical to the tooltip form by definition, not by coincidence — both want
+ * every field — so it delegates rather than repeating the option list, which is
+ * how the two drifted into disagreeing about the year in the first place.
+ */
 export function formatDateFull(dateStr: string): string {
-  return new Date(dateStr).toLocaleString(undefined, {
-    month: 'short',
-    day: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-    timeZoneName: 'short',
-    hour12: false,
-  });
+  return fullTitle(new Date(dateStr));
 }
