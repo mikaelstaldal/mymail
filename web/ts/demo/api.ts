@@ -1861,12 +1861,16 @@ function listContacts(state: DemoState, url: URL): Response {
 
   const matching = state.contacts
     .filter((c) => q === null || c.name.toLowerCase().includes(q) || c.address.toLowerCase().includes(q))
-    // Named contacts first, then by name, then by address — the ORDER BY in
-    // ContactRepository.ListContacts.
+    // Named contacts first, then by name, then by address, then by id — the
+    // ORDER BY in ContactRepository.ListContacts. The id is what makes it total:
+    // address is unique case-sensitively, so two contacts differing only in the
+    // case of their address fold together on the term before it, and paging a
+    // tie needs a defined winner.
     .sort((a, b) =>
       (a.name === '' ? 1 : 0) - (b.name === '' ? 1 : 0) ||
       a.name.toLowerCase().localeCompare(b.name.toLowerCase()) ||
-      a.address.toLowerCase().localeCompare(b.address.toLowerCase()));
+      a.address.toLowerCase().localeCompare(b.address.toLowerCase()) ||
+      a.id - b.id);
 
   return jsonResponse(200, {
     total: matching.length,

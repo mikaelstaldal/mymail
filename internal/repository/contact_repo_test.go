@@ -46,6 +46,55 @@ func TestListContactsNonASCII(t *testing.T) {
 	}
 }
 
+// Two halves, and the first is the more important one: a contacts tie is
+// **unreachable** through the repository, because all three write paths casefold
+// the address before storing it. Asserted here so that a change to the folding
+// is a failing test rather than a quiet widening of what the listing has to
+// order.
+//
+// The second half then constructs the tie the API refuses to, by inserting
+// straight into the table, and pins what the `id ASC` term decides. It is
+// deliberately reaching past the repository — that is the only way to reach this
+// state, and the reason the term is defence-in-depth rather than a bug fix.
+// Like TestListMessagesPagingIsStableAcrossTies it passes with and without the
+// clause (SQLite's sorter preserves input order; measured to 100k tied rows), so
+// it pins the declared order, not a live defect.
+func TestListContactsTieIsDecidedByID(t *testing.T) {
+	ctx := context.Background()
+	db := openTestDB(t)
+	r := NewContactRepository(db)
+
+	require.NoError(t, r.UpsertContact(ctx, "Bob@example.com", "Bob"))
+	require.NoError(t, r.UpsertContact(ctx, "bob@example.com", "Bob"))
+	_, total, err := r.ListContacts(ctx, nil, 10, 0)
+	require.NoError(t, err)
+	assert.Equal(t, 1, total,
+		"addresses are casefolded on write, so a case-differing pair collapses to one row")
+
+	// Past the repository on purpose: nothing else can produce two rows that tie.
+	for _, addr := range []string{"Tie@example.com", "tIe@example.com"} {
+		_, err := db.ExecContext(ctx,
+			`INSERT INTO contacts(address,name,created_at,updated_at) VALUES(?,'Zed',?,?)`,
+			addr, "2026-01-01T00:00:00Z", "2026-01-01T00:00:00Z")
+		require.NoError(t, err)
+	}
+
+	items, _, err := r.ListContacts(ctx, nil, 10, 0)
+	require.NoError(t, err)
+	require.Len(t, items, 3)
+	tied := items[1:] // "Zed" sorts after "Bob"
+	assert.Less(t, tied[0].ID, tied[1].ID, "a tie must resolve to ascending id")
+
+	// And paging across the tie returns each of them exactly once.
+	first, _, err := r.ListContacts(ctx, nil, 1, 1)
+	require.NoError(t, err)
+	second, _, err := r.ListContacts(ctx, nil, 1, 2)
+	require.NoError(t, err)
+	require.Len(t, first, 1)
+	require.Len(t, second, 1)
+	assert.NotEqual(t, first[0].ID, second[0].ID, "the same contact came back on both pages")
+}
+
 // The filter uses instr(), not LIKE, so % and _ are ordinary characters — the
 // same rule as SearchMessages. Under LIKE every probe here but the last would
 // have matched.

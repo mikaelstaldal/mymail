@@ -1415,7 +1415,7 @@ paths:
     get:
       summary: Get thread
       description: |
-        Returns all messages in the same thread, ordered by date ascending.
+        Returns all messages in the same thread, ordered by date ascending, ties broken by ascending `id`.
 
         **Thread membership algorithm (applied in order):**
         1. **Header-based (primary):** Build a directed graph where message A links to message B if
@@ -2402,7 +2402,8 @@ paths:
     get:
       summary: List contacts
       description: |
-        List contacts ordered by name (empty names last), then address. Supports autocomplete filtering.
+        List contacts ordered by name (empty names last), then address, then `id`. Supports autocomplete
+        filtering.
         When used for address-field autocomplete dropdowns, clients should send `limit=10`. If `total`
         exceeds the requested limit, the UI should show a "type more to narrow" hint rather than paginating.
         The Contact schema has no flag distinguishing manually set names from auto-populated ones;

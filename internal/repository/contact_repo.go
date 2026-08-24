@@ -49,7 +49,21 @@ const contactSelectSQL = `SELECT id, address, name, created_at, updated_at FROM 
 // unicode_lower rather than SQLite's built-in lower(), which folds ASCII only —
 // see sqlfunc.go. In the ordering that would file "Åsa" apart from "åsa"; in
 // the filter below it would make the search miss them.
-const contactOrderSQL = ` ORDER BY CASE WHEN name = '' THEN 1 ELSE 0 END, unicode_lower(name), unicode_lower(address)`
+//
+// The trailing id makes the order total by construction. Note what it is not:
+// a fix for a reachable bug. A tie needs two rows agreeing on unicode_lower of
+// the address, and every write path — CreateContact, UpdateContact,
+// UpsertContact — casefolds the address before storing it, on top of the UNIQUE
+// constraint. So the rows that would tie cannot be created, and the ordering was
+// already total *because of an invariant maintained in three other functions*.
+//
+// This term is here so it is total on its own terms instead. That is worth the
+// zero it costs, because ordering by an expression means no index can satisfy
+// this clause — the plan is SCAN plus USE TEMP B-TREE FOR ORDER BY — so unlike
+// the folder listing there is not even an incidental index order to fall back
+// on if the folding invariant ever weakens. See ListMessages in message_repo.go
+// for the wider reasoning.
+const contactOrderSQL = ` ORDER BY CASE WHEN name = '' THEN 1 ELSE 0 END, unicode_lower(name), unicode_lower(address), id ASC`
 
 // ListContacts returns contacts with an optional substring filter on name+address, plus the total count.
 func (r *ContactRepository) ListContacts(ctx context.Context, q *string, limit, offset int) ([]oas.Contact, int, error) {

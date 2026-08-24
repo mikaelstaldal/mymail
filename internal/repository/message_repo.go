@@ -885,10 +885,18 @@ func addThreadRow(
 	}
 }
 
-// fetchSummariesByIDs fetches MessageSummary rows for the given IDs ordered by date ASC.
+// fetchSummariesByIDs fetches MessageSummary rows for the given IDs ordered by
+// date ASC, ties broken by ascending id.
+//
+// Not a paging fault like the two listings — a thread is returned whole, so
+// nothing can be repeated or skipped. What the tiebreak buys is that two
+// messages sharing a date hold their relative position between one load of a
+// thread and the next, instead of being free to swap. The demo backend already
+// ordered this way (the sort in threadFor), so this is the server catching up to
+// it rather than the other way round.
 func (r *MessageRepository) fetchSummariesByIDs(ctx context.Context, ids []int64) ([]oas.MessageSummary, error) {
 	rows, err := r.db.QueryContext(ctx,
-		`SELECT `+summaryColumns+` FROM messages m WHERE m.id IN (`+placeholders(len(ids))+`) ORDER BY m.date ASC`,
+		`SELECT `+summaryColumns+` FROM messages m WHERE m.id IN (`+placeholders(len(ids))+`) ORDER BY m.date ASC, m.id ASC`,
 		int64Args(ids)...,
 	)
 	if err != nil {

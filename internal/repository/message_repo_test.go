@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"database/sql"
+	"fmt"
 	"os"
 	"strings"
 	"testing"
@@ -449,6 +450,51 @@ func TestGetMessageThread_HeaderBased(t *testing.T) {
 	}
 	assert.True(t, ids[pid])
 	assert.True(t, ids[cid])
+}
+
+// A thread whose messages share a date — a reply written inside the same second
+// as its parent, or an import that assigned both the same stamp. The order is
+// chronological then ascending id, so the two hold their positions between one
+// load and the next rather than being free to swap. Not a paging concern: a
+// thread comes back whole.
+//
+// Passes with and without the `, m.id ASC` (see
+// TestListMessagesPagingIsStableAcrossTies for why); it pins the declared order.
+func TestGetMessageThreadTieIsDecidedByID(t *testing.T) {
+	ctx := context.Background()
+	db := openTestDB(t)
+	r := NewMessageRepository(db)
+
+	parent := makeMsg(1, "tied thread")
+	parent.MessageID = sql.NullString{String: "p@x", Valid: true}
+	pid, err := r.InsertMessage(ctx, parent)
+	require.NoError(t, err)
+
+	var replyIDs []int64
+	for i := range 3 {
+		reply := makeMsg(1, "Re: tied thread")
+		reply.MessageID = sql.NullString{String: fmt.Sprintf("r%d@x", i), Valid: true}
+		reply.InReplyTo = sql.NullString{String: "p@x", Valid: true}
+		reply.Date = parent.Date // same instant as the parent and each other
+		id, err := r.InsertMessage(ctx, reply)
+		require.NoError(t, err)
+		replyIDs = append(replyIDs, id)
+	}
+
+	summaries, truncated, err := r.GetMessageThread(ctx, pid)
+	require.NoError(t, err)
+	assert.False(t, truncated)
+	require.Len(t, summaries, 4)
+
+	got := make([]int, len(summaries))
+	for i, s := range summaries {
+		got[i] = s.ID
+	}
+	want := []int{int(pid)}
+	for _, id := range replyIDs {
+		want = append(want, int(id))
+	}
+	assert.Equal(t, want, got, "an all-tied thread must come back in ascending id order")
 }
 
 func TestGetMessageThread_SubjectFallback(t *testing.T) {
