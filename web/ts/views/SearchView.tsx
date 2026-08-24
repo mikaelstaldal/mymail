@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'preact/hooks';
-import { api } from '../api/client.js';
+import { api, type SearchSort } from '../api/client.js';
 import { navigate } from '../router.js';
 import { MessageList } from '../components/MessageList.js';
 import { Icon } from '../components/Icon.js';
@@ -36,6 +36,27 @@ const NO_REFINEMENTS: Refinements = {
   toAddr: '',
 };
 
+/**
+ * The sort is deliberately not a Refinement: it does not narrow the result set,
+ * so it neither belongs in the form's submit-to-apply group nor needs one. It
+ * takes effect on change, from the results toolbar, and is passed to runSearch
+ * separately.
+ */
+const DEFAULT_SORT: SearchSort = 'relevance';
+
+/**
+ * The options, in the order the dropdown offers them. A list rather than a
+ * Record keyed by sort: the order is then something this file states, not
+ * something it inherits from object key insertion order, which a reformat or an
+ * alphabetising refactor would silently change — including which option the
+ * dropdown shows first.
+ */
+const SORT_OPTIONS: ReadonlyArray<readonly [SearchSort, string]> = [
+  ['relevance', 'Relevance'],
+  ['date_desc', 'Newest first'],
+  ['date_asc', 'Oldest first'],
+];
+
 function dateInputToISO(dateStr: string, addDays = 0): string {
   const [y, m, d] = dateStr.split('-').map(Number);
   const date = new Date(y, m - 1, d + addDays, 0, 0, 0);
@@ -55,6 +76,7 @@ export function SearchView({ query, folders }: SearchViewProps) {
   // Last-submitted params — used for pagination so live form edits don't affect prev/next
   const [activeQ, setActiveQ] = useState(query);
   const [active, setActive] = useState<Refinements>(NO_REFINEMENTS);
+  const [sort, setSort] = useState<SearchSort>(DEFAULT_SORT);
 
   const [items, setItems] = useState<MessageSummary[]>([]);
   const [snippets, setSnippets] = useState<Record<number, string>>({});
@@ -74,13 +96,22 @@ export function SearchView({ query, folders }: SearchViewProps) {
   // from the toolbar.
   const handledQuery = useRef<string | null>(null);
 
-  const runSearch = useCallback(async (q: string, r: Refinements, off: number) => {
+  // Which search is the current one. Responses can arrive out of order — two
+  // quick changes of the Sort dropdown are enough — and the later request is
+  // the one the controls now describe, so an earlier response landing after it
+  // must be dropped rather than painted. Without this the list can end up
+  // showing one ordering while the dropdown reads the other.
+  const latestRequest = useRef(0);
+
+  const runSearch = useCallback(async (q: string, r: Refinements, off: number, s: SearchSort) => {
+    const request = ++latestRequest.current;
     setLoading(true);
     setError(null);
     try {
       const opts: Parameters<typeof api.messages.search>[1] = {
         limit: PAGE_SIZE,
         offset: off,
+        sort: s,
       };
       if (r.folderId != null) opts.folder_id = r.folderId;
       if (r.dateFrom) opts.date_from = dateInputToISO(r.dateFrom);
@@ -90,6 +121,7 @@ export function SearchView({ query, folders }: SearchViewProps) {
       if (fromAddr) opts.from_addr = fromAddr;
       if (toAddr) opts.to_addr = toAddr;
       const result = await api.messages.search(q, opts);
+      if (request !== latestRequest.current) return;
       setItems(result.items);
       const map: Record<number, string> = {};
       for (const item of result.items) {
@@ -100,9 +132,12 @@ export function SearchView({ query, folders }: SearchViewProps) {
       setOffset(off);
       setHasSearched(true);
     } catch (e) {
+      if (request !== latestRequest.current) return;
       setError(e instanceof Error ? e.message : 'Search failed');
     } finally {
-      setLoading(false);
+      // Only the newest request owns the spinner: an older one finishing must
+      // not clear it while the newer is still in flight.
+      if (request === latestRequest.current) setLoading(false);
     }
   }, []);
 
@@ -115,8 +150,9 @@ export function SearchView({ query, folders }: SearchViewProps) {
     setRefine(NO_REFINEMENTS);
     setActiveQ(q);
     setActive(NO_REFINEMENTS);
+    setSort(DEFAULT_SORT);
     if (q) {
-      void runSearch(q, NO_REFINEMENTS, 0);
+      void runSearch(q, NO_REFINEMENTS, 0, DEFAULT_SORT);
     }
   }, [query, runSearch]);
 
@@ -132,7 +168,20 @@ export function SearchView({ query, folders }: SearchViewProps) {
     // same way keeps the round-trip exact, so a query containing "+" still
     // compares equal to handledQuery above.
     navigate(`#/search?${new URLSearchParams({ q }).toString()}`);
-    void runSearch(q, refine, 0);
+    // The sort survives a resubmit: it is not part of what the form edits, and
+    // silently reverting it to relevance would look like the control had been
+    // forgotten. Only a query arriving from the toolbar resets it, alongside the
+    // refinements.
+    void runSearch(q, refine, 0, sort);
+  }
+
+  function handleSortChange(next: SearchSort) {
+    setSort(next);
+    // Back to the first page: the same offset means a different slice under a
+    // new ordering, so keeping it would drop the user somewhere arbitrary.
+    // Re-runs the last *submitted* refinements, like the pagination buttons —
+    // unsubmitted form edits must not take effect through the sort control.
+    void runSearch(activeQ, active, 0, next);
   }
 
   const hasPrev = offset > 0;
@@ -220,43 +269,76 @@ export function SearchView({ query, folders }: SearchViewProps) {
 
       {!hasSearched && !loading ? (
         <div class="search-blank" />
-      ) : loading ? (
-        <div class="folder-status">Searching…</div>
-      ) : items.length === 0 ? (
-        <div class="folder-status folder-empty">No results</div>
       ) : (
         <>
+          {/* Present from the first result onwards, including while a later
+              search is in flight and when one returns nothing. Unmounting it
+              would destroy the control the user just operated — moving keyboard
+              focus to the body mid-interaction, which for the Sort dropdown
+              means you cannot pick a second option without navigating back to
+              it. Gating on hasSearched rather than items.length is what covers
+              the empty case: Sort must not vanish at the moment a user reaches
+              for it to widen a search that found nothing. The counts read the
+              previous page's numbers while loading; the re-render corrects
+              them. */}
+          {hasSearched && (
           <div class="folder-toolbar">
+            <div class="search-field">
+              <label class="search-field-label" htmlFor="search-sort">Sort</label>
+              <select
+                id="search-sort"
+                class="search-sort-select"
+                value={sort}
+                onChange={(e) => handleSortChange((e.target as HTMLSelectElement).value as SearchSort)}
+                aria-label="Sort results"
+              >
+                {SORT_OPTIONS.map(([value, label]) => (
+                  <option key={value} value={value}>{label}</option>
+                ))}
+              </select>
+            </div>
             <span class="ml-auto" />
             <span class="pagination-info">{pageStart}–{pageEnd} of {total}</span>
+            {/* Disabled while loading, unlike the Sort dropdown beside them:
+                `offset` only advances when a response lands, so a second click
+                mid-flight would re-request the page already being fetched and
+                appear to do nothing. The dropdown has no such state to outrun,
+                and keeping it operable is the point of the mounted toolbar. */}
             <button
               class="btn btn-ghost btn-sm btn-icon"
-              disabled={!hasPrev}
-              onClick={() => void runSearch(activeQ, active, offset - PAGE_SIZE)}
+              disabled={!hasPrev || loading}
+              onClick={() => void runSearch(activeQ, active, offset - PAGE_SIZE, sort)}
               aria-label="Previous page"
             >
               <Icon name="chevron-left" />
             </button>
             <button
               class="btn btn-ghost btn-sm btn-icon"
-              disabled={!hasNext}
-              onClick={() => void runSearch(activeQ, active, offset + PAGE_SIZE)}
+              disabled={!hasNext || loading}
+              onClick={() => void runSearch(activeQ, active, offset + PAGE_SIZE, sort)}
               aria-label="Next page"
             >
               <Icon name="chevron-right" />
             </button>
           </div>
-          <div class="msg-list-wrap">
-            <MessageList
-              items={items}
-              selectedIds={new Set()}
-              onToggleSelect={() => undefined}
-              onToggleSelectAll={() => undefined}
-              onRowClick={(id) => navigate(`#/message/${id}`)}
-              snippets={snippets}
-              folders={active.folderId == null ? folders : undefined}
-            />
-          </div>
+          )}
+          {loading ? (
+            <div class="folder-status">Searching…</div>
+          ) : items.length === 0 ? (
+            <div class="folder-status folder-empty">No results</div>
+          ) : (
+            <div class="msg-list-wrap">
+              <MessageList
+                items={items}
+                selectedIds={new Set()}
+                onToggleSelect={() => undefined}
+                onToggleSelectAll={() => undefined}
+                onRowClick={(id) => navigate(`#/message/${id}`)}
+                snippets={snippets}
+                folders={active.folderId == null ? folders : undefined}
+              />
+            </div>
+          )}
         </>
       )}
     </div>

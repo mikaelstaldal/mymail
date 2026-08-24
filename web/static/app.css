@@ -1431,8 +1431,13 @@ html, body {
 }
 .search-query-input:focus { outline: none; box-shadow: var(--focus-ring); border-color: var(--btn-primary); }
 
-.search-folder-select {
-  padding: 5px 8px;
+/* .search-sort-select sits in the results toolbar rather than the form — it
+   orders the result set instead of narrowing it — but is the same control.
+   Padding is the one thing they do not share, so it is set per selector below
+   rather than here and overridden: an override would work only as long as
+   nothing reorders the two rules. */
+.search-folder-select,
+.search-sort-select {
   border: 1px solid var(--field-border);
   border-radius: var(--border-radius);
   font-size: 0.8rem;
@@ -1440,7 +1445,12 @@ html, body {
   color: var(--text-primary);
   cursor: pointer;
 }
-.search-folder-select:focus { outline: none; box-shadow: var(--focus-ring); }
+.search-folder-select { padding: 5px 8px; }
+/* Tighter: the toolbar is sized for buttons, not for form fields. */
+.search-sort-select { padding: 3px 6px; }
+
+.search-folder-select:focus,
+.search-sort-select:focus { outline: none; box-shadow: var(--focus-ring); }
 
 /* Label + control, kept on one line so .search-form's wrap never separates them. */
 .search-field {

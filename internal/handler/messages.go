@@ -40,6 +40,16 @@ func (h *Handler) FoldersFolderIDMessagesGet(ctx context.Context, params api.Fol
 	return &api.FoldersFolderIDMessagesGetOK{Total: total, Items: items}, nil
 }
 
+// searchSorts maps the wire enum onto the repository's. It must have an entry
+// for every member of api.MessagesSearchGetSort — which is generated from
+// openapi.yaml, so adding one there is what makes this incomplete.
+// TestSearchSortsCoverTheEnum walks AllValues() and fails when it is.
+var searchSorts = map[api.MessagesSearchGetSort]repository.SearchSort{
+	api.MessagesSearchGetSortRelevance: repository.SortRelevance,
+	api.MessagesSearchGetSortDateAsc:   repository.SortDateAsc,
+	api.MessagesSearchGetSortDateDesc:  repository.SortDateDesc,
+}
+
 func (h *Handler) MessagesSearchGet(ctx context.Context, params api.MessagesSearchGetParams) (api.MessagesSearchGetRes, error) {
 	q := strings.TrimSpace(params.Q)
 	if q == "" {
@@ -70,7 +80,17 @@ func (h *Handler) MessagesSearchGet(ctx context.Context, params api.MessagesSear
 
 	limit, offset := parsePagination(params.Limit, params.Offset)
 
-	items, total, err := h.messages.SearchMessages(ctx, q, folderID, dateFrom, dateTo, fromAddr, toAddr, limit, offset)
+	// The schema's enum and default mean ogen has already rejected anything else
+	// and filled in "relevance" when the parameter is absent. The lookup is
+	// unconditional rather than defaulted so that a member added to the enum but
+	// not to searchSorts is a missing key rather than a silent relevance search;
+	// TestSearchSortsCoverTheEnum turns that into a failing test.
+	sort, ok := searchSorts[params.Sort.Or(api.MessagesSearchGetSortRelevance)]
+	if !ok {
+		return &api.Error{Error: "unsupported sort"}, nil
+	}
+
+	items, total, err := h.messages.SearchMessages(ctx, q, folderID, dateFrom, dateTo, fromAddr, toAddr, sort, limit, offset)
 	if err != nil {
 		// A search that exceeds the repository's internal timeout returns a
 		// deadline error; surface it as a clean client error rather than a

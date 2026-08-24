@@ -1,5 +1,5 @@
 import { showNetworkErrorToast } from '../util/toast.js';
-import type { components } from './types.js';
+import type { components, paths } from './types.js';
 
 type Folder = components['schemas']['Folder'];
 type MessageSummary = components['schemas']['MessageSummary'];
@@ -10,6 +10,14 @@ type FilterRequest = components['schemas']['FilterRequest'];
 type SpamFilterSettings = components['schemas']['SpamFilterSettings'];
 type Contact = components['schemas']['Contact'];
 type DraftRequest = components['schemas']['DraftRequest'];
+
+/**
+ * The orderings `GET /messages/search` accepts. Read off the generated schema
+ * rather than written out, so adding or renaming one in openapi.yaml is a type
+ * error here instead of a request the server rejects at runtime.
+ */
+export type SearchSort =
+  NonNullable<NonNullable<paths['/messages/search']['get']['parameters']['query']>['sort']>;
 
 const BASE = 'api/v1';
 
@@ -151,13 +159,16 @@ export const api = {
         'DELETE', '/messages', { ids }
       ),
 
-    search: (q: string, opts: { folder_id?: number; date_from?: string; date_to?: string; from_addr?: string; to_addr?: string; limit?: number; offset?: number } = {}) => {
+    search: (q: string, opts: { folder_id?: number; date_from?: string; date_to?: string; from_addr?: string; to_addr?: string; sort?: SearchSort; limit?: number; offset?: number } = {}) => {
       const p = new URLSearchParams({ q });
       if (opts.folder_id != null) p.set('folder_id', String(opts.folder_id));
       if (opts.date_from) p.set('date_from', opts.date_from);
       if (opts.date_to) p.set('date_to', opts.date_to);
       if (opts.from_addr) p.set('from_addr', opts.from_addr);
       if (opts.to_addr) p.set('to_addr', opts.to_addr);
+      // Blank is not "unset" for this one: the enum has no empty member, so an
+      // empty value is a 400 rather than the default (see the demo's sortParam).
+      if (opts.sort) p.set('sort', opts.sort);
       if (opts.limit != null) p.set('limit', String(opts.limit));
       if (opts.offset != null) p.set('offset', String(opts.offset));
       return request<{ total: number; items: (MessageSummary & { snippet?: string })[] }>('GET', `/messages/search?${p}`);

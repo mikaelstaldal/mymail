@@ -661,6 +661,42 @@ test('search rejects an empty query', async () => {
   assert.equal((await call(newState(), 'GET', '/messages/search?q=%20%20')).status, 400);
 });
 
+// The date orderings are the half of the search sort that is NOT a divergence:
+// relevance stands in for bm25, but these mirror SearchSort.orderBy exactly,
+// ascending-id tiebreak included. The bodies differ in how well they match so a
+// sort that was ignored would come back in relevance order and fail.
+test('search sorts by date in both directions, tiebreaking on id like the server', async () => {
+  const state = newState([
+    message({ id: 1, subject: 'needle', bodyText: 'needle', date: '2026-01-01T00:00:00Z' }),
+    message({ id: 2, subject: 'x', bodyText: 'needle', date: '2026-02-01T00:00:00Z' }),
+    message({ id: 3, subject: 'x', bodyText: 'needle', date: '2026-02-01T00:00:00Z' }),
+    message({ id: 4, subject: 'x', bodyText: 'needle', date: '2026-03-01T00:00:00Z' }),
+  ]);
+  const ids = async (query) =>
+    (await call(state, 'GET', '/messages/search?q=needle' + query)).body.items.map((m) => m.id);
+
+  assert.deepEqual(await ids('&sort=date_desc'), [4, 2, 3, 1]);
+  assert.deepEqual(await ids('&sort=date_asc'), [1, 2, 3, 4]);
+  // Ties keep ascending id under both, so a page boundary inside one lands in
+  // the same place either way: id 2 leads the pair in the desc order above.
+  assert.deepEqual(await ids('&sort=date_desc&limit=2&offset=1'), [2, 3], 'paging a tie is stable');
+  assert.deepEqual(
+    await ids('&sort=relevance'), await ids(''),
+    'absent and explicit relevance are the same request',
+  );
+  // Sorting orders the filtered set rather than replacing the filter.
+  assert.deepEqual(await ids('&sort=date_asc&date_to=2026-02-15T00%3A00%3A00Z'), [1, 2, 3]);
+
+  // ogen validates sort against the schema's enum before the handler runs, so
+  // unlike from_addr/to_addr a blank value is rejected rather than defaulted.
+  for (const bad of ['subject', '']) {
+    assert.equal(
+      (await call(state, 'GET', `/messages/search?q=needle&sort=${bad}`)).status, 400,
+      `sort=${JSON.stringify(bad)}`,
+    );
+  }
+});
+
 test('search refines on from_addr and to_addr the way repository.SearchMessages does', async () => {
   const state = newState([
     message({

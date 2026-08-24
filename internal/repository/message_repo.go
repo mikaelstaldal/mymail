@@ -1321,8 +1321,64 @@ func buildSnippet(body, query string) string {
 	return sb.String()
 }
 
+// SearchSort selects the ordering of a search result page. It is an enum rather
+// than a string so no caller can hand SearchMessages an ORDER BY fragment: the
+// clause is chosen by the switch in orderBy below and never interpolated from
+// input.
+type SearchSort int
+
+const (
+	// SortRelevance is FTS5 ORDER BY rank, the default.
+	SortRelevance SearchSort = iota
+	// SortDateAsc orders by message date, oldest first.
+	SortDateAsc
+	// SortDateDesc orders by message date, newest first.
+	SortDateDesc
+)
+
+// orderBy returns the ORDER BY clause for this sort.
+//
+// Both date orderings break ties on id so that paging is stable: rows with an
+// identical date would otherwise come back in an unspecified order, which can
+// differ between the LIMIT/OFFSET queries of two adjacent pages and so repeat or
+// skip a message. Any total order does that job; ascending in both directions is
+// chosen because it is the simplest thing to state and to mirror, and the demo
+// backend mirrors it exactly.
+//
+// Note this makes the two date sorts stricter than the folder listing above,
+// which is a bare ORDER BY m.date DESC and so has the tie problem this clause
+// exists to avoid. That is a pre-existing gap, not a rule being followed here.
+//
+// Sorting m.date as text is chronological because every date is stored as UTC
+// RFC 3339 — a fixed-width YYYY-MM-DDTHH:MM:SSZ — by every write path
+// (InsertMessage and the three in draft_repo.go).
+//
+// The date orderings are not free, and idx_messages_date does not make them so:
+// the FTS5 MATCH drives the query, so that index cannot be used to order it.
+// EXPLAIN QUERY PLAN shows the date clauses adding USE TEMP B-TREE FOR ORDER BY
+// where rank has none — every matching row is materialised and sorted before
+// LIMIT/OFFSET, rather than streamed. On a large mailbox and a common term this
+// is the ordering that reaches searchTimeout first, and the user sees a query
+// that works under Relevance time out under Newest first.
+func (s SearchSort) orderBy() string {
+	switch s {
+	case SortRelevance:
+		return "rank"
+	case SortDateAsc:
+		return "m.date ASC, m.id ASC"
+	case SortDateDesc:
+		return "m.date DESC, m.id ASC"
+	}
+	// Unreachable: SearchSort is closed, and handler.searchSorts is what maps
+	// the wire enum onto it — a value with no entry there is refused before it
+	// reaches this method, so this branch cannot silently serve relevance for a
+	// sort someone forgot to wire up. Relevance is nonetheless the least
+	// surprising answer, being the endpoint's own default.
+	return "rank"
+}
+
 // SearchMessages performs FTS5 phrase-match search with optional folder, date
-// and address filters.
+// and address filters, ordered by sort.
 //
 // fromAddr and toAddr refine the result set by sender/recipient using the same
 // rule as a filter's match_from/match_to (case-insensitive substring, toAddr
@@ -1335,6 +1391,7 @@ func (r *MessageRepository) SearchMessages(
 	folderID *int64,
 	dateFrom, dateTo *time.Time,
 	fromAddr, toAddr *string,
+	sort SearchSort,
 	limit, offset int,
 ) ([]oas.MessagesSearchGetOKItemsItem, int, error) {
 	// Bound the query so a pathologically slow search fails fast with a clean
@@ -1400,7 +1457,7 @@ func (r *MessageRepository) SearchMessages(
 		m.send_at, m.snoozed_until, m.created_at,
 		substr(m.body_text, 1, ` + fmt.Sprint(snippetSourceLimit) + `)
 	FROM messages_fts JOIN messages m ON messages_fts.rowid = m.id
-	WHERE ` + whereClause + ` ORDER BY rank LIMIT ? OFFSET ?`
+	WHERE ` + whereClause + ` ORDER BY ` + sort.orderBy() + ` LIMIT ? OFFSET ?`
 
 	mainArgs := append(filterArgs, limit, offset)
 	rows, err := r.db.QueryContext(ctx, mainSQL, mainArgs...)

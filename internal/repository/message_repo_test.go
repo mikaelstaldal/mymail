@@ -11,6 +11,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	oas "github.com/mikaelstaldal/mymail/internal/api"
 	"github.com/mikaelstaldal/mymail/internal/model"
 )
 
@@ -428,12 +429,91 @@ func TestSearchMessages(t *testing.T) {
 	_, err := r.InsertMessage(ctx, msg)
 	require.NoError(t, err)
 
-	items, total, err := r.SearchMessages(ctx, "quick", nil, nil, nil, nil, nil, 10, 0)
+	items, total, err := r.SearchMessages(ctx, "quick", nil, nil, nil, nil, nil, SortRelevance, 10, 0)
 	require.NoError(t, err)
 	assert.NotEmpty(t, items)
 	assert.NotZero(t, total)
 	// The matched term is highlighted with ** markers in the snippet.
 	assert.Contains(t, items[0].Snippet, "**quick**")
+}
+
+// The date orderings, and the id tiebreaker that makes paging them stable. The
+// bodies are deliberately unequal in how well they match so that relevance would
+// order them differently from either date sort — otherwise a test could pass
+// with the sort ignored entirely.
+func TestSearchMessagesDateSort(t *testing.T) {
+	ctx := context.Background()
+	db := openTestDB(t)
+	r := NewMessageRepository(db)
+
+	base := time.Date(2026, 3, 1, 12, 0, 0, 0, time.UTC)
+
+	oldest := makeMsg(1, "needle in the subject too")
+	oldest.Date = base
+	oldestID, err := r.InsertMessage(ctx, oldest)
+	require.NoError(t, err)
+
+	// Same date as the message below, so only the id tiebreaker separates them —
+	// ascending in both directions, so this one leads the pair either way.
+	tiedEarlier := makeMsg(1, "middle")
+	tiedEarlier.Date = base.Add(time.Hour)
+	tiedEarlier.BodyText = "needle"
+	tiedEarlierID, err := r.InsertMessage(ctx, tiedEarlier)
+	require.NoError(t, err)
+
+	tiedLater := makeMsg(1, "middle")
+	tiedLater.Date = base.Add(time.Hour)
+	tiedLater.BodyText = "needle"
+	tiedLaterID, err := r.InsertMessage(ctx, tiedLater)
+	require.NoError(t, err)
+
+	newest := makeMsg(1, "newest")
+	newest.Date = base.Add(2 * time.Hour)
+	newest.BodyText = "needle"
+	newestID, err := r.InsertMessage(ctx, newest)
+	require.NoError(t, err)
+
+	ids := func(items []oas.MessagesSearchGetOKItemsItem) []int64 {
+		out := make([]int64, len(items))
+		for i, it := range items {
+			out[i] = int64(it.ID)
+		}
+		return out
+	}
+
+	t.Run("date_desc", func(t *testing.T) {
+		items, total, err := r.SearchMessages(ctx, "needle", nil, nil, nil, nil, nil, SortDateDesc, 10, 0)
+		require.NoError(t, err)
+		assert.Equal(t, 4, total)
+		assert.Equal(t, []int64{newestID, tiedEarlierID, tiedLaterID, oldestID}, ids(items))
+	})
+
+	t.Run("date_asc", func(t *testing.T) {
+		items, total, err := r.SearchMessages(ctx, "needle", nil, nil, nil, nil, nil, SortDateAsc, 10, 0)
+		require.NoError(t, err)
+		assert.Equal(t, 4, total)
+		assert.Equal(t, []int64{oldestID, tiedEarlierID, tiedLaterID, newestID}, ids(items))
+	})
+
+	// Paging a date sort across a tie must neither repeat nor skip a message.
+	t.Run("paging across a tie is stable", func(t *testing.T) {
+		var paged []int64
+		for off := 0; off < 4; off += 2 {
+			items, _, err := r.SearchMessages(ctx, "needle", nil, nil, nil, nil, nil, SortDateDesc, 2, off)
+			require.NoError(t, err)
+			paged = append(paged, ids(items)...)
+		}
+		assert.Equal(t, []int64{newestID, tiedEarlierID, tiedLaterID, oldestID}, paged)
+	})
+
+	// The sort is applied to the filtered set, not instead of the filters.
+	t.Run("combines with a refinement", func(t *testing.T) {
+		to := base.Add(90 * time.Minute)
+		items, total, err := r.SearchMessages(ctx, "needle", nil, nil, &to, nil, nil, SortDateAsc, 10, 0)
+		require.NoError(t, err)
+		assert.Equal(t, 3, total)
+		assert.Equal(t, []int64{oldestID, tiedEarlierID, tiedLaterID}, ids(items))
+	})
 }
 
 func TestSearchMessagesAddressFilters(t *testing.T) {
@@ -478,7 +558,7 @@ func TestSearchMessagesAddressFilters(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			items, total, err := r.SearchMessages(ctx, "needle", nil, nil, nil, tc.fromAddr, tc.toAddr, 10, 0)
+			items, total, err := r.SearchMessages(ctx, "needle", nil, nil, nil, tc.fromAddr, tc.toAddr, SortRelevance, 10, 0)
 			require.NoError(t, err)
 			assert.Equal(t, tc.wantTotal, total)
 			assert.Len(t, items, tc.wantTotal)
@@ -521,7 +601,7 @@ func TestSearchMessagesAddressFiltersNonASCII(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			_, total, err := r.SearchMessages(ctx, "needle", nil, nil, nil, tc.fromAddr, tc.toAddr, 10, 0)
+			_, total, err := r.SearchMessages(ctx, "needle", nil, nil, nil, tc.fromAddr, tc.toAddr, SortRelevance, 10, 0)
 			require.NoError(t, err)
 			assert.Equal(t, 1, total)
 		})
@@ -542,7 +622,7 @@ func TestSearchMessagesSnippetLargeBody(t *testing.T) {
 	require.NoError(t, err)
 
 	start := time.Now()
-	items, total, err := r.SearchMessages(ctx, "filler", nil, nil, nil, nil, nil, 10, 0)
+	items, total, err := r.SearchMessages(ctx, "filler", nil, nil, nil, nil, nil, SortRelevance, 10, 0)
 	require.NoError(t, err)
 	require.Equal(t, 1, total)
 	assert.Less(t, time.Since(start), 2*time.Second, "search over a large body must stay fast")
@@ -550,6 +630,56 @@ func TestSearchMessagesSnippetLargeBody(t *testing.T) {
 	snip := items[0].Snippet
 	assert.Contains(t, snip, "**filler**")
 	assert.Less(t, len(snip), 1024, "snippet must be a bounded excerpt, not the whole body")
+}
+
+// TestSearchMessagesSnippetLargeBody covers one enormous body; this covers the
+// other axis, many matching rows, which is the one the date sorts make
+// expensive. They cannot use idx_messages_date — the FTS5 MATCH drives the
+// query — so SQLite materialises and sorts the whole match set before
+// LIMIT/OFFSET (EXPLAIN QUERY PLAN: USE TEMP B-TREE FOR ORDER BY), where rank
+// streams. The assertion is on the ordering being right across a paged result
+// at this size, plus a deliberately loose time bound: a tight one would be a
+// flaky test on shared CI, and the real guard is searchTimeout in production.
+func TestSearchMessagesDateSortLargeMatchSet(t *testing.T) {
+	ctx := context.Background()
+	db := openTestDB(t)
+	r := NewMessageRepository(db)
+
+	const n = 2000
+	base := time.Date(2020, 1, 1, 0, 0, 0, 0, time.UTC)
+	for i := range n {
+		msg := makeMsg(1, "bulk")
+		msg.BodyText = "every one of these contains the needle"
+		// Shuffled relative to id so neither insertion order nor rank can pass
+		// for date order: id i carries the date of a scattered minute.
+		msg.Date = base.Add(time.Duration((i*7919)%n) * time.Minute)
+		_, err := r.InsertMessage(ctx, msg)
+		require.NoError(t, err)
+	}
+
+	start := time.Now()
+	first, total, err := r.SearchMessages(ctx, "needle", nil, nil, nil, nil, nil, SortDateDesc, 50, 0)
+	require.NoError(t, err)
+	require.Equal(t, n, total)
+	require.Len(t, first, 50)
+	assert.Less(t, time.Since(start), 5*time.Second, "a date sort over a large match set must still answer")
+
+	// Descending within the page...
+	for i := 1; i < len(first); i++ {
+		assert.False(t, first[i].Date.After(first[i-1].Date), "page not descending at %d", i)
+	}
+	// ...and across the boundary into the next one, which is where an
+	// unstable sort would repeat or skip a row.
+	second, _, err := r.SearchMessages(ctx, "needle", nil, nil, nil, nil, nil, SortDateDesc, 50, 50)
+	require.NoError(t, err)
+	require.Len(t, second, 50)
+	assert.False(t, second[0].Date.After(first[len(first)-1].Date), "boundary not descending")
+
+	seen := make(map[int]bool, 100)
+	for _, it := range append(append([]oas.MessagesSearchGetOKItemsItem{}, first...), second...) {
+		assert.False(t, seen[it.ID], "id %d appeared on both pages", it.ID)
+		seen[it.ID] = true
+	}
 }
 
 func TestBuildSnippet(t *testing.T) {
@@ -610,7 +740,7 @@ func TestSearchMessagesFTSSanitization(t *testing.T) {
 		`café résumé`,
 	}
 	for _, q := range cases {
-		_, _, err := r.SearchMessages(ctx, q, nil, nil, nil, nil, nil, 10, 0)
+		_, _, err := r.SearchMessages(ctx, q, nil, nil, nil, nil, nil, SortRelevance, 10, 0)
 		assert.NoError(t, err, "SearchMessages(%q)", q)
 	}
 }

@@ -299,6 +299,99 @@ func TestMarkAllRead(t *testing.T) {
 	assert.Equal(t, http.StatusNotFound, resp.StatusCode)
 }
 
+// The handler's map from the wire enum to the repository's must be total. ogen
+// regenerates AllValues() from openapi.yaml, so adding a sort there and
+// forgetting the handler is caught here — as the "unsupported sort" the handler
+// answers with for a value it cannot map — instead of silently serving
+// relevance. Driven through HTTP rather than reading the map directly, which
+// this external test package cannot see.
+func TestSearchSortsCoverTheEnum(t *testing.T) {
+	db := openTestDB(t)
+	srv := newServer(t, db)
+
+	values := (api.MessagesSearchGetSort("")).AllValues()
+	require.NotEmpty(t, values, "the generated enum is empty; regenerate internal/api")
+	for _, v := range values {
+		t.Run(string(v), func(t *testing.T) {
+			resp := do(srv, http.MethodGet, "/messages/search?q=needle&sort="+string(v), "")
+			assert.Equal(t, http.StatusOK, resp.StatusCode)
+			var body struct {
+				Error string `json:"error"`
+			}
+			decodeJSON(t, resp, &body)
+			assert.Empty(t, body.Error)
+		})
+	}
+}
+
+// The sort parameter, end to end: which ordering each value asks for, that an
+// absent one still means relevance, and that an unknown one is rejected by the
+// schema's enum rather than silently falling back to a default.
+func TestSearchSort(t *testing.T) {
+	db := openTestDB(t)
+	srv := newServer(t, db)
+
+	insert := func(subject, date string) {
+		t.Helper()
+		_, err := db.Exec(
+			`INSERT INTO messages(folder_id,from_addr,to_addr,subject,body_text,date,created_at,updated_at)
+			 VALUES(1,'sender@example.com','me@example.com',?,'the needle is here',?,?,?)`,
+			subject, date, date, date)
+		require.NoError(t, err)
+	}
+	insert("oldest", "2024-01-01T00:00:00Z")
+	insert("middle", "2024-02-01T00:00:00Z")
+	insert("newest", "2024-03-01T00:00:00Z")
+
+	type result struct {
+		Total int `json:"total"`
+		Items []struct {
+			Subject string `json:"subject"`
+		} `json:"items"`
+	}
+	subjects := func(query string) []string {
+		t.Helper()
+		resp := do(srv, http.MethodGet, "/messages/search"+query, "")
+		require.Equal(t, http.StatusOK, resp.StatusCode)
+		var body result
+		decodeJSON(t, resp, &body)
+		assert.Equal(t, 3, body.Total)
+		out := make([]string, len(body.Items))
+		for i, it := range body.Items {
+			out[i] = it.Subject
+		}
+		return out
+	}
+
+	assert.Equal(t, []string{"newest", "middle", "oldest"}, subjects("?q=needle&sort=date_desc"))
+	assert.Equal(t, []string{"oldest", "middle", "newest"}, subjects("?q=needle&sort=date_asc"))
+	// Every row here matches the query identically, so relevance leaves them in
+	// whatever order rank produces; all this asserts is that the default and an
+	// explicit "relevance" are the same request.
+	assert.Equal(t, subjects("?q=needle"), subjects("?q=needle&sort=relevance"))
+
+	// The sort applies to the page, so paging a date sort walks the whole result.
+	// `subjects` asserts total == 3 throughout, which still holds under a
+	// LIMIT/OFFSET: total comes from the separate count query.
+	assert.Equal(t, []string{"middle"}, subjects("?q=needle&sort=date_desc&limit=1&offset=1"))
+
+	// Unlike from_addr/to_addr — where the handler reads a blank value as "no
+	// filter" — sort is validated by ogen against the schema's enum before the
+	// handler runs, so an empty value is rejected rather than defaulted. The
+	// demo backend's sortParam mirrors that.
+	for _, bad := range []string{"subject", ""} {
+		resp := do(srv, http.MethodGet, "/messages/search?q=needle&sort="+bad, "")
+		assert.Equal(t, http.StatusBadRequest, resp.StatusCode, "sort=%q", bad)
+		var errBody struct {
+			Error        string `json:"error"`
+			ErrorMessage string `json:"error_message"`
+		}
+		decodeJSON(t, resp, &errBody)
+		assert.Empty(t, errBody.ErrorMessage, "the undocumented field must not appear")
+		assert.Contains(t, errBody.Error, "sort")
+	}
+}
+
 func TestSearchAddressRefinement(t *testing.T) {
 	db := openTestDB(t)
 	srv := newServer(t, db)

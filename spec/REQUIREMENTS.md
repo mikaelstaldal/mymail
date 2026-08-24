@@ -1001,6 +1001,14 @@ On first load the UI reads `localStorage` for the last selected folder and navig
    fields, and date pickers are shown together in the search view; the refinements reset whenever a new query arrives
    from the toolbar, and pagination re-runs the last submitted set rather than the current form contents.
 
+   A **Sort** dropdown above the results offers Relevance (the default), Newest first and Oldest first — in that
+   order — passed as `sort=relevance|date_desc|date_asc`; the date orderings are on the message's `date`, the field
+   the Date column shows. It is not a refinement and so is not part of the form: it applies on change rather than on
+   submit, against the last submitted refinements, and returns to the first page — the same offset under a new
+   ordering is a different slice. It survives a resubmit of the form and resets to Relevance with the refinements,
+   when a new query arrives from the toolbar. It is shown from the first search onwards, including while one is in
+   flight and when one returns no results, so that it never disappears at the moment a user reaches for it.
+
 6. **Filter management** — CRUD UI with drag-to-reorder. The `match_to` field is labelled "To / Cc".
 
 7. **Folder management** — Create/rename/delete/reorder user folders.
@@ -1216,8 +1224,10 @@ bug.
 - **Search ranking is not bm25.** Matching is identical — the server passes the
   query to FTS5 as one quoted phrase, so operators are literals and a multi-word
   query only matches consecutive words — but `ORDER BY rank` needs index
-  statistics the demo does not keep, so results are ordered by a weighted
-  match count (subject above body) and then by date.
+  statistics the demo does not keep, so `sort=relevance` results are ordered by
+  a weighted match count (subject above body) and then by date. This covers the
+  relevance ordering only: `sort=date_asc` and `sort=date_desc` mirror the
+  server's `ORDER BY` exactly, ascending-id tiebreak included.
 - **Outgoing HTML is not sanitised.** `bluemonday` has no in-worker equivalent.
   Nothing is transmitted and the body is rendered in a sandboxed iframe with no
   `allow-scripts` under a `default-src 'none'` CSP, so the sanitiser's job is

@@ -796,6 +796,16 @@ function compareDateDesc(a: DemoMessage, b: DemoMessage): number {
   return a.date < b.date ? 1 : -1;
 }
 
+/**
+ * `ORDER BY m.date ASC, m.id ASC`, the search sort's ascending half. Not the
+ * negation of compareDateDesc: negating would reverse the tiebreak too, and
+ * both orderings tiebreak on ascending id (SearchSort.orderBy).
+ */
+function compareDateAsc(a: DemoMessage, b: DemoMessage): number {
+  if (a.date === b.date) return a.id - b.id;
+  return a.date < b.date ? -1 : 1;
+}
+
 async function markFolderRead(state: DemoState, folderId: number): Promise<Response> {
   findFolder(state, folderId);
   let updated = 0;
@@ -967,8 +977,11 @@ async function moveMessages(state: DemoState, body: Record<string, unknown>): Pr
  * Full-text search. The server hands the query to FTS5 as a single quoted
  * phrase over from/to/cc/subject/body, so this matches the same way (see
  * phraseMatches). What it cannot reproduce is `ORDER BY rank`: bm25 needs
- * corpus statistics FTS5 maintains and this does not, so results are ordered
- * by a match-count score and then by date — the one search divergence.
+ * corpus statistics FTS5 maintains and this does not, so relevance results are
+ * ordered by a match-count score and then by date — the one search divergence.
+ *
+ * The two date sorts have no such gap: they mirror SearchSort.orderBy exactly,
+ * ascending-id tiebreak included, so paging one is stable here too.
  *
  * The from_addr/to_addr refinements narrow that result set the way
  * repository.SearchMessages does: a case-insensitive substring, with to_addr
@@ -987,6 +1000,7 @@ function searchMessages(state: DemoState, url: URL): Response {
   const dateTo = parseDateParam(url, 'date_to');
   const fromAddr = addressFilterParam(url, 'from_addr');
   const toAddr = addressFilterParam(url, 'to_addr');
+  const sort = sortParam(url);
   const { limit, offset } = pagination(url);
   const queryTokens = tokenizeText(q).map((t) => t.lower);
 
@@ -1008,7 +1022,13 @@ function searchMessages(state: DemoState, url: URL): Response {
     const score = searchScore(msg, queryTokens);
     if (score > 0) scored.push({ msg, score });
   }
-  scored.sort((a, b) => b.score - a.score || compareDateDesc(a.msg, b.msg));
+  if (sort === 'date_asc') {
+    scored.sort((a, b) => compareDateAsc(a.msg, b.msg));
+  } else if (sort === 'date_desc') {
+    scored.sort((a, b) => compareDateDesc(a.msg, b.msg));
+  } else {
+    scored.sort((a, b) => b.score - a.score || compareDateDesc(a.msg, b.msg));
+  }
 
   const items = scored.slice(offset, offset + limit).map(({ msg }) => ({
     ...(toSummaryDTO(msg) as Record<string, unknown>),
@@ -1040,6 +1060,40 @@ function addressFilterParam(url: URL, name: string): string | null {
   }
   const trimmed = raw.trim();
   return trimmed === '' ? null : trimmed;
+}
+
+/**
+ * Keep in step with the `sort` enum in openapi.yaml. Worker code takes no
+ * imports, so unlike the DOM side (which reads the union off the generated
+ * types in api/client.ts) this list is hand-maintained: adding a sort to the
+ * schema without adding it here makes the demo 400 a request the server
+ * answers, and no test here would notice — the coverage runs the other way.
+ */
+type SearchSort = 'relevance' | 'date_asc' | 'date_desc';
+
+const SEARCH_SORTS: SearchSort[] = ['relevance', 'date_asc', 'date_desc'];
+
+/**
+ * The search ordering. Only an absent parameter means relevance, which is the
+ * schema's default; anything else outside the enum is a 400, **including an
+ * empty value** — unlike from_addr/to_addr, where the handler itself reads
+ * blank as "no filter". Here ogen validates against the schema before the
+ * handler runs, so `sort=` is rejected like any other non-member. Falling back
+ * to relevance instead would let a typo look like it worked in the demo only.
+ *
+ * What is *not* mirrored is which parameter wins when several are bad at once.
+ * ogen validates every parameter against the schema before the handler runs, so
+ * the server rejects `?q=%20&sort=x` on sort, while searchMessages checks the
+ * query first and rejects it on q. Both are 400s in the documented shape; only
+ * the message differs. The same already holds for from_addr's maxLength.
+ */
+function sortParam(url: URL): SearchSort {
+  const raw = url.searchParams.get('sort');
+  if (raw === null) return 'relevance';
+  if (!(SEARCH_SORTS as string[]).includes(raw)) {
+    throw validationError(`sort must be one of ${SEARCH_SORTS.join(', ')}`);
+  }
+  return raw as SearchSort;
 }
 
 /** Weighted so a subject hit outranks a body hit, standing in for bm25. */

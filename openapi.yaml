@@ -820,9 +820,9 @@ paths:
     get:
       summary: Search messages
       description: |
-        Full-text search using FTS5 phrase-match. Results are ordered by relevance using
+        Full-text search using FTS5 phrase-match. Results are ordered by relevance by default using
         `ORDER BY rank` (SQLite FTS5 BM25 score — lower/more-negative rank means higher relevance).
-        No custom column weighting is applied.
+        No custom column weighting is applied. `sort` selects a date ordering instead.
         Optionally filtered by date range and by sender/recipient address. The FTS5 `unicode61`
         tokenizer is used, so searches are case-insensitive. Search results include a `snippet`
         field (present only in search results, not in `GET /messages/{id}`).
@@ -885,6 +885,17 @@ paths:
           schema:
             type: string
             maxLength: 200
+        - name: sort
+          in: query
+          description: |
+            Result ordering. `relevance` (the default) is FTS5 `ORDER BY rank`; `date_desc` orders
+            newest first and `date_asc` oldest first, both on the message's `date` — the same field
+            the Date column shows, not the arrival time. Ties on `date` are broken by ascending
+            `id` in both directions, so paging a date sort never repeats or skips a message.
+          schema:
+            type: string
+            enum: [relevance, date_asc, date_desc]
+            default: relevance
         - name: limit
           in: query
           schema:
