@@ -612,8 +612,14 @@ per-message opt-in for external images is provided via `has_external_images` in 
 Optional HTTP Basic Auth over all endpoints (API + static UI). Passwords stored as bcrypt hashes in an htpasswd file. If
 not configured, all requests are accepted without authentication (loopback-only deployments).
 
-When authentication is required and credentials are missing or invalid, all endpoints respond with `401 Unauthorized`
-and `WWW-Authenticate: Basic realm="<realm>"` where `<realm>` is the `-basic-auth-realm` flag value.
+The htpasswd file is read strictly at startup: every non-blank line must be a `username:bcrypt-hash` pair, usernames
+must be unique, and the file must not be empty. Anything else aborts startup naming the file — and, for a line it can
+point at, the line number — rather than skipping the line and leaving the operator with a login that silently does not
+exist.
+
+When authentication is required and credentials are missing or invalid, all endpoints respond with `401 Unauthorized`,
+`WWW-Authenticate: Basic realm="<realm>"` where `<realm>` is the `-basic-auth-realm` flag value, and the standard error
+body `{"error": "unauthorized"}`.
 
 ### CSRF Protection
 
@@ -622,7 +628,7 @@ All state-changing HTTP methods (POST, PUT, PATCH, DELETE) are protected via Ori
 - Requests whose `Origin` (or derived Referer origin) does not match the server's own origin are rejected.
 - `Origin: null` is explicitly rejected.
 - Requests without either header (typical of native clients) bypass the check.
-- GET requests are fully exempt.
+- The safe methods GET, HEAD and OPTIONS are fully exempt.
 
 ### Attachment Download Security
 

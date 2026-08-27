@@ -249,6 +249,24 @@ func buildIndexHTML(staticFS fs.FS, configScript string) ([]byte, error) {
 	return []byte(modified), nil
 }
 
+// loadAuthMiddleware builds the HTTP Basic Auth middleware from an htpasswd
+// file, reading it strictly: a line that is not a "username:bcrypt-hash" pair,
+// a duplicate username, or an empty file is an error rather than something to
+// skip past, because a skipped line is an operator's login that silently does
+// not exist. The username is not validated — MyMail is single-user and never
+// uses it as a key, a path, or an address, so it has no vocabulary to check
+// against.
+//
+// It is separate from runServer only so a test can see the error instead of
+// log.Fatalf.
+func loadAuthMiddleware(path, realm string) (func(http.Handler) http.Handler, error) {
+	htpasswd, err := auth.LoadHtpasswdStrict(path, nil)
+	if err != nil {
+		return nil, err
+	}
+	return htpasswd.Middleware(realm), nil
+}
+
 // runServer starts the HTTP server. In demo mode there is no database, no
 // sendmail, and no REST API: a service worker in the browser answers /api/v1
 // from local storage (see web/ts/demo/), and this process only serves the
@@ -260,11 +278,11 @@ func runServer(dataDir, addr string, port int, publicURL, basicAuthFile, basicAu
 
 	var authMiddleware func(http.Handler) http.Handler
 	if basicAuthFile != "" {
-		htpasswd, err := auth.LoadHtpasswd(basicAuthFile)
+		middleware, err := loadAuthMiddleware(basicAuthFile, basicAuthRealm)
 		if err != nil {
 			log.Fatalf("load htpasswd: %v", err)
 		}
-		authMiddleware = htpasswd.Middleware(basicAuthRealm)
+		authMiddleware = middleware
 		log.Printf("basic authentication enabled")
 	}
 

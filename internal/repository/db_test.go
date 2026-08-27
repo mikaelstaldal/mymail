@@ -1,9 +1,11 @@
 package repository
 
 import (
+	"fmt"
 	"os"
 	"testing"
 
+	"github.com/mikaelstaldal/go-server-common/sqlite"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -94,4 +96,26 @@ func TestOpenDBAndInitSchema(t *testing.T) {
 	var count int
 	db.QueryRow("SELECT COUNT(*) FROM attachments WHERE message_id=?", msgID).Scan(&count)
 	assert.Zero(t, count, "cascade delete failed: attachments remain")
+}
+
+// TestOpenDBRefusesNewerSchema pins the MigrateStrict guarantee: a database
+// written by a build that knows more migrations than this one is refused, so an
+// older binary never writes to a schema it does not understand.
+func TestOpenDBRefusesNewerSchema(t *testing.T) {
+	f, err := os.CreateTemp("", "mymail-*.sqlite")
+	require.NoError(t, err)
+	f.Close()
+	path := f.Name()
+	defer os.Remove(path)
+
+	db, err := OpenDB(path, 0)
+	require.NoError(t, err, "OpenDB")
+	_, err = db.Exec(fmt.Sprintf("PRAGMA user_version = %d", len(migrations)+1))
+	require.NoError(t, err, "bump user_version past the last migration")
+	require.NoError(t, db.Close())
+
+	_, err = OpenDB(path, 0)
+	require.Error(t, err, "OpenDB on a newer schema")
+	assert.ErrorIs(t, err, sqlite.ErrSchemaTooNew)
+	assert.Contains(t, err.Error(), "upgrade the binary")
 }

@@ -6,8 +6,9 @@ info:
 
     **Authentication:** When `-basic-auth-file` is configured, all endpoints 
     require HTTP Basic Auth. Missing or invalid credentials return `401 Unauthorized` with
-    `WWW-Authenticate: Basic realm="<realm>"`. The `401` response is not individually listed on
-    each endpoint but applies globally to all authenticated endpoints.
+    `WWW-Authenticate: Basic realm="<realm>"` and the body `{"error": "unauthorized"}`. The `401`
+    response is not individually listed on each endpoint but applies globally to all authenticated
+    endpoints.
 
     **Error responses** use the schema `{"error": "human-readable message"}` with status
     `400`, `401`, `404`, `409`, or `500`.

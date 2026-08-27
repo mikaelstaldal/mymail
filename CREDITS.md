@@ -22,7 +22,7 @@ Linked into the distributed `mymail` and/or `mymail-lda` binaries.
 | [github.com/emersion/go-mbox](https://github.com/emersion/go-mbox) | v1.0.4 | MIT | mbox parsing for `-import` mode |
 | [github.com/emersion/go-maildir](https://github.com/emersion/go-maildir) | v0.6.0 | MIT | Maildir traversal for `-import` mode |
 | [github.com/google/uuid](https://github.com/google/uuid) | v1.6.0 | BSD-3-Clause | Message-ID and identifier generation |
-| [github.com/mikaelstaldal/go-server-common](https://github.com/mikaelstaldal/go-server-common) | v1.8.0 | Apache-2.0 | HTTP server helpers: Basic Auth (htpasswd/bcrypt), CSRF Origin/Referer validation |
+| [github.com/mikaelstaldal/go-server-common](https://github.com/mikaelstaldal/go-server-common) | v1.9.0 | Apache-2.0 | HTTP server helpers: Basic Auth (htpasswd/bcrypt), CSRF Origin/Referer validation |
 | [github.com/go-faster/errors](https://github.com/go-faster/errors) | v0.7.1 | BSD-3-Clause | Error wrapping used by the generated API code |
 | [github.com/go-faster/jx](https://github.com/go-faster/jx) | v1.2.0 | MIT | Streaming JSON encode/decode used by the generated API code |
 | [golang.org/x/net](https://pkg.go.dev/golang.org/x/net) | v0.56.0 | BSD-3-Clause | HTML parsing (`html`, `html/atom`) for sanitization |

@@ -1,7 +1,9 @@
 package repository
 
 import (
+	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"os"
 
@@ -23,12 +25,38 @@ var migrations = [][]string{
 // schema migrations. Pragmas are baked into the DSN so every connection in
 // the pool inherits them automatically.
 func OpenDB(path string, busyTimeout int, extraPragmas ...string) (*sql.DB, error) {
-	return sqlite.Open(path, busyTimeout, migrations, extraPragmas...)
+	// sqlite.Open migrates with sqlite.Migrate, so it is given no migrations
+	// here and only opens the database; InitSchema then applies them with
+	// MigrateStrict.
+	db, err := sqlite.Open(path, busyTimeout, nil, extraPragmas...)
+	if err != nil {
+		return nil, err
+	}
+	if err := InitSchema(db); err != nil {
+		_ = db.Close()
+		return nil, err
+	}
+	return db, nil
 }
 
 // InitSchema applies pending schema migrations using PRAGMA user_version.
+//
+// It uses sqlite.MigrateStrict, which takes the write lock before deciding a
+// migration is still needed — two processes opening a stale database at once
+// (the server starting while an LDA delivery runs, say) cannot both apply the
+// same batch — and refuses a database whose user_version is beyond the last
+// migration this binary carries rather than writing to a schema it does not
+// know.
 func InitSchema(db *sql.DB) error {
-	return sqlite.Migrate(db, migrations)
+	// Migrations run before any request, at startup or from a one-shot mode,
+	// so there is no caller context to inherit.
+	if err := sqlite.MigrateStrict(context.Background(), db, migrations); err != nil {
+		if errors.Is(err, sqlite.ErrSchemaTooNew) {
+			return fmt.Errorf("database was written by a newer version of mymail; upgrade the binary: %w", err)
+		}
+		return err
+	}
+	return nil
 }
 
 // CreateDataDir creates the parent directory of dbPath with mode 0700.
