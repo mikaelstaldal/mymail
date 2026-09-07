@@ -115,7 +115,13 @@ two browser-demo modes are the exception — they never open one, and refuse
 - Pure-Go SQLite (`modernc.org/sqlite`) — no CGO.
 - Single file at `<data>/mymail.sqlite`.
 - Schema versioned via `PRAGMA user_version`; migrations applied on server startup.
-- **Current schema version: 4** (see `internal/repository/db.go` for full DDL).
+- The current schema version is recorded in `spec/schema.sql`; migrations are
+  defined in `internal/repository/db.go`.
+- `spec/schema.sql` is the canonical snapshot of the application-owned DDL
+  produced by a freshly migrated database. Update it in the same commit as any
+  schema migration by running
+  `MYMAIL_UPDATE_SCHEMA_SNAPSHOT=1 go test ./internal/repository -run TestSchemaSnapshot`;
+  the same test verifies it during the full build.
 - FTS5 content table (`messages_fts`) kept in sync with `messages` via triggers.
 - All timestamps stored as UTC RFC 3339 strings.
 - `messages.references` column name collides with SQL reserved word — always quote it as `"references"` in queries.

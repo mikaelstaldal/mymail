@@ -3,12 +3,58 @@ package repository
 import (
 	"fmt"
 	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/mikaelstaldal/go-server-common/sqlite"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+// TestSchemaSnapshot verifies that spec/schema.sql describes exactly the
+// application-owned objects produced by migrating a new database. SQLite's
+// internal tables and the shadow tables behind the FTS5 virtual table are
+// implementation details and are deliberately omitted from the snapshot.
+func TestSchemaSnapshot(t *testing.T) {
+	db, err := OpenDB(filepath.Join(t.TempDir(), "mymail.sqlite"), 0)
+	require.NoError(t, err, "OpenDB")
+	t.Cleanup(func() { require.NoError(t, db.Close()) })
+
+	var version int
+	require.NoError(t, db.QueryRow("PRAGMA user_version").Scan(&version))
+
+	rows, err := db.Query(`
+		SELECT s.sql
+		FROM sqlite_schema AS s
+		WHERE s.sql IS NOT NULL
+		  AND s.name NOT LIKE 'sqlite_%'
+		  AND NOT (s.type = 'table' AND EXISTS (
+			SELECT 1 FROM sqlite_schema AS virtual
+			WHERE virtual.sql LIKE 'CREATE VIRTUAL TABLE%'
+			  AND s.name LIKE virtual.name || '\_%' ESCAPE '\'
+		  ))
+		ORDER BY s.type, s.name`)
+	require.NoError(t, err)
+	defer rows.Close()
+
+	var ddl []string
+	for rows.Next() {
+		var statement string
+		require.NoError(t, rows.Scan(&statement))
+		ddl = append(ddl, statement+";")
+	}
+	require.NoError(t, rows.Err())
+
+	actual := fmt.Sprintf("-- Application-owned DDL from a freshly migrated database; see AGENTS.md.\n-- This omits seed rows and is not a replacement for mymail -init.\nPRAGMA user_version = %d;\n\n%s\n", version, strings.Join(ddl, "\n\n"))
+	snapshotPath := filepath.Join("..", "..", "spec", "schema.sql")
+	if os.Getenv("MYMAIL_UPDATE_SCHEMA_SNAPSHOT") == "1" {
+		require.NoError(t, os.WriteFile(snapshotPath, []byte(actual), 0o644))
+	}
+	want, err := os.ReadFile(snapshotPath)
+	require.NoError(t, err)
+	assert.Equal(t, string(want), actual, "schema changed; update spec/schema.sql in the same commit as the migration")
+}
 
 func TestOpenDBAndInitSchema(t *testing.T) {
 	f, err := os.CreateTemp("", "mymail-*.sqlite")
