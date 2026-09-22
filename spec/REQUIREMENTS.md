@@ -410,6 +410,9 @@ The send flow:
     - User-supplied header values (`to_addr`, `cc_addr`, `bcc_addr`, `reply_to_addr`, `subject`, `in_reply_to`, every
       element of `references`, and the identity display name) are sanitized to strip CR, LF, and NUL control characters
       before encoding.
+    - Display names in `From`, `To`, `Cc`, `Bcc`, and `Reply-To` are serialized as valid RFC 5322 addresses. In
+      particular, an ASCII name containing a comma stays quoted so it cannot become a separate recipient.
+      A malformed recipient address list fails message construction instead of being emitted unchanged.
 2. Pipes the message to `sendmail -t -oi` with a 30-second timeout.
 3. On failure: returns the sendmail stderr as an error. No retries.
 4. On success: upserts recipients into the contacts table, stores the sent message in the Sent folder with `Bcc` header

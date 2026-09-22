@@ -9,6 +9,7 @@ import (
 	"mime"
 	"mime/multipart"
 	"mime/quotedprintable"
+	"net/mail"
 	"net/textproto"
 	"os/exec"
 	"strings"
@@ -82,10 +83,10 @@ func BuildMIMEMessage(fields SendFields, attachments []model.DBAttachment) ([]by
 	// RFC 5322 date
 	date := time.Now().Format(time.RFC1123Z)
 
-	// From header: RFC 2047-encode display name if non-ASCII
+	// Format the display name as an RFC 5322 address (including quotes for commas).
 	var fromHeader string
 	if fields.FromName != "" {
-		fromHeader = mime.QEncoding.Encode("utf-8", fields.FromName) + " <" + fields.FromAddr + ">"
+		fromHeader = (&mail.Address{Name: fields.FromName, Address: fields.FromAddr}).String()
 	} else {
 		fromHeader = fields.FromAddr
 	}
@@ -106,18 +107,29 @@ func BuildMIMEMessage(fields SendFields, attachments []model.DBAttachment) ([]by
 	wh("Date", date)
 	wh("Message-ID", msgID)
 	wh("From", fromHeader)
-	if fields.ToAddr != "" {
-		wh("To", encodeAddrList(fields.ToAddr))
+	writeAddrList := func(header, value string) error {
+		if value == "" {
+			return nil
+		}
+		encoded, err := encodeAddrList(value)
+		if err != nil {
+			return fmt.Errorf("invalid %s address list: %w", header, err)
+		}
+		wh(header, encoded)
+		return nil
 	}
-	if fields.CcAddr != "" {
-		wh("Cc", encodeAddrList(fields.CcAddr))
+	if err := writeAddrList("To", fields.ToAddr); err != nil {
+		return nil, false, "", err
+	}
+	if err := writeAddrList("Cc", fields.CcAddr); err != nil {
+		return nil, false, "", err
 	}
 	// Bcc always written so sendmail -t picks up recipients; MTA strips it on delivery
-	if fields.BccAddr != "" {
-		wh("Bcc", encodeAddrList(fields.BccAddr))
+	if err := writeAddrList("Bcc", fields.BccAddr); err != nil {
+		return nil, false, "", err
 	}
-	if fields.ReplyToAddr != "" {
-		wh("Reply-To", encodeAddrList(fields.ReplyToAddr))
+	if err := writeAddrList("Reply-To", fields.ReplyToAddr); err != nil {
+		return nil, false, "", err
 	}
 	wh("Subject", mime.QEncoding.Encode("utf-8", fields.Subject))
 	if fields.InReplyTo != "" {
@@ -285,25 +297,18 @@ func StripHeaderControls(s string) string {
 	}, s)
 }
 
-// encodeAddrList reformats a comma-separated RFC 5322 address list, encoding any
-// non-ASCII display names as RFC 2047 encoded words.
-func encodeAddrList(s string) string {
-	if s == "" {
-		return s
-	}
+// encodeAddrList reformats an RFC 5322 address list, quoting ASCII display
+// names when needed and encoding non-ASCII names as RFC 2047 encoded words.
+func encodeAddrList(s string) (string, error) {
 	addrs, err := ParseAddressList(s)
 	if err != nil {
-		return mime.QEncoding.Encode("utf-8", s)
+		return "", err
 	}
 	parts := make([]string, len(addrs))
 	for i, a := range addrs {
-		if a.Name != "" {
-			parts[i] = mime.QEncoding.Encode("utf-8", a.Name) + " <" + a.Address + ">"
-		} else {
-			parts[i] = a.Address
-		}
+		parts[i] = a.String()
 	}
-	return strings.Join(parts, ", ")
+	return strings.Join(parts, ", "), nil
 }
 
 // qpEncode returns the quoted-printable encoding of s.
