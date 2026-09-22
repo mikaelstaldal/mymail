@@ -12,6 +12,29 @@
 
 // ── Slugs ────────────────────────────────────────────────────────────────────
 
+// Mirrors sanitize.joinSoftWrappedParagraphs for Quill's serialized editor
+// HTML. Worker scopes have no DOMParser, so this handles the adjacent <p>
+// blocks q.root.innerHTML emits; comments (including the quote boundary) stop
+// a run. Drafts retain the marks and are normalized only when sent.
+function joinSoftWrappedHtml(html: string): string {
+  if (!html.includes('ql-softwrap-y')) return html;
+  const marked = (attrs: string) => /\bql-softwrap-y\b/.test(attrs);
+  const blockFormat = (attrs: string) => /\bql-(?:align|indent)-[\w-]+\b/.test(attrs);
+  const stripMark = (attrs: string) => attrs.replace(/\bql-softwrap-y\b/g, '').replace(/class="\s*"/g, '').trimEnd();
+  const adjacent = /<p\b([^>]*)>([\s\S]*?)<\/p>(\s*)<p\b([^>]*)>/gi;
+  for (;;) {
+    let changed = false;
+    html = html.replace(adjacent, (match, first: string, body: string, _gap: string, second: string) => {
+      if (!marked(first) || blockFormat(second)) return match;
+      changed = true;
+      const attrs = marked(second) ? first : stripMark(first);
+      return `<p${attrs}>${body} `;
+    });
+    if (!changed) break;
+  }
+  return html.replace(/<p\b([^>]*)>/gi, (_match, attrs: string) => `<p${stripMark(attrs)}>`);
+}
+
 /**
  * A display name turned into a URL-safe slug. Mirrors repository.toSlug:
  * NFKD-decompose (so an accented letter contributes its ASCII base), lower-case,

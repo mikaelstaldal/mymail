@@ -407,6 +407,8 @@ The send flow:
       sent through mymail to thread on the recipient side.
     - Body is a single `text/plain` or `text/html` part when only one body type is provided; `multipart/alternative`
       when both are provided; wrapped in `multipart/mixed` if attachments are present.
+    - ASCII plain text with transport-safe lines uses `Content-Transfer-Encoding: 7bit`, preserving its authored line
+      breaks in raw mail. Non-ASCII text, overlong lines and lines ending in whitespace use quoted-printable.
     - User-supplied header values (`to_addr`, `cc_addr`, `bcc_addr`, `reply_to_addr`, `subject`, `in_reply_to`, every
       element of `references`, and the identity display name) are sanitized to strip CR, LF, and NUL control characters
       before encoding.
@@ -910,12 +912,13 @@ On first load the UI reads `localStorage` for the last selected folder and navig
       gets. Every change — typing, pasting, restoring a draft, undoing — leaves each paragraph filled to the column. A
       break is not merely added: the paragraph is unwrapped and re-filled, so editing text early in a paragraph moves
       the breaks after it instead of pushing one word at a time onto lines of its own. This means the breaks are real
-      paragraph breaks in `body_html` too: an HTML alternative composed this way is hard-wrapped and does not re-flow to
-      the recipient's window width.
+      paragraph breaks in the **draft** `body_html` too. On sending, the marked visual breaks are joined back into
+      spaces before HTML sanitization, so the HTML alternative has one paragraph per author-created paragraph and
+      re-flows to the recipient's window width.
 
       To re-fill a paragraph the editor has to know which breaks are its own. Each one carries a block format rendered
-      as `class="ql-softwrap-y"` on the paragraph. `class` is on no sanitiser allowlist, so the mark is dropped on the
-      way out and never reaches a recipient; drafts are stored verbatim, so it survives a save/reopen cycle and
+      as `class="ql-softwrap-y"` on the paragraph. The send path uses the mark to join visual lines, then the
+      sanitiser drops the class; drafts are stored verbatim, so the mark survives a save/reopen cycle and
       re-filling keeps working on a reopened draft. Breaks without the mark are the author's own and are never
       dissolved — including the one Enter makes inside a wrapped paragraph, which has to have the mark cleared
       explicitly, since splitting a paragraph otherwise copies it to both halves. If the mark is ever lost, the wrapper
@@ -1251,11 +1254,13 @@ bug.
 - **Outgoing HTML is not sanitised.** `bluemonday` has no in-worker equivalent.
   Nothing is transmitted and the body is rendered in a sandboxed iframe with no
   `allow-scripts` under a `default-src 'none'` CSP, so the sanitiser's job is
-  already done by the iframe; `has_external_images` is still computed.
+  already done by the iframe; `has_external_images` is still computed. The
+  worker still joins the editor's marked visual wraps when sending, matching
+  the server's paragraph structure.
 - **The stored RFC 5322 source is simplified.** `raw` is assembled with the same
   MIME structure (`multipart/alternative` inside `multipart/mixed`), but text
   parts are written as UTF-8 with `Content-Transfer-Encoding: 8bit` rather than
-  quoted-printable, and display names and subjects are written literally rather
+  the server's selected `7bit` or quoted-printable encoding, and display names and subjects are written literally rather
   than as RFC 2047 encoded words. `raw` is only ever shown in the headers view
   or downloaded as `.eml`.
 - **Spam detection never runs.** `spam_filter_settings` is stored and editable,

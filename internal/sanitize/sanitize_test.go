@@ -1,16 +1,41 @@
 package sanitize
 
 import (
+	"os"
 	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
+
+func TestSoftWrapMarkMatchesComposerAndDemo(t *testing.T) {
+	composer, err := os.ReadFile("../../web/ts/views/ComposeForm.tsx")
+	require.NoError(t, err)
+	assert.Contains(t, string(composer), "const SOFT_BREAK = 'ql-softwrap';")
+	assert.Contains(t, string(composer), "const SOFT_BREAK_FORMAT = { [SOFT_BREAK]: 'y' };")
+	assert.Equal(t, "ql-softwrap-y", softWrapClass)
+	demo, err := os.ReadFile("../../web/ts/demo/text.ts")
+	require.NoError(t, err)
+	assert.Contains(t, string(demo), softWrapClass)
+}
 
 func TestScriptStripped(t *testing.T) {
 	out := HTML(`<p>hello</p><script>alert(1)</script>`)
 	assert.NotContains(t, out, "<script")
 	assert.Contains(t, out, "hello")
+}
+
+func TestOutgoingJoinsOnlyComposerSoftWraps(t *testing.T) {
+	in := `<p class="ql-softwrap-y"><strong>Lorem</strong> ipsum</p>` +
+		`<p class="ql-softwrap-y">dolor sit</p><p>amet.</p><p>New paragraph.</p>`
+	out := OutgoingHTML(in)
+	assert.Equal(t, `<p><strong>Lorem</strong> ipsum dolor sit amet.</p><p>New paragraph.</p>`, out)
+	assert.NotContains(t, out, "ql-softwrap")
+	assert.Contains(t, HTML(in), "</p><p>")
+	assert.Equal(t, `<p>one two</p>`, OutgoingHTML("<p class=\"ql-softwrap-y\">one</p>\n<p>two</p>"))
+	assert.Equal(t, `<p>one</p><p>two</p>`, OutgoingHTML(`<p class="ql-softwrap-y">one</p><!--mymail-quote--><p>two</p>`))
+	assert.Equal(t, `<p>one</p><p>two</p>`, OutgoingHTML(`<p class="ql-softwrap-y">one</p><p class="ql-align-center">two</p>`))
 }
 
 func TestDataImagePreserved(t *testing.T) {

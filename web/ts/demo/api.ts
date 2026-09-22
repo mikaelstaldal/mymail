@@ -1358,6 +1358,7 @@ async function sendMessage(
   const deferUntil = scheduledFor(body, now.getTime());
 
   const msg = newComposedMessage(state, identity, fields, now);
+  msg.bodyHtml = joinSoftWrappedHtml(msg.bodyHtml);
   msg.hasExternalImages = hasExternalImages(fields.bodyHtml);
   state.messages.push(msg);
   await storeAttachments(state, msg.id, files);
@@ -1567,6 +1568,7 @@ async function sendDraft(state: DemoState, id: number): Promise<Response> {
   }
   draft.identityId = identity.id;
   draft.fromAddr = identity.address;
+  draft.bodyHtml = joinSoftWrappedHtml(draft.bodyHtml);
   draft.hasExternalImages = hasExternalImages(draft.bodyHtml);
 
   const now = new Date();

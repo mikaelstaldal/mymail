@@ -1,12 +1,57 @@
 package service
 
 import (
+	"io"
+	"mime"
+	"mime/multipart"
 	"net/mail"
 	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 )
+
+func TestBuildMIMEMessageKeepsASCIILineBreaksReadable(t *testing.T) {
+	text := "Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor\n" +
+		"incididunt ut labore et dolore magna aliqua."
+	raw, _, _, err := BuildMIMEMessage(SendFields{
+		FromAddr: "sender@example.com", ToAddr: "reader@example.com",
+		BodyText: text, BodyHTML: `<p>Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua.</p>`,
+	}, nil)
+	require.NoError(t, err)
+	message, err := mail.ReadMessage(strings.NewReader(string(raw)))
+	require.NoError(t, err)
+	_, params, err := mime.ParseMediaType(message.Header.Get("Content-Type"))
+	require.NoError(t, err)
+	reader := multipart.NewReader(message.Body, params["boundary"])
+	part, err := reader.NextPart()
+	require.NoError(t, err)
+	require.Equal(t, "7bit", part.Header.Get("Content-Transfer-Encoding"))
+	body, err := io.ReadAll(part)
+	require.NoError(t, err)
+	require.Equal(t, strings.ReplaceAll(text, "\n", "\r\n"), string(body))
+}
+
+func TestEncodePlainTextFallsBackWhenSevenBitWouldChangeContent(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		text string
+		cte  string
+	}{
+		{"non-ASCII", "café", "quoted-printable"},
+		{"trailing space", "one ", "quoted-printable"},
+		{"long line", strings.Repeat("x", 999), "quoted-printable"},
+		{"CRLF", "one\r\ntwo", "7bit"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cte, body := encodePlainText(tc.text)
+			require.Equal(t, tc.cte, cte)
+			if cte == "7bit" {
+				require.Equal(t, tc.text, string(body))
+			}
+		})
+	}
+}
 
 func TestBuildMIMEMessageQuotesCommaInDisplayNames(t *testing.T) {
 	raw, _, _, err := BuildMIMEMessage(SendFields{

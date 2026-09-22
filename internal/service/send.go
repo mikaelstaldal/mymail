@@ -167,13 +167,14 @@ func buildBody(w *bytes.Buffer, fields SendFields, attachments []model.DBAttachm
 	}
 
 	var inline part
+	textCTE, textBody := encodePlainText(fields.BodyText)
 
 	switch {
 	case !hasText && !hasHTML:
-		inline = part{ct: "text/plain; charset=utf-8", cte: "quoted-printable", body: qpEncode("")}
+		inline = part{ct: "text/plain; charset=utf-8", cte: textCTE, body: textBody}
 
 	case hasText && !hasHTML:
-		inline = part{ct: "text/plain; charset=utf-8", cte: "quoted-printable", body: qpEncode(fields.BodyText)}
+		inline = part{ct: "text/plain; charset=utf-8", cte: textCTE, body: textBody}
 
 	case !hasText && hasHTML:
 		inline = part{ct: "text/html; charset=utf-8", cte: "quoted-printable", body: qpEncode(fields.BodyHTML)}
@@ -184,12 +185,12 @@ func buildBody(w *bytes.Buffer, fields SendFields, attachments []model.DBAttachm
 
 		pw, e := mw.CreatePart(textproto.MIMEHeader{
 			"Content-Type":              {"text/plain; charset=utf-8"},
-			"Content-Transfer-Encoding": {"quoted-printable"},
+			"Content-Transfer-Encoding": {textCTE},
 		})
 		if e != nil {
 			return "", "", e
 		}
-		if _, e = pw.Write(qpEncode(fields.BodyText)); e != nil {
+		if _, e = pw.Write(textBody); e != nil {
 			return "", "", e
 		}
 
@@ -318,6 +319,24 @@ func qpEncode(s string) []byte {
 	w.Write([]byte(s)) //nolint:errcheck
 	w.Close()          //nolint:errcheck
 	return buf.Bytes()
+}
+
+// ASCII text with transport-safe lines needs no transfer encoding. This keeps
+// authored line breaks readable in raw mail instead of adding quoted-printable
+// soft breaks inside words near its 76-character limit.
+func encodePlainText(s string) (string, []byte) {
+	normalized := strings.ReplaceAll(strings.ReplaceAll(s, "\r\n", "\n"), "\r", "\n")
+	for _, line := range strings.Split(normalized, "\n") {
+		if len(line) > 998 || strings.HasSuffix(line, " ") || strings.HasSuffix(line, "\t") {
+			return "quoted-printable", qpEncode(s)
+		}
+		for i := 0; i < len(line); i++ {
+			if c := line[i]; c > 127 || c < 32 && c != '\t' {
+				return "quoted-printable", qpEncode(s)
+			}
+		}
+	}
+	return "7bit", []byte(strings.ReplaceAll(normalized, "\n", "\r\n"))
 }
 
 // writeBase64Wrapped writes data base64-encoded with lines of at most 76 characters.

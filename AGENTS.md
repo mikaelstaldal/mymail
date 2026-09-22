@@ -156,15 +156,18 @@ Piped to `sendmail -t -oi` (no internal send queue). Path resolved at startup vi
 ### HTML Sanitization — two policies, one allowlist
 
 `internal/sanitize` exposes **two** policies built by the same `newPolicy`
-helper, so they differ only in their allowlists, never in how they validate:
+helper, so their HTML and CSS validation uses the same allowlists and rules:
 
 - `HTML()` / `NewEmailPolicy()` — **inbound**, attacker-controlled. Used by
   `internal/lda/parse.go` only.
 - `OutgoingHTML()` / `NewOutgoingPolicy()` — mail **we** send. Used by
   `handler/send_draft.go` (×2) and `service/send.go`.
 
+`OutgoingHTML()` also joins editor-marked visual line breaks before sanitizing,
+so sent HTML reflows as paragraphs. `HTML()` leaves inbound structure alone.
+
 `outgoingOnlyElements` / `outgoingOnlyCSS` are **empty on purpose**, so the two
-are currently equivalent. The invariant to protect is: **MyMail must render
+currently have equivalent allowlists. The invariant to protect is: **MyMail must render
 everything MyMail will send.** Otherwise a message to another MyMail instance —
 or to yourself — arrives stripped of styling this same instance produced.
 `TestSentHTMLSurvivesBeingReceived` pins `HTML(OutgoingHTML(x)) ==

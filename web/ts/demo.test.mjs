@@ -200,6 +200,14 @@ test('hasExternalImages only fires on http(s) image sources', () => {
   assert.ok(!hasExternalImages('<p>no images at all</p>'));
 });
 
+test('demo send joins only editor-marked HTML lines', () => {
+  const html = '<p class="ql-softwrap-y">Lorem</p><p class="ql-softwrap-y">ipsum</p>'
+    + '<p>dolor.</p><p>New paragraph.</p>';
+  assert.equal(joinSoftWrappedHtml(html), '<p>Lorem ipsum dolor.</p><p>New paragraph.</p>');
+  assert.equal(joinSoftWrappedHtml('<p class="ql-softwrap-y">one</p><!--mymail-quote--><p>quoted</p>'),
+    '<p>one</p><!--mymail-quote--><p>quoted</p>');
+});
+
 // ---------------------------------------------------------------------------
 // Search — parity with repository.tokenizeText, buildSnippet and the FTS5
 // phrase query sanitizeFTSQuery builds
@@ -805,6 +813,7 @@ test('sending stores the message in Sent and queues a reply', async () => {
     to_addr: 'Alice Smith <alice@example.com>',
     subject: 'Hello',
     body_text: 'Hi there',
+    body_html: '<p class="ql-softwrap-y">Hi</p><p>there</p>',
   });
   assert.equal(res.status, 201);
 
@@ -814,6 +823,7 @@ test('sending stores the message in Sent and queues a reply', async () => {
   assert.ok(sent.messageId.endsWith('@example.com'), 'a Message-ID is assigned');
   assert.ok(sent.raw.includes('Subject: Hello'), 'and an RFC 5322 source is built');
   assert.equal(sent.fromAddr, 'demo@example.com', 'From comes from the default identity');
+  assert.equal(sent.bodyHtml, '<p>Hi there</p>');
 
   assert.deepEqual(state.contacts.map((c) => c.address), ['alice@example.com'],
     'the recipient becomes a contact');

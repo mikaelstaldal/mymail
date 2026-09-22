@@ -9,6 +9,7 @@ import (
 
 	"github.com/microcosm-cc/bluemonday"
 	"golang.org/x/net/html"
+	"golang.org/x/net/html/atom"
 )
 
 var (
@@ -203,11 +204,96 @@ func HTML(h string) string {
 	return policy.Sanitize(h)
 }
 
-// OutgoingHTML sanitizes HTML composed by this instance's own user, on its way
-// into a message we send. See NewOutgoingPolicy for why this is a separate,
-// slightly wider allowlist.
+// OutgoingHTML joins editor-created visual wraps, then sanitizes HTML composed
+// by this instance's own user on its way into a message we send. See
+// NewOutgoingPolicy for the separate outgoing allowlist.
 func OutgoingHTML(h string) string {
-	return outgoingPolicy.Sanitize(h)
+	return outgoingPolicy.Sanitize(joinSoftWrappedParagraphs(h))
+}
+
+// Quill represents a visual wrap as a paragraph with this class. Join only
+// those marked boundaries before the sanitizer removes the class, preserving
+// actual Enter-created paragraphs and the draft's editable representation.
+const softWrapClass = "ql-softwrap-y"
+
+func joinSoftWrappedParagraphs(h string) string {
+	if !strings.Contains(h, softWrapClass) {
+		return h
+	}
+	root := &html.Node{Type: html.ElementNode, Data: "div", DataAtom: atom.Div}
+	nodes, err := html.ParseFragment(strings.NewReader(h), root)
+	if err != nil {
+		return h
+	}
+	for _, n := range nodes {
+		root.AppendChild(n)
+	}
+	var join func(*html.Node)
+	join = func(parent *html.Node) {
+		for n := parent.FirstChild; n != nil; n = n.NextSibling {
+			if n.Type == html.ElementNode && n.Data == "p" {
+				continued := hasSoftWrap(n)
+				for continued {
+					next := n.NextSibling
+					for next != nil && next.Type == html.TextNode && strings.TrimSpace(next.Data) == "" {
+						next = next.NextSibling
+					}
+					if next == nil || next.Type != html.ElementNode || next.Data != "p" || hasOwnBlockFormat(next) {
+						break
+					}
+					for gap := n.NextSibling; gap != next; {
+						following := gap.NextSibling
+						parent.RemoveChild(gap)
+						gap = following
+					}
+					n.AppendChild(&html.Node{Type: html.TextNode, Data: " "})
+					for next.FirstChild != nil {
+						child := next.FirstChild
+						next.RemoveChild(child)
+						n.AppendChild(child)
+					}
+					// A run continues only when the next line also ends in a soft break.
+					continued = hasSoftWrap(next)
+					parent.RemoveChild(next)
+				}
+			}
+			join(n)
+		}
+	}
+	join(root)
+	var out strings.Builder
+	for n := root.FirstChild; n != nil; n = n.NextSibling {
+		if err := html.Render(&out, n); err != nil {
+			return h
+		}
+	}
+	return out.String()
+}
+
+func hasSoftWrap(n *html.Node) bool {
+	for _, a := range n.Attr {
+		if a.Key == "class" {
+			for _, name := range strings.Fields(a.Val) {
+				if name == softWrapClass {
+					return true
+				}
+			}
+		}
+	}
+	return false
+}
+
+func hasOwnBlockFormat(n *html.Node) bool {
+	for _, a := range n.Attr {
+		if a.Key == "class" {
+			for _, name := range strings.Fields(a.Val) {
+				if strings.HasPrefix(name, "ql-align-") || strings.HasPrefix(name, "ql-indent-") {
+					return true
+				}
+			}
+		}
+	}
+	return false
 }
 
 const (
