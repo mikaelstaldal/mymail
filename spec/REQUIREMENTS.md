@@ -712,8 +712,9 @@ On first load the UI reads `localStorage` for the last selected folder and navig
    of To/Cc/Bcc non-empty, and none of the three malformed — which is the same condition the server enforces. The Snooze button is available only
    when the message is in Inbox, Snoozed, or a user-created folder. It is not available for messages in Drafts, Sent,
    Trash, Junk, or Scheduled — each of those folders has its own dedicated lifecycle management that would conflict with
-   snooze behaviour. The snooze `until` time must be at least 1 minute ahead of the current server time; a shorter value
-   is rejected. **Re-snooze / edit snooze:** if the message is already in Snoozed, the Snooze button is labelled "Edit
+   snooze behaviour. For a new snooze, the datetime picker defaults to the next local midnight at least 1 minute in the
+   future, with its time set to 00:00. The snooze `until` time must be at least 1 minute ahead of the current server time;
+   a shorter value is rejected. **Re-snooze / edit snooze:** if the message is already in Snoozed, the Snooze button is labelled "Edit
    snooze" and pre-fills the datetime picker with the current snooze time; submitting updates the expiry time and
    preserves the original return folder. Opening an unread message causes the UI to issue an explicit
    `PATCH /messages/{id}` request (with `{"read": true}`) after a successful GET to mark it as read;

@@ -304,7 +304,7 @@ than here — read the header before the cases.
 | `address.test.mjs` | `util/address.ts` — whether the Send button is offered at all | no |
 | `signature.test.mjs` | `util/signature.ts` — the identity signature as a region of the Quill document | no |
 | `confirm.test.mjs` | `util/confirm.ts` — the store behind every confirmation the UI asks for | no |
-| `date.test.mjs` | `util/date.ts` — the Date, Scheduled and Snoozed columns' formatters | no |
+| `date.test.mjs` | `util/date.ts` — the Date, Scheduled and Snoozed columns' formatters and the new-snooze midnight default | no |
 | `demo.test.mjs` | `web/ts/demo/*.ts` — the demo backend, evaluated as the worker scripts they are | no |
 
 ## Important Implementation Notes

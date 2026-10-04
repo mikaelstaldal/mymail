@@ -37,6 +37,18 @@ function calendarDaysAgo(date: Date, now: Date): number {
   return Math.round((todayStart - dayStart) / 86_400_000);
 }
 
+/** The first local midnight far enough ahead to be a valid new snooze. */
+export function defaultSnoozeDateTime(now: Date = new Date()): string {
+  const date = new Date(now);
+  do {
+    date.setDate(date.getDate() + 1);
+    date.setHours(0, 0, 0, 0);
+  } while (date.getHours() !== 0 || date.getTime() <= now.getTime() + 60_000);
+
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T00:00`;
+}
+
 export function formatDateAdaptive(dateStr: string): { display: string; title: string } {
   const date = new Date(dateStr);
   const now = new Date();

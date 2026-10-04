@@ -4,7 +4,7 @@ import { navigate } from '../router.js';
 import { showToast } from '../util/toast.js';
 import { confirmDialog } from '../util/confirm.js';
 import { getMycalUrl, isDemo } from '../util/config.js';
-import { formatDateFull, formatDateAdaptive } from '../util/date.js';
+import { formatDateFull, formatDateAdaptive, defaultSnoozeDateTime } from '../util/date.js';
 import { hasValidRecipient } from '../util/address.js';
 import { findIcsLinks } from '../util/icslinks.js';
 import { Icon } from '../components/Icon.js';
@@ -710,10 +710,15 @@ export function MessageDetail({ id, folders }: MessageDetailProps) {
             class={`btn btn-ghost btn-sm${snoozeOpen ? ' active' : ''}`}
             disabled={actionInFlight}
             onClick={() => {
-              if (!snoozeOpen && canCancelSnooze && msg.snoozed_until) {
-                const d = new Date(msg.snoozed_until);
-                const pad = (n: number) => String(n).padStart(2, '0');
-                setSnoozeValue(`${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`);
+              if (!snoozeOpen) {
+                const existingSnooze = canCancelSnooze && msg.snoozed_until;
+                if (existingSnooze) {
+                  const d = new Date(existingSnooze);
+                  const pad = (n: number) => String(n).padStart(2, '0');
+                  setSnoozeValue(`${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`);
+                } else {
+                  setSnoozeValue(defaultSnoozeDateTime());
+                }
               }
               setSnoozeOpen(o => !o);
             }}

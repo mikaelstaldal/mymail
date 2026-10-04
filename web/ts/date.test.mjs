@@ -38,6 +38,11 @@
 // the prefix that names the day and the presence of the time of day, never the
 // spelling of either.
 //
+// defaultSnoozeDateTime covers the new-snooze picker's midnight default,
+// including the minute boundary and a timezone where today's midnight is
+// skipped. Component wiring and the native datetime-local picker are not
+// covered here.
+//
 // Nor is the wiring covered, since it is not reachable from a function: nothing
 // here checks that FolderView asks for `send_at` in folder 5 and `snoozed_until`
 // in folder 6, or that MessageList renders the column at all. That is the
@@ -50,12 +55,42 @@ import path from 'node:path';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
-const { formatDateSchedule, formatDateAdaptive, formatDateFull } = await import(
+const { formatDateSchedule, formatDateAdaptive, formatDateFull, defaultSnoozeDateTime } = await import(
   path.resolve(__dirname, '../static/util/date.js')
 );
 
 const MINUTE = 60_000;
 const DAY = 86_400_000;
+
+function inTimeZone(timeZone, check) {
+  const previousTZ = process.env.TZ;
+  process.env.TZ = timeZone;
+  try {
+    check();
+  } finally {
+    if (previousTZ === undefined) delete process.env.TZ;
+    else process.env.TZ = previousTZ;
+  }
+}
+
+test('a new snooze starts at the next local midnight', () => {
+  inTimeZone('UTC', () => {
+    assert.equal(defaultSnoozeDateTime(new Date(2026, 9, 4, 12)), '2026-10-05T00:00');
+  });
+});
+
+test('a midnight less than a minute away is skipped', () => {
+  inTimeZone('UTC', () => {
+    assert.equal(defaultSnoozeDateTime(new Date(2026, 9, 4, 23, 59, 30)), '2026-10-06T00:00');
+  });
+});
+
+test('a skipped midnight today does not carry 01:00 into tomorrow', () => {
+  inTimeZone('America/Santiago', () => {
+    assert.equal(new Date(2026, 8, 6, 0).getHours(), 1);
+    assert.equal(defaultSnoozeDateTime(new Date(2026, 8, 6, 12)), '2026-09-07T00:00');
+  });
+});
 
 /**
  * An ISO string `mins` minutes from now — the inputs are always relative.
