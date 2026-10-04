@@ -39,8 +39,8 @@ export function ApiTokens() {
     finally { setBusy(false); }
   }
 
-  async function revoke(id: number) {
-    const item = tokens.find(t => t.id === id);
+  async function revoke(slug: string) {
+    const item = tokens.find(t => t.slug === slug);
     if (!await confirmDialog({
       title: 'Revoke API token',
       body: `Revoke "${item?.name ?? 'this token'}"? Any client using it will immediately lose access.`,
@@ -49,7 +49,7 @@ export function ApiTokens() {
       destructive: true,
     })) return;
     setError('');
-    try { await api.tokens.revoke(id); await reload(); }
+    try { await api.tokens.revoke(slug); await reload(); }
     catch (e) { setError(e instanceof Error ? e.message : 'Could not revoke token'); }
   }
 
@@ -63,9 +63,9 @@ export function ApiTokens() {
     <fieldset><legend>Readable folders</legend>{folders.map(f => <div key={f.id} class="settings-field-check"><input id={`token-folder-${f.id}`} type="checkbox" checked={selected.includes(f.id)} onChange={e => setSelected((e.target as HTMLInputElement).checked ? [...selected, f.id] : selected.filter(id => id !== f.id))} /><label for={`token-folder-${f.id}`}>{f.name}</label></div>)}</fieldset>
     <div class="settings-form-actions"><button class="btn btn-primary" disabled={busy || !name.trim() || !expiresAt || selected.length === 0} onClick={() => void create()}>Create token</button></div>
     <h3>Existing tokens</h3>
-    {tokens.length === 0 ? <p>No API tokens.</p> : <ul>{tokens.map(t => <li key={t.id}>
-      <strong>{t.name}</strong> {new Date(t.expires_at).getTime() <= Date.now() ? '(expired)' : ''} — expires {new Date(t.expires_at).toLocaleString()} — {t.folder_ids.map(id => folders.find(f => f.id === id)?.name ?? `Folder ${id}`).join(', ')}
-      {' '}<button class="btn btn-secondary" onClick={() => void revoke(t.id)}>Revoke</button>
+    {tokens.length === 0 ? <p>No API tokens.</p> : <ul>{tokens.map(t => <li key={t.slug}>
+      <strong>{t.name}</strong> (<code>{t.slug}</code>) {new Date(t.expires_at).getTime() <= Date.now() ? '(expired)' : ''} — expires {new Date(t.expires_at).toLocaleString()} — {t.folder_ids.map(id => folders.find(f => f.id === id)?.name ?? `Folder ${id}`).join(', ')}
+      {' '}<button class="btn btn-secondary" onClick={() => void revoke(t.slug)}>Revoke</button>
     </li>)}</ul>}
   </div>;
 }

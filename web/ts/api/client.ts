@@ -110,7 +110,7 @@ export const api = {
     list: () => request<{ total: number; items: ApiToken[] }>('GET', '/tokens'),
     create: (body: { name: string; expires_at: string; folder_ids: number[] }) =>
       request<ApiToken & { token: string }>('POST', '/tokens', body),
-    revoke: (id: number) => request<void>('DELETE', `/tokens/${id}`),
+    revoke: (slug: string) => request<void>('DELETE', `/tokens/${encodeURIComponent(slug)}`),
   },
   folders: {
     list: () =>
@@ -312,7 +312,7 @@ export const api = {
 };
 
 export interface ApiToken {
-  id: number;
+  slug: string;
   name: string;
   created_at: string;
   expires_at: string;

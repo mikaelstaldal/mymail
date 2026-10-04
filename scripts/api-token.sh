@@ -5,11 +5,11 @@ usage() {
   cat <<'EOF'
 Usage:
   api-token.sh [--url BASE_URL] [--user USER | --netrc-file FILE] create --name NAME --lifetime NUMBER[s|m|h|d] --folders ID[,ID...]
-  api-token.sh [--url BASE_URL] [--user USER | --netrc-file FILE] revoke ID
+  api-token.sh [--url BASE_URL] [--user USER | --netrc-file FILE] revoke SLUG
 
 The default BASE_URL is http://127.0.0.1:8080. --user prompts for the Basic
 Auth password; --netrc-file supports unattended use. Create prints only the
-token secret to stdout and its revocation ID to stderr.
+token secret to stdout and its revocation slug to stderr.
 MYMAIL_URL and MYMAIL_USER provide defaults for --url and --user.
 EOF
 }
@@ -25,7 +25,7 @@ user_given=false
 netrc_file=
 netrc_given=false
 command_name=
-token_id=
+token_slug=
 name=
 lifetime=
 folders=
@@ -56,8 +56,8 @@ while (($#)); do
       exit 0
       ;;
     *)
-      if [[ $command_name == revoke && -z $token_id ]]; then
-        token_id=$1
+      if [[ $command_name == revoke && -z $token_slug ]]; then
+        token_slug=$1
         shift
       else
         die "unexpected argument: $1"
@@ -115,10 +115,10 @@ if [[ $command_name == create ]]; then
   curl_args+=(--request POST --header 'Content-Type: application/json' --data "$payload")
   endpoint=$base_url/api/v1/tokens
 else
-  [[ -z $name && -z $lifetime && -z $folders ]] || die 'revoke takes only a token ID'
-  [[ $token_id =~ ^[1-9][0-9]*$ ]] || die 'revoke needs a positive token ID'
+  [[ -z $name && -z $lifetime && -z $folders ]] || die 'revoke takes only a token slug'
+  [[ $token_slug =~ ^[a-z0-9]+(-[a-z0-9]+)*$ ]] || die 'revoke needs a token slug'
   curl_args+=(--request DELETE)
-  endpoint=$base_url/api/v1/tokens/$token_id
+  endpoint=$base_url/api/v1/tokens/$token_slug
 fi
 
 # curl writes the status on its own final line. The body stays in memory, so a
@@ -130,13 +130,13 @@ body=${response%$'\n'*}
 if [[ $command_name == create ]]; then
   [[ $status == 201 ]] || die "HTTP $status: $body"
   token_pattern='"token"[[:space:]]*:[[:space:]]*"(mymail_[A-Za-z0-9_-]{43})"'
-  id_pattern='"id"[[:space:]]*:[[:space:]]*([1-9][0-9]*)'
+  slug_pattern='"slug"[[:space:]]*:[[:space:]]*"([a-z0-9]+(-[a-z0-9]+)*)"'
   [[ $body =~ $token_pattern ]] || die 'server response has no token'
   token=${BASH_REMATCH[1]}
-  [[ $body =~ $id_pattern ]] || die 'server response has no token ID'
-  printf 'Token ID: %s\n' "${BASH_REMATCH[1]}" >&2
+  [[ $body =~ $slug_pattern ]] || die 'server response has no token slug'
+  printf 'Token slug: %s\n' "${BASH_REMATCH[1]}" >&2
   printf '%s\n' "$token"
 else
   [[ $status == 204 ]] || die "HTTP $status: $body"
-  printf 'Revoked token ID %s\n' "$token_id" >&2
+  printf 'Revoked token %s\n' "$token_slug" >&2
 fi

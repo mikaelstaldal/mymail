@@ -26,8 +26,8 @@ func NewFolderRepository(db *sql.DB) *FolderRepository {
 
 var nonAlphanumRun = regexp.MustCompile(`[^a-z0-9]+`)
 
-// toSlug converts a display name to a URL-safe slug.
-func toSlug(name string) string {
+// SlugifyName converts a display name to a URL-safe slug for folders and API tokens.
+func SlugifyName(name string) string {
 	s := norm.NFKD.String(name)
 	s = strings.ToLower(s)
 	s = nonAlphanumRun.ReplaceAllString(s, "-")
@@ -38,11 +38,20 @@ func toSlug(name string) string {
 	return s
 }
 
+// SlugCandidate applies the same collision suffix to folder and token slugs.
+// Number 1 leaves the base unchanged; subsequent candidates use -2, -3, ...
+func SlugCandidate(base string, number int) string {
+	if number == 1 {
+		return base
+	}
+	return fmt.Sprintf("%s-%d", base, number)
+}
+
 // uniqueSlug returns a slug derived from base that does not collide with any existing slug.
 // It appends -2, -3, … until the slug is free. Must be called within a transaction.
 func (r *FolderRepository) uniqueSlug(ctx context.Context, tx *sql.Tx, base string) (string, error) {
-	slug := base
-	for i := 2; ; i++ {
+	for i := 1; ; i++ {
+		slug := SlugCandidate(base, i)
 		var count int
 		if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM folders WHERE slug = ?`, slug).Scan(&count); err != nil {
 			return "", err
@@ -50,7 +59,6 @@ func (r *FolderRepository) uniqueSlug(ctx context.Context, tx *sql.Tx, base stri
 		if count == 0 {
 			return slug, nil
 		}
-		slug = fmt.Sprintf("%s-%d", base, i)
 	}
 }
 
@@ -135,7 +143,7 @@ func (r *FolderRepository) FolderExists(ctx context.Context, id int64) error {
 // If position is nil, append semantics are used (COALESCE(MAX(position),-1)+1).
 // Returns ErrConflict if the name already exists.
 func (r *FolderRepository) CreateFolder(ctx context.Context, name string, position *int) (oas.Folder, error) {
-	baseSlug := toSlug(name)
+	baseSlug := SlugifyName(name)
 
 	for range 5 {
 		tx, err := r.db.BeginTx(ctx, nil)

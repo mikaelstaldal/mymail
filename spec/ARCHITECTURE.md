@@ -135,6 +135,10 @@ Folder-scoped API tokens live in `api_tokens` and `api_token_folders`. Only a SH
 random secret is stored. The bearer middleware selects a narrow set of GET routes, looks up the
 current message or attachment folder in SQLite, and checks expiry on every request. Token
 management uses separate handlers that are reached only through the full-access auth path.
+The token table keeps a numeric ID for folder relations, while the API exposes only a unique
+slug derived from the token name with the same algorithm and collision suffixes as folders.
+Revocation deletes by slug, allowing that slug to be reused. The token table is introduced
+with a required, unique slug in migration v5.
 The one allowed token write, `PUT /messages/{id}/read`, checks token expiry and folder membership
 inside the SQL `UPDATE`, so a concurrent folder move cannot broaden its reach.
 

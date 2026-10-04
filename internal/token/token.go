@@ -9,6 +9,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -20,7 +21,8 @@ import (
 type Store struct{ DB *sql.DB }
 
 type Record struct {
-	ID        int64   `json:"id"`
+	ID        int64   `json:"-"`
+	Slug      string  `json:"slug"`
 	Name      string  `json:"name"`
 	CreatedAt string  `json:"created_at"`
 	ExpiresAt string  `json:"expires_at"`
@@ -44,13 +46,19 @@ func (s Store) Create(name string, expiry time.Time, folders []int64) (Record, s
 	}
 	defer tx.Rollback()
 	record = Record{Name: strings.TrimSpace(name), CreatedAt: time.Now().UTC().Format(time.RFC3339), ExpiresAt: expiry.UTC().Format(time.RFC3339), FolderIDs: folders}
-	res, err := tx.Exec(`INSERT INTO api_tokens(name,token_hash,created_at,expires_at) VALUES(?,?,?,?)`, record.Name, digest[:], record.CreatedAt, record.ExpiresAt)
-	if err != nil {
-		return Record{}, "", err
-	}
-	record.ID, err = res.LastInsertId()
-	if err != nil {
-		return Record{}, "", err
+	base := repository.SlugifyName(record.Name)
+	for number := 1; ; number++ {
+		record.Slug = repository.SlugCandidate(base, number)
+		err = tx.QueryRow(`INSERT INTO api_tokens(name,slug,token_hash,created_at,expires_at)
+			VALUES(?,?,?,?,?) ON CONFLICT(slug) DO NOTHING RETURNING id`,
+			record.Name, record.Slug, digest[:], record.CreatedAt, record.ExpiresAt).Scan(&record.ID)
+		if errors.Is(err, sql.ErrNoRows) {
+			continue
+		}
+		if err != nil {
+			return Record{}, "", err
+		}
+		break
 	}
 	seen := map[int64]bool{}
 	for _, id := range folders {
@@ -76,7 +84,7 @@ func (s Store) Create(name string, expiry time.Time, folders []int64) (Record, s
 }
 
 func (s Store) List() ([]Record, error) {
-	rows, err := s.DB.Query(`SELECT t.id,t.name,t.created_at,t.expires_at,f.folder_id FROM api_tokens t LEFT JOIN api_token_folders f ON f.token_id=t.id ORDER BY t.id DESC,f.folder_id`)
+	rows, err := s.DB.Query(`SELECT t.id,t.slug,t.name,t.created_at,t.expires_at,f.folder_id FROM api_tokens t LEFT JOIN api_token_folders f ON f.token_id=t.id ORDER BY t.id DESC,f.folder_id`)
 	if err != nil {
 		return nil, err
 	}
@@ -85,7 +93,7 @@ func (s Store) List() ([]Record, error) {
 	for rows.Next() {
 		var r Record
 		var folderID sql.NullInt64
-		if err := rows.Scan(&r.ID, &r.Name, &r.CreatedAt, &r.ExpiresAt, &folderID); err != nil {
+		if err := rows.Scan(&r.ID, &r.Slug, &r.Name, &r.CreatedAt, &r.ExpiresAt, &folderID); err != nil {
 			return nil, err
 		}
 		if len(items) == 0 || items[len(items)-1].ID != r.ID {
@@ -99,8 +107,8 @@ func (s Store) List() ([]Record, error) {
 	return items, rows.Err()
 }
 
-func (s Store) Revoke(id int64) (bool, error) {
-	res, err := s.DB.Exec(`DELETE FROM api_tokens WHERE id=?`, id)
+func (s Store) Revoke(slug string) (bool, error) {
+	res, err := s.DB.Exec(`DELETE FROM api_tokens WHERE slug=?`, slug)
 	if err != nil {
 		return false, err
 	}
@@ -156,6 +164,8 @@ func writeError(w http.ResponseWriter, status int, message string) {
 	_ = json.NewEncoder(w).Encode(map[string]string{"error": message})
 }
 
+var slugPattern = regexp.MustCompile(`^[a-z0-9]+(-[a-z0-9]+)*$`)
+
 // Management permits only the full-access caller. The outer Basic middleware
 // authenticates it when Basic auth is configured.
 func (s Store) Management(w http.ResponseWriter, r *http.Request) {
@@ -208,12 +218,12 @@ func (s Store) Management(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 405, "method not allowed")
 		return
 	}
-	id, err := strconv.ParseInt(strings.TrimPrefix(r.URL.Path, "/api/v1/tokens/"), 10, 64)
-	if err != nil || id <= 0 {
+	slug := strings.TrimPrefix(r.URL.Path, "/api/v1/tokens/")
+	if !slugPattern.MatchString(slug) {
 		writeError(w, 404, "token not found")
 		return
 	}
-	ok, err := s.Revoke(id)
+	ok, err := s.Revoke(slug)
 	if err != nil {
 		writeError(w, 500, "database error")
 		return

@@ -1,6 +1,7 @@
 package repository
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -67,7 +68,7 @@ func TestOpenDBAndInitSchema(t *testing.T) {
 	require.NoError(t, err, "OpenDB")
 	defer db.Close()
 
-	// Schema version must be 4.
+	// Schema version must match the latest migration.
 	var v int
 	db.QueryRow("PRAGMA user_version").Scan(&v)
 	assert.Equal(t, 5, v, "user_version")
@@ -142,6 +143,27 @@ func TestOpenDBAndInitSchema(t *testing.T) {
 	var count int
 	db.QueryRow("SELECT COUNT(*) FROM attachments WHERE message_id=?", msgID).Scan(&count)
 	assert.Zero(t, count, "cascade delete failed: attachments remain")
+}
+
+func TestAPITokenSlugSchema(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "mymail.sqlite")
+	db, err := sqlite.Open(path, 0, nil)
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, db.Close()) })
+	require.NoError(t, sqlite.MigrateStrict(context.Background(), db, migrations[:4]))
+	require.NoError(t, InitSchema(db))
+	insert := func(slug string, hash byte) error {
+		_, err := db.Exec(`INSERT INTO api_tokens(name,slug,token_hash,created_at,expires_at) VALUES('Reader',?,?,'2024','2025')`, slug, []byte{hash})
+		return err
+	}
+	require.NoError(t, insert("reader", 1))
+	require.Error(t, insert("reader", 2), "slugs must be unique")
+	require.Error(t, insert("", 3), "slugs must be nonempty")
+	_, err = db.Exec(`INSERT INTO api_tokens(name,token_hash,created_at,expires_at) VALUES('bad',X'01','2024','2025')`)
+	require.Error(t, err, "tokens require a slug")
+	_, err = db.Exec(`DELETE FROM api_tokens WHERE slug='reader'`)
+	require.NoError(t, err)
+	require.NoError(t, insert("reader", 4), "revocation frees a slug")
 }
 
 // TestOpenDBRefusesNewerSchema pins the MigrateStrict guarantee: a database

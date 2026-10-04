@@ -630,13 +630,15 @@ An `Authorization: Bearer` header is always treated as a MyMail token, including
 is not configured; an unknown token is rejected rather than granting anonymous full access.
 
 Full-access users can create, list, and revoke API tokens from Settings → API Tokens or through
-`GET /api/v1/tokens`, `POST /api/v1/tokens`, and `DELETE /api/v1/tokens/{id}`. A token has a name,
+`GET /api/v1/tokens`, `POST /api/v1/tokens`, and `DELETE /api/v1/tokens/{slug}`. A token has a name,
 an expiry time, and at least one existing folder ID. Its secret is returned only when created;
 list responses contain metadata but never the secret. Revocation takes effect immediately.
 Tokens are sent as `Authorization: Bearer <token>`. The server stores a SHA-256 hash of each
-random 256-bit secret and rejects it at or after its expiry time.
+random 256-bit secret and rejects it at or after its expiry time. The API returns a unique slug
+derived from the token name using the folder slug algorithm, with numeric suffixes for collisions.
+Revoking a token frees its slug for reuse. The token's internal numeric ID is never returned by the API.
 The `scripts/api-token.sh` CLI uses those management endpoints to create a token from a lifetime
-and folder IDs or revoke one by ID; it prints the newly created secret to stdout.
+and folder IDs or revoke one by slug; it prints the newly created secret to stdout.
 
 Initially a token grants read access to its selected folders through `GET /folders` (filtered),
 `GET /folders/{folder_id}/messages`, `GET /messages/search` with an allowed `folder_id`,

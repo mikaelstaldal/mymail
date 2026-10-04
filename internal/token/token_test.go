@@ -40,12 +40,32 @@ func TestTokenLifecycle(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, items, 1)
 	assert.Equal(t, []int64{1}, items[0].FolderIDs)
-	ok, err := s.Revoke(r.ID)
+	assert.Equal(t, "reader", r.Slug)
+	ok, err := s.Revoke(r.Slug)
 	require.NoError(t, err)
 	assert.True(t, ok)
 	allowed, err = s.Validate(value)
 	require.NoError(t, err)
 	assert.Nil(t, allowed)
+}
+
+func TestTokenSlugCollisionAndReuse(t *testing.T) {
+	s := testStore(t)
+	for _, tc := range []struct{ name, slug string }{
+		{"Résumé", "re-sume"},
+		{"Résumé", "re-sume-2"},
+		{"Résumé-2", "re-sume-2-2"},
+	} {
+		r, _, err := s.Create(tc.name, time.Now().Add(time.Hour), []int64{1})
+		require.NoError(t, err)
+		assert.Equal(t, tc.slug, r.Slug)
+	}
+	ok, err := s.Revoke("re-sume")
+	require.NoError(t, err)
+	assert.True(t, ok)
+	r, _, err := s.Create("Résumé", time.Now().Add(time.Hour), []int64{1})
+	require.NoError(t, err)
+	assert.Equal(t, "re-sume", r.Slug)
 }
 
 func TestTokenExpiryAndInvalidFolders(t *testing.T) {
@@ -144,12 +164,22 @@ func TestManagement(t *testing.T) {
 	s.Management(w, httptest.NewRequest("POST", "/api/v1/tokens", strings.NewReader(body)))
 	assert.Equal(t, 201, w.Code)
 	var created struct {
-		ID    int64  `json:"id"`
+		Slug  string `json:"slug"`
 		Token string `json:"token"`
 	}
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &created))
 	assert.NotEmpty(t, created.Token)
+	assert.Equal(t, "reader", created.Slug)
+	assert.NotContains(t, w.Body.String(), `"id"`)
 	w = httptest.NewRecorder()
-	s.Management(w, httptest.NewRequest("DELETE", "/api/v1/tokens/"+"1", nil))
+	s.Management(w, httptest.NewRequest("GET", "/api/v1/tokens", nil))
+	assert.Equal(t, 200, w.Code)
+	assert.Contains(t, w.Body.String(), `"slug":"reader"`)
+	assert.NotContains(t, w.Body.String(), `"id"`)
+	w = httptest.NewRecorder()
+	s.Management(w, httptest.NewRequest("DELETE", "/api/v1/tokens/1", nil))
+	assert.Equal(t, 404, w.Code)
+	w = httptest.NewRecorder()
+	s.Management(w, httptest.NewRequest("DELETE", "/api/v1/tokens/"+created.Slug, nil))
 	assert.Equal(t, 204, w.Code)
 }

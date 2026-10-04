@@ -289,6 +289,7 @@ var schemaV5 = []string{
 	`CREATE TABLE api_tokens (
 		id INTEGER PRIMARY KEY,
 		name TEXT NOT NULL,
+		slug TEXT NOT NULL UNIQUE CHECK (slug <> ''),
 		token_hash BLOB NOT NULL UNIQUE,
 		created_at TEXT NOT NULL,
 		expires_at TEXT NOT NULL

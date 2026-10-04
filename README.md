@@ -116,11 +116,11 @@ server's token API; `--user` prompts for the Basic Auth password when authentica
 ```bash
 ./scripts/api-token.sh --url https://mail.example.com --user myuser \
   create --name 'Archive reader' --lifetime 7d --folders 1,100
-./scripts/api-token.sh --url https://mail.example.com --user myuser revoke 12
+./scripts/api-token.sh --url https://mail.example.com --user myuser revoke archive-reader
 ```
 
-Creation prints **only the token secret to stdout** and the numeric token ID to stderr. Save that
-ID for revocation. Lifetimes accept `s`, `m`, `h`, or `d` (up to ten years). For unattended use,
+Creation prints **only the token secret to stdout** and its slug to stderr. Save that
+slug for revocation. Lifetimes accept `s`, `m`, `h`, or `d` (up to ten years). For unattended use,
 pass `--netrc-file PATH` instead of `--user`; keep that file readable only by its owner.
 `MYMAIL_URL` and `MYMAIL_USER` can supply defaults; an explicit `--netrc-file` overrides
 `MYMAIL_USER`.

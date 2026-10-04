@@ -30,9 +30,9 @@ components:
   schemas:
     ApiToken:
       type: object
-      required: [id, name, created_at, expires_at, folder_ids]
+      required: [slug, name, created_at, expires_at, folder_ids]
       properties:
-        id: { type: integer, format: int64 }
+        slug: { type: string, description: Unique URL-safe name; may be reused after revocation. }
         name: { type: string }
         created_at: { type: string, format: date-time }
         expires_at: { type: string, format: date-time }
@@ -600,14 +600,14 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
 
-  /tokens/{id}:
+  /tokens/{slug}:
     delete:
       summary: Revoke an API token immediately (full access only)
       parameters:
-        - name: id
+        - name: slug
           in: path
           required: true
-          schema: { type: integer, format: int64 }
+          schema: { type: string, pattern: '^[a-z0-9]+(-[a-z0-9]+)*$' }
       responses:
         '204': { description: Revoked }
         '404':
