@@ -7,7 +7,10 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/mikaelstaldal/mymail/internal/repository"
+	"github.com/mikaelstaldal/mymail/internal/token"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -26,6 +29,49 @@ func writeHtpasswd(t *testing.T, content string) string {
 	path := filepath.Join(t.TempDir(), "htpasswd")
 	require.NoError(t, os.WriteFile(path, []byte(content), 0o600))
 	return path
+}
+
+func TestSelectAuthentication(t *testing.T) {
+	db, err := repository.OpenDB(filepath.Join(t.TempDir(), "mymail.sqlite"), 0)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = db.Close() })
+	_, err = db.Exec(`INSERT INTO folders(id,name,slug,position) VALUES(1,'Inbox','inbox',0)`)
+	require.NoError(t, err)
+	store := &token.Store{DB: db}
+	_, secret, err := store.Create("reader", time.Now().Add(time.Hour), []int64{1})
+	require.NoError(t, err)
+	basic, err := loadAuthMiddleware(writeHtpasswd(t, "alice:"+aliceHash+"\n"), "mymail")
+	require.NoError(t, err)
+	h := selectAuthentication(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}), basic, store)
+
+	tests := []struct {
+		name, path, auth string
+		want             int
+	}{
+		{"no credentials", "/api/v1/folders/1/messages", "", 401},
+		{"valid bearer", "/api/v1/folders/1/messages", "Bearer " + secret, 200},
+		{"bearer cannot manage", "/api/v1/tokens", "Bearer " + secret, 403},
+		{"bearer cannot see UI", "/", "Bearer " + secret, 403},
+		{"invalid bearer", "/api/v1/folders/1/messages", "Bearer bad", 401},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodGet, tt.path, nil)
+			if tt.auth != "" {
+				req.Header.Set("Authorization", tt.auth)
+			}
+			rec := httptest.NewRecorder()
+			h.ServeHTTP(rec, req)
+			assert.Equal(t, tt.want, rec.Code)
+		})
+	}
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/tokens", nil)
+	req.SetBasicAuth("alice", "s3cret")
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	assert.Equal(t, 200, rec.Code)
 }
 
 // TestLoadAuthMiddlewareRefusesUnusableFile pins that the server reads its

@@ -18,6 +18,7 @@ var migrations = [][]string{
 	schemaV2,
 	schemaV3,
 	schemaV4,
+	schemaV5,
 }
 
 // OpenDB opens the SQLite database at path, enables foreign keys, sets the
@@ -282,4 +283,19 @@ var schemaV3 = []string{
 // which previously caused a full table scan on every threading iteration.
 var schemaV4 = []string{
 	`CREATE INDEX IF NOT EXISTS idx_messages_in_reply_to ON messages(in_reply_to) WHERE in_reply_to IS NOT NULL`,
+}
+
+var schemaV5 = []string{
+	`CREATE TABLE api_tokens (
+		id INTEGER PRIMARY KEY,
+		name TEXT NOT NULL,
+		token_hash BLOB NOT NULL UNIQUE,
+		created_at TEXT NOT NULL,
+		expires_at TEXT NOT NULL
+	)`,
+	`CREATE TABLE api_token_folders (
+		token_id INTEGER NOT NULL REFERENCES api_tokens(id) ON DELETE CASCADE,
+		folder_id INTEGER NOT NULL REFERENCES folders(id) ON DELETE CASCADE,
+		PRIMARY KEY (token_id, folder_id)
+	)`,
 }

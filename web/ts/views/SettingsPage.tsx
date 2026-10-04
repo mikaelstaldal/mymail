@@ -5,6 +5,8 @@ import { Filters } from './settings/Filters.js';
 import { SpamFilter } from './settings/SpamFilter.js';
 import { Contacts } from './settings/Contacts.js';
 import { Preferences } from './settings/Preferences.js';
+import { ApiTokens } from './settings/ApiTokens.js';
+import { isDemo } from '../util/config.js';
 
 interface SettingsPageProps {
   tab?: string;
@@ -17,6 +19,7 @@ const TABS = [
   { slug: 'spam', label: 'Spam Filter' },
   { slug: 'contacts', label: 'Contacts' },
   { slug: 'preferences', label: 'Preferences' },
+  { slug: 'api-tokens', label: 'API Tokens' },
 ] as const;
 
 export function SettingsPage({ tab }: SettingsPageProps) {
@@ -25,7 +28,7 @@ export function SettingsPage({ tab }: SettingsPageProps) {
   return (
     <div class="settings-page">
       <div class="settings-tabs">
-        {TABS.map(t => (
+        {TABS.filter(t => t.slug !== 'api-tokens' || !isDemo()).map(t => (
           <button
             key={t.slug}
             class={`settings-tab${activeTab === t.slug ? ' active' : ''}`}
@@ -42,6 +45,7 @@ export function SettingsPage({ tab }: SettingsPageProps) {
         {activeTab === 'spam' && <SpamFilter />}
         {activeTab === 'contacts' && <Contacts />}
         {activeTab === 'preferences' && <Preferences />}
+        {activeTab === 'api-tokens' && !isDemo() && <ApiTokens />}
       </div>
     </div>
   );

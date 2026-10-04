@@ -1,6 +1,6 @@
 -- Application-owned DDL from a freshly migrated database; see AGENTS.md.
 -- This omits seed rows and is not a replacement for mymail -init.
-PRAGMA user_version = 4;
+PRAGMA user_version = 5;
 
 CREATE INDEX idx_attachments_message_id ON attachments(message_id);
 
@@ -25,6 +25,20 @@ CREATE INDEX idx_messages_send_at      ON messages(send_at) WHERE send_at IS NOT
 CREATE INDEX idx_messages_snoozed_until ON messages(snoozed_until) WHERE snoozed_until IS NOT NULL;
 
 CREATE INDEX idx_msgref_ref ON message_references(ref_msg_id);
+
+CREATE TABLE api_token_folders (
+		token_id INTEGER NOT NULL REFERENCES api_tokens(id) ON DELETE CASCADE,
+		folder_id INTEGER NOT NULL REFERENCES folders(id) ON DELETE CASCADE,
+		PRIMARY KEY (token_id, folder_id)
+	);
+
+CREATE TABLE api_tokens (
+		id INTEGER PRIMARY KEY,
+		name TEXT NOT NULL,
+		token_hash BLOB NOT NULL UNIQUE,
+		created_at TEXT NOT NULL,
+		expires_at TEXT NOT NULL
+	);
 
 CREATE TABLE attachments (
 		id           INTEGER PRIMARY KEY AUTOINCREMENT,

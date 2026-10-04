@@ -106,6 +106,12 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
 }
 
 export const api = {
+  tokens: {
+    list: () => request<{ total: number; items: ApiToken[] }>('GET', '/tokens'),
+    create: (body: { name: string; expires_at: string; folder_ids: number[] }) =>
+      request<ApiToken & { token: string }>('POST', '/tokens', body),
+    revoke: (id: number) => request<void>('DELETE', `/tokens/${id}`),
+  },
   folders: {
     list: () =>
       request<{ total: number; items: Folder[] }>('GET', '/folders'),
@@ -301,3 +307,11 @@ export const api = {
       requestStatus('POST', `/drafts/${id}/send`),
   },
 };
+
+export interface ApiToken {
+  id: number;
+  name: string;
+  created_at: string;
+  expires_at: string;
+  folder_ids: number[];
+}

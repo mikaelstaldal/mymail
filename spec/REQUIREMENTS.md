@@ -625,6 +625,23 @@ exist.
 When authentication is required and credentials are missing or invalid, all endpoints respond with `401 Unauthorized`,
 `WWW-Authenticate: Basic realm="<realm>"` where `<realm>` is the `-basic-auth-realm` flag value, and the standard error
 body `{"error": "unauthorized"}`.
+Invalid or expired bearer credentials instead return `WWW-Authenticate: Bearer` with the same error body.
+An `Authorization: Bearer` header is always treated as a MyMail token, including when Basic auth
+is not configured; an unknown token is rejected rather than granting anonymous full access.
+
+Full-access users can create, list, and revoke API tokens from Settings → API Tokens or through
+`GET /api/v1/tokens`, `POST /api/v1/tokens`, and `DELETE /api/v1/tokens/{id}`. A token has a name,
+an expiry time, and at least one existing folder ID. Its secret is returned only when created;
+list responses contain metadata but never the secret. Revocation takes effect immediately.
+Tokens are sent as `Authorization: Bearer <token>`. The server stores a SHA-256 hash of each
+random 256-bit secret and rejects it at or after its expiry time.
+
+Initially a token grants read access to its selected folders through `GET /folders` (filtered),
+`GET /folders/{folder_id}/messages`, `GET /messages/search` with an allowed `folder_id`,
+`GET /messages/{id}` and its `raw`, `headers`, and `body` resources, and
+`GET /attachments/{id}`. A message or attachment is checked against its current folder on every
+request. Other routes, cross-folder reads, and all writes return 403. An invalid or expired
+token returns 401. API tokens cannot manage other tokens or serve the web UI.
 
 ### CSRF Protection
 
@@ -1231,6 +1248,8 @@ bug.
 - **Storage can be full.** A write that exceeds the origin's quota returns
   `507`, a status the real server never produces. Attachments are additionally
   capped at 8 MiB each, where the server caps only the whole request at 32 MiB.
+- **API tokens are unavailable.** Demo mode has no server identity or database to authenticate
+  tokens. The API Tokens Settings tab is hidden, and the service worker has no `/tokens` endpoints.
 
 ### Behaviour that differs
 

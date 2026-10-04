@@ -33,6 +33,7 @@ import (
 	"github.com/mikaelstaldal/mymail/internal/lda"
 	"github.com/mikaelstaldal/mymail/internal/repository"
 	"github.com/mikaelstaldal/mymail/internal/service"
+	"github.com/mikaelstaldal/mymail/internal/token"
 	"github.com/mikaelstaldal/mymail/web"
 )
 
@@ -290,6 +291,7 @@ func runServer(dataDir, addr string, port int, publicURL, basicAuthFile, basicAu
 	defer cancel()
 
 	mux := http.NewServeMux()
+	var tokenStore *token.Store
 
 	if demoMode {
 		// The demo's initial content, produced by the same seeding pipeline the
@@ -319,6 +321,9 @@ func runServer(dataDir, addr string, port int, publicURL, basicAuthFile, basicAu
 			log.Fatalf("error: open database: %v", err)
 		}
 		defer db.Close()
+		tokenStore = &token.Store{DB: db}
+		mux.HandleFunc("/api/v1/tokens", tokenStore.Management)
+		mux.HandleFunc("/api/v1/tokens/", tokenStore.Management)
 
 		// Allow concurrent reads under WAL mode; writes still serialize at the SQLite level.
 		numConns := runtime.GOMAXPROCS(0)
@@ -418,9 +423,7 @@ func runServer(dataDir, addr string, port int, publicURL, basicAuthFile, basicAu
 		ReferrerPolicy: "same-origin",
 		HSTS:           "max-age=31536000",
 	})(httpHandler)
-	if authMiddleware != nil {
-		httpHandler = authMiddleware(httpHandler)
-	}
+	httpHandler = selectAuthentication(httpHandler, authMiddleware, tokenStore)
 	httpHandler = http.MaxBytesHandler(httpHandler, maxRequestBody)
 
 	serverAddr := fmt.Sprintf("%s:%d", addr, port)
@@ -449,6 +452,26 @@ func runServer(dataDir, addr string, port int, publicURL, basicAuthFile, basicAu
 	if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		log.Printf("Failed to start server: %v", err)
 	}
+}
+
+// selectAuthentication keeps the full-access Basic path and the restricted
+// bearer path separate before either can reach the API or static UI.
+func selectAuthentication(next http.Handler, basic func(http.Handler) http.Handler, store *token.Store) http.Handler {
+	fullAccess := next
+	if basic != nil {
+		fullAccess = basic(fullAccess)
+	}
+	if store == nil {
+		return fullAccess
+	}
+	bearerAccess := store.Bearer(next)
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasPrefix(strings.ToLower(r.Header.Get("Authorization")), "bearer ") {
+			bearerAccess.ServeHTTP(w, r)
+		} else {
+			fullAccess.ServeHTTP(w, r)
+		}
+	})
 }
 
 // maxRequestBody is the hard ceiling on the size of an incoming HTTP request

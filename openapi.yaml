@@ -4,8 +4,13 @@ info:
   description: |
     REST API for MyMail — a self-hosted personal email client.
 
-    **Authentication:** When `-basic-auth-file` is configured, all endpoints 
-    require HTTP Basic Auth. Missing or invalid credentials return `401 Unauthorized` with
+    **Authentication:** When `-basic-auth-file` is configured, full access
+    requires HTTP Basic Auth. A folder-scoped bearer token may instead read
+    `GET /folders`, `GET /folders/{folder_id}/messages`,
+    `GET /messages/search?folder_id=...`, `GET /messages/{id}` and its
+    `raw`, `headers`, and `body` resources, and `GET /attachments/{id}`.
+    Folder lists are filtered; searches require an allowed folder_id.
+    Other routes and methods return 403 for bearer tokens. Missing or invalid credentials return `401 Unauthorized` with
     `WWW-Authenticate: Basic realm="<realm>"` and the body `{"error": "unauthorized"}`. The `401`
     response is not individually listed on each endpoint but applies globally to all authenticated
     endpoints.
@@ -22,6 +27,34 @@ servers:
 
 components:
   schemas:
+    ApiToken:
+      type: object
+      required: [id, name, created_at, expires_at, folder_ids]
+      properties:
+        id: { type: integer, format: int64 }
+        name: { type: string }
+        created_at: { type: string, format: date-time }
+        expires_at: { type: string, format: date-time }
+        folder_ids:
+          type: array
+          items: { type: integer, format: int64 }
+    ApiTokenRequest:
+      type: object
+      required: [name, expires_at, folder_ids]
+      properties:
+        name: { type: string, minLength: 1, maxLength: 200 }
+        expires_at: { type: string, format: date-time }
+        folder_ids:
+          type: array
+          minItems: 1
+          items: { type: integer, format: int64 }
+    CreatedApiToken:
+      allOf:
+        - $ref: '#/components/schemas/ApiToken'
+        - type: object
+          required: [token]
+          properties:
+            token: { type: string, description: Returned once at creation; never stored in plaintext. }
     Error:
       type: object
       properties:
@@ -520,6 +553,72 @@ components:
             $ref: '#/components/schemas/Error'
 
 paths:
+
+  /tokens:
+    get:
+      summary: List API tokens (full access only)
+      responses:
+        '200':
+          description: Token metadata without secrets
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [total, items]
+                properties:
+                  total: { type: integer }
+                  items:
+                    type: array
+                    items: { $ref: '#/components/schemas/ApiToken' }
+        default:
+          description: Error
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+    post:
+      summary: Create a folder-scoped read token (full access only)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ApiTokenRequest' }
+      responses:
+        '201':
+          description: Created token, including its one-time secret
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CreatedApiToken' }
+        '400':
+          description: Invalid request
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        default:
+          description: Error
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+  /tokens/{id}:
+    delete:
+      summary: Revoke an API token immediately (full access only)
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: integer, format: int64 }
+      responses:
+        '204': { description: Revoked }
+        '404':
+          description: Token not found
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        default:
+          description: Error
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
   # ── Folders ────────────────────────────────────────────────────────────────
 
   /folders:
