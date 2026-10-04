@@ -254,7 +254,7 @@ export function MessageDetail({ id, folders }: MessageDetailProps) {
       setMsg(m);
       setLoading(false);
       if (!m.read) {
-        void api.messages.patch(id, { read: true }).then(() => {
+        void api.messages.markRead(id).then(() => {
           window.dispatchEvent(new CustomEvent('folder-reload'));
         });
       }
@@ -296,7 +296,7 @@ export function MessageDetail({ id, folders }: MessageDetailProps) {
       // Only apply if the user hasn't clicked a different entry while waiting.
       if (expandedThreadIdRef.current !== entryId) return;
       if (!m.read) {
-        void api.messages.patch(entryId, { read: true }).then(() => {
+        void api.messages.markRead(entryId).then(() => {
           window.dispatchEvent(new CustomEvent('folder-reload'));
         });
         setThread(t => t ? {

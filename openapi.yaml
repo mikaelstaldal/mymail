@@ -8,7 +8,8 @@ info:
     requires HTTP Basic Auth. A folder-scoped bearer token may instead read
     `GET /folders`, `GET /folders/{folder_id}/messages`,
     `GET /messages/search?folder_id=...`, `GET /messages/{id}` and its
-    `raw`, `headers`, and `body` resources, and `GET /attachments/{id}`.
+    `raw`, `headers`, and `body` resources, `GET /attachments/{id}`,
+    and `PUT /messages/{id}/read` to mark a message read.
     Folder lists are filtered; searches require an allowed folder_id.
     Other routes and methods return 403 for bearer tokens. Missing or invalid credentials return `401 Unauthorized` with
     `WWW-Authenticate: Basic realm="<realm>"` and the body `{"error": "unauthorized"}`. The `401`
@@ -1397,6 +1398,27 @@ paths:
                 required: [updated]
         '400':
           $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        'default':
+          $ref: '#/components/responses/Default'
+
+  /messages/{id}/read:
+    put:
+      summary: Mark a message as read
+      description: |
+        Idempotently marks the message as read without changing other metadata. Takes no request
+        body. Available to Basic-authenticated callers and bearer tokens granted access to the
+        message's current folder. A bearer token receives 403 if the message is outside its scope.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '204':
+          description: Message marked read (including when it was already read)
         '404':
           $ref: '#/components/responses/NotFound'
         'default':

@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/mikaelstaldal/go-server-common/csrf"
 	"github.com/mikaelstaldal/mymail/internal/repository"
 	"github.com/mikaelstaldal/mymail/internal/token"
 	"github.com/stretchr/testify/assert"
@@ -37,14 +38,18 @@ func TestSelectAuthentication(t *testing.T) {
 	t.Cleanup(func() { _ = db.Close() })
 	_, err = db.Exec(`INSERT INTO folders(id,name,slug,position) VALUES(1,'Inbox','inbox',0)`)
 	require.NoError(t, err)
+	_, err = db.Exec(`INSERT INTO messages(id,folder_id,date,created_at,updated_at) VALUES(42,1,'2024-01-01T00:00:00Z','2024-01-01T00:00:00Z','2024-01-01T00:00:00Z')`)
+	require.NoError(t, err)
 	store := &token.Store{DB: db}
 	_, secret, err := store.Create("reader", time.Now().Add(time.Hour), []int64{1})
 	require.NoError(t, err)
 	basic, err := loadAuthMiddleware(writeHtpasswd(t, "alice:"+aliceHash+"\n"), "mymail")
 	require.NoError(t, err)
+	origin, err := csrf.ResolveServerOrigin("http://example.test", "127.0.0.1", 8080)
+	require.NoError(t, err)
 	h := selectAuthentication(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
-	}), basic, store)
+	}), basic, store, csrf.Middleware(origin))
 
 	tests := []struct {
 		name, path, auth string
@@ -72,6 +77,35 @@ func TestSelectAuthentication(t *testing.T) {
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, req)
 	assert.Equal(t, 200, rec.Code)
+
+	for _, tt := range []struct {
+		name, auth, origin string
+		want               int
+	}{
+		{"bearer cross-origin blocked", "Bearer " + secret, "http://evil.test", 403},
+		{"bearer read write", "Bearer " + secret, "", 204},
+		{"basic read write", "", "", 200},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodPut, "/api/v1/messages/42/read", nil)
+			if tt.auth != "" {
+				req.Header.Set("Authorization", tt.auth)
+			} else {
+				req.SetBasicAuth("alice", "s3cret")
+			}
+			if tt.origin != "" {
+				req.Header.Set("Origin", tt.origin)
+			}
+			rec := httptest.NewRecorder()
+			h.ServeHTTP(rec, req)
+			assert.Equal(t, tt.want, rec.Code)
+			if tt.name == "bearer cross-origin blocked" {
+				var read int
+				require.NoError(t, db.QueryRow(`SELECT read FROM messages WHERE id=42`).Scan(&read))
+				assert.Zero(t, read)
+			}
+		})
+	}
 }
 
 // TestLoadAuthMiddlewareRefusesUnusableFile pins that the server reads its

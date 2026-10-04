@@ -411,19 +411,19 @@ func runServer(dataDir, addr string, port int, publicURL, basicAuthFile, basicAu
 	if err != nil {
 		log.Fatalf("error: %v", err)
 	}
-	var httpHandler http.Handler = mux
-	httpHandler = csrf.Middleware(serverOrigin)(httpHandler)
-
 	csp := "default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self' " + importMapHash
 	if configScript != "" {
 		csp += " " + inlineScriptCSPHash(configScript)
 	}
-	httpHandler = httputil.SecurityHeaders(httputil.SecurityHeadersOptions{
-		CSP:            csp,
-		ReferrerPolicy: "same-origin",
-		HSTS:           "max-age=31536000",
-	})(httpHandler)
-	httpHandler = selectAuthentication(httpHandler, authMiddleware, tokenStore)
+	commonMiddleware := func(h http.Handler) http.Handler {
+		h = csrf.Middleware(serverOrigin)(h)
+		return httputil.SecurityHeaders(httputil.SecurityHeadersOptions{
+			CSP:            csp,
+			ReferrerPolicy: "same-origin",
+			HSTS:           "max-age=31536000",
+		})(h)
+	}
+	httpHandler := selectAuthentication(mux, authMiddleware, tokenStore, commonMiddleware)
 	httpHandler = http.MaxBytesHandler(httpHandler, maxRequestBody)
 
 	serverAddr := fmt.Sprintf("%s:%d", addr, port)
@@ -456,15 +456,15 @@ func runServer(dataDir, addr string, port int, publicURL, basicAuthFile, basicAu
 
 // selectAuthentication keeps the full-access Basic path and the restricted
 // bearer path separate before either can reach the API or static UI.
-func selectAuthentication(next http.Handler, basic func(http.Handler) http.Handler, store *token.Store) http.Handler {
-	fullAccess := next
+func selectAuthentication(next http.Handler, basic func(http.Handler) http.Handler, store *token.Store, common func(http.Handler) http.Handler) http.Handler {
+	fullAccess := common(next)
 	if basic != nil {
 		fullAccess = basic(fullAccess)
 	}
 	if store == nil {
 		return fullAccess
 	}
-	bearerAccess := store.Bearer(next)
+	bearerAccess := common(store.Bearer(next))
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if strings.HasPrefix(strings.ToLower(r.Header.Get("Authorization")), "bearer ") {
 			bearerAccess.ServeHTTP(w, r)

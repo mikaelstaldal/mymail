@@ -567,6 +567,15 @@ test('a message in Trash is deleted for good, one in Inbox is moved there', asyn
   assert.equal(state.messages.find((m) => m.id === 2), undefined);
 });
 
+test('PUT message read is idempotent and leaves other metadata alone', async () => {
+  const state = newState([message({ id: 1, read: false, flagged: true })]);
+  assert.equal((await call(state, 'PUT', '/messages/1/read')).status, 204);
+  assert.equal((await call(state, 'PUT', '/messages/1/read')).status, 204);
+  assert.equal(state.messages[0].read, true);
+  assert.equal(state.messages[0].flagged, true);
+  assert.equal((await call(state, 'PUT', '/messages/99/read')).status, 404);
+});
+
 test('Drafts, Scheduled and Snoozed refuse a delete or a move', async () => {
   for (const folderId of [3, 5, 6]) {
     const state = newState([message({ id: 1, folderId })]);

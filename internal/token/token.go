@@ -12,6 +12,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/mikaelstaldal/mymail/internal/repository"
 )
 
 // Store keeps only a SHA-256 digest of each random, 256-bit bearer secret.
@@ -107,40 +109,45 @@ func (s Store) Revoke(id int64) (bool, error) {
 }
 
 func (s Store) Validate(value string) (map[int64]bool, error) {
+	_, allowed, err := s.validate(value)
+	return allowed, err
+}
+
+func (s Store) validate(value string) (int64, map[int64]bool, error) {
 	if !strings.HasPrefix(value, "mymail_") || len(value) != 50 {
-		return nil, nil
+		return 0, nil, nil
 	}
 	digest := sha256.Sum256([]byte(value))
 	var id int64
 	var expiry string
 	err := s.DB.QueryRow(`SELECT id,expires_at FROM api_tokens WHERE token_hash=?`, digest[:]).Scan(&id, &expiry)
 	if errors.Is(err, sql.ErrNoRows) {
-		return nil, nil
+		return 0, nil, nil
 	}
 	if err != nil {
-		return nil, err
+		return 0, nil, err
 	}
 	until, err := time.Parse(time.RFC3339, expiry)
 	if err != nil {
-		return nil, err
+		return 0, nil, err
 	}
 	if !time.Now().Before(until) {
-		return nil, nil
+		return 0, nil, nil
 	}
 	rows, err := s.DB.Query(`SELECT folder_id FROM api_token_folders WHERE token_id=?`, id)
 	if err != nil {
-		return nil, err
+		return 0, nil, err
 	}
 	defer rows.Close()
 	allowed := map[int64]bool{}
 	for rows.Next() {
 		var f int64
 		if err := rows.Scan(&f); err != nil {
-			return nil, err
+			return 0, nil, err
 		}
 		allowed[f] = true
 	}
-	return allowed, rows.Err()
+	return id, allowed, rows.Err()
 }
 
 func writeError(w http.ResponseWriter, status int, message string) {
@@ -218,8 +225,8 @@ func (s Store) Management(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// Bearer bypasses Basic only for narrowly scoped read routes. Every other
-// bearer request is denied before it can reach the full-access API or UI.
+// Bearer bypasses Basic for scoped reads and the dedicated mark-read write.
+// Every other bearer request is denied before it can reach the full-access API or UI.
 func (s Store) Bearer(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		header := r.Header.Get("Authorization")
@@ -227,7 +234,7 @@ func (s Store) Bearer(next http.Handler) http.Handler {
 			next.ServeHTTP(w, r)
 			return
 		}
-		allowed, err := s.Validate(strings.TrimSpace(header[7:]))
+		tokenID, allowed, err := s.validate(strings.TrimSpace(header[7:]))
 		if err != nil {
 			writeError(w, 500, "database error")
 			return
@@ -237,12 +244,30 @@ func (s Store) Bearer(next http.Handler) http.Handler {
 			writeError(w, 401, "unauthorized")
 			return
 		}
-		if r.Method != http.MethodGet && r.Method != http.MethodHead {
-			writeError(w, 403, "token grants read access only")
-			return
-		}
 		parts := strings.Split(strings.Trim(r.URL.Path, "/"), "/")
 		if len(parts) < 3 || parts[0] != "api" || parts[1] != "v1" {
+			writeError(w, 403, "token cannot access this resource")
+			return
+		}
+		if r.Method == http.MethodPut && len(parts) == 5 && parts[2] == "messages" && parts[4] == "read" {
+			messageID, err := strconv.ParseInt(parts[3], 10, 64)
+			if err != nil || messageID <= 0 {
+				writeError(w, 403, "token cannot access this resource")
+				return
+			}
+			found, err := repository.NewMessageRepository(s.DB).MarkRead(r.Context(), messageID, &tokenID)
+			if err != nil {
+				writeError(w, 500, "database error")
+				return
+			}
+			if !found {
+				writeError(w, 403, "token cannot access this resource")
+				return
+			}
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		if r.Method != http.MethodGet && r.Method != http.MethodHead {
 			writeError(w, 403, "token cannot access this resource")
 			return
 		}

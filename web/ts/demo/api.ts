@@ -898,6 +898,15 @@ async function patchMessage(state: DemoState, id: number, body: Record<string, u
   return jsonResponse(200, toSummaryDTO(msg));
 }
 
+// Mirrors handler.MessagesIDReadPut and MessageRepository.MarkRead.
+async function markMessageRead(state: DemoState, id: number): Promise<Response> {
+  const msg = findMessage(state, id);
+  msg.read = true;
+  msg.updatedAt = nowTimestamp();
+  await saveState(state);
+  return new Response(null, { status: 204 });
+}
+
 async function bulkPatchMessages(state: DemoState, body: Record<string, unknown>): Promise<Response> {
   const ids = idList(body, 'ids');
   const read = optBool(body, 'read');
@@ -2016,6 +2025,7 @@ async function route(
         if (method === 'DELETE') return deleteMessage(state, pathId(second));
       } else if (segments.length === 3) {
         const id = pathId(second);
+        if (third === 'read' && method === 'PUT') return markMessageRead(state, id);
         if (third === 'raw' && method === 'GET') return getRawMessage(state, id);
         if (third === 'headers' && method === 'GET') return getMessageHeaders(state, id);
         if (third === 'body' && method === 'GET') return getMessageBody(state, id, url);

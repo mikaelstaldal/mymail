@@ -135,6 +135,8 @@ Folder-scoped API tokens live in `api_tokens` and `api_token_folders`. Only a SH
 random secret is stored. The bearer middleware selects a narrow set of GET routes, looks up the
 current message or attachment folder in SQLite, and checks expiry on every request. Token
 management uses separate handlers that are reached only through the full-access auth path.
+The one allowed token write, `PUT /messages/{id}/read`, checks token expiry and folder membership
+inside the SQL `UPDATE`, so a concurrent folder move cannot broaden its reach.
 
 ### `send_failure_count` Exposed as Boolean Only
 API exposes only `send_failed` (true when count > 0). Raw count is an implementation detail without UI value.

@@ -91,6 +91,10 @@ func TestBearerScope(t *testing.T) {
 		{"GET", "/api/v1/messages/search", 403},
 		{"GET", "/api/v1/messages/search?folder_id=1&folder_id=2", 403},
 		{"GET", "/api/v1/messages/10/thread", 403},
+		{"PUT", "/api/v1/messages/10/read", 204},
+		{"PUT", "/api/v1/messages/20/read", 403},
+		{"PUT", "/api/v1/messages/999/read", 403},
+		{"PUT", "/api/v1/messages/10/snooze", 403},
 		{"POST", "/api/v1/folders/1/messages", 403},
 		{"GET", "/api/v1/tokens", 403},
 		{"GET", "/", 403},
@@ -120,6 +124,11 @@ func TestBearerScope(t *testing.T) {
 	require.Len(t, response.Items, 1)
 	assert.Equal(t, int64(1), response.Items[0].ID)
 	assert.Equal(t, 4, called)
+	var read, otherRead int
+	require.NoError(t, s.DB.QueryRow(`SELECT read FROM messages WHERE id=10`).Scan(&read))
+	require.NoError(t, s.DB.QueryRow(`SELECT read FROM messages WHERE id=20`).Scan(&otherRead))
+	assert.Equal(t, 1, read)
+	assert.Equal(t, 0, otherRead)
 	req = httptest.NewRequest("GET", "/api/v1/messages/10", nil)
 	req.Header.Set("Authorization", "Bearer invalid")
 	w = httptest.NewRecorder()

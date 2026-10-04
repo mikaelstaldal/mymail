@@ -214,6 +214,17 @@ func (h *Handler) MessagesIDPatch(ctx context.Context, req *api.MessagesIDPatchR
 	return msg.ToOASMessageSummary(), nil
 }
 
+func (h *Handler) MessagesIDReadPut(ctx context.Context, params api.MessagesIDReadPutParams) (api.MessagesIDReadPutRes, error) {
+	found, err := h.messages.MarkRead(ctx, int64(params.ID), nil)
+	if err != nil {
+		return nil, err
+	}
+	if !found {
+		return &api.Error{Error: "message not found"}, nil
+	}
+	return &api.MessagesIDReadPutNoContent{}, nil
+}
+
 func (h *Handler) MessagesPatch(ctx context.Context, req *api.MessagesPatchReq) (api.MessagesPatchRes, error) {
 	if len(req.Ids) == 0 {
 		return &api.MessagesPatchBadRequest{Error: "ids must contain at least one id"}, nil

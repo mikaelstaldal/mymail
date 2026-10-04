@@ -605,6 +605,28 @@ func (r *MessageRepository) UpdateMessage(ctx context.Context, id int64, fields 
 	return r.GetMessageDetail(ctx, id)
 }
 
+// MarkRead is idempotent. When tokenID is set, folder authorization and the
+// update happen in one statement, so a concurrent move cannot widen access.
+func (r *MessageRepository) MarkRead(ctx context.Context, id int64, tokenID *int64) (bool, error) {
+	query := `UPDATE messages SET read = 1 WHERE id = ?`
+	args := []any{id}
+	if tokenID != nil {
+		query += ` AND EXISTS (
+			SELECT 1 FROM api_token_folders f
+			JOIN api_tokens t ON t.id = f.token_id
+			WHERE f.token_id = ? AND f.folder_id = messages.folder_id AND t.expires_at > ?
+		)`
+		args = append(args, *tokenID, time.Now().UTC().Format(time.RFC3339))
+	}
+	query += ` RETURNING id`
+	var updatedID int64
+	err := r.db.QueryRowContext(ctx, query, args...).Scan(&updatedID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	return err == nil, err
+}
+
 // BulkUpdateMessages sets read and/or flagged on a set of messages. Returns count changed.
 // Returns ErrNotFound if any ID is missing; ErrTooManyIDs if len > 1000.
 func (r *MessageRepository) BulkUpdateMessages(ctx context.Context, ids []int64, read *bool, flagged *bool) (int, error) {

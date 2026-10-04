@@ -151,6 +151,9 @@ export const api = {
     patch: (id: number, updates: { folder_id?: number; read?: boolean; flagged?: boolean }) =>
       request<components['schemas']['MessageSummary']>('PATCH', `/messages/${id}`, updates),
 
+    markRead: (id: number) =>
+      request<void>('PUT', `/messages/${id}/read`),
+
     deleteSingle: (id: number) =>
       request<void>('DELETE', `/messages/${id}`),
 

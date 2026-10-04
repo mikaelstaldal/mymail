@@ -66,6 +66,24 @@ func decodeJSON(t *testing.T, r *http.Response, v any) {
 	require.NoError(t, err, "decode response")
 }
 
+func TestMessageMarkRead(t *testing.T) {
+	db := openTestDB(t)
+	_, err := db.Exec(`INSERT INTO messages(id,folder_id,date,read,flagged,created_at,updated_at)
+		VALUES(42,1,'2024-01-01T00:00:00Z',0,1,'2024-01-01T00:00:00Z','2024-01-01T00:00:00Z')`)
+	require.NoError(t, err)
+	srv := newServer(t, db)
+
+	for range 2 {
+		res := do(srv, http.MethodPut, "/messages/42/read", "")
+		assert.Equal(t, http.StatusNoContent, res.StatusCode)
+	}
+	var read, flagged int
+	require.NoError(t, db.QueryRow(`SELECT read,flagged FROM messages WHERE id=42`).Scan(&read, &flagged))
+	assert.Equal(t, 1, read)
+	assert.Equal(t, 1, flagged)
+	assert.Equal(t, http.StatusNotFound, do(srv, http.MethodPut, "/messages/999/read", "").StatusCode)
+}
+
 func TestFoldersGet(t *testing.T) {
 	db := openTestDB(t)
 	srv := newServer(t, db)

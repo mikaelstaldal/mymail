@@ -640,7 +640,10 @@ Initially a token grants read access to its selected folders through `GET /folde
 `GET /folders/{folder_id}/messages`, `GET /messages/search` with an allowed `folder_id`,
 `GET /messages/{id}` and its `raw`, `headers`, and `body` resources, and
 `GET /attachments/{id}`. A message or attachment is checked against its current folder on every
-request. Other routes, cross-folder reads, and all writes return 403. An invalid or expired
+request. A token can also call `PUT /messages/{id}/read` to mark an allowed message as read.
+This operation takes no body and is idempotent; Basic-authenticated clients may use it too.
+The token's folder rule is checked atomically with this write. Other routes, cross-folder reads,
+and other writes return 403. An invalid or expired
 token returns 401. API tokens cannot manage other tokens or serve the web UI.
 
 ### CSRF Protection
@@ -734,7 +737,7 @@ On first load the UI reads `localStorage` for the last selected folder and navig
    a shorter value is rejected. **Re-snooze / edit snooze:** if the message is already in Snoozed, the Snooze button is labelled "Edit
    snooze" and pre-fills the datetime picker with the current snooze time; submitting updates the expiry time and
    preserves the original return folder. Opening an unread message causes the UI to issue an explicit
-   `PATCH /messages/{id}` request (with `{"read": true}`) after a successful GET to mark it as read;
+   `PUT /messages/{id}/read` request after a successful GET to mark it as read;
    `GET /messages/{id}` itself does not alter read state. When the message has both body types, a toggle switches
    between HTML and plain text; the preference is stored. Thread display: if the message is part of a thread, a
    collapsed conversation strip is shown below the body; clicking an entry expands it inline. Each entry other than the
