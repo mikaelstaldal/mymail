@@ -1,7 +1,7 @@
 {
   "name": "mymail-vendor-rebuild",
   "private": true,
-  "description": "Throwaway manifest for web/ts/vendor/rebuild.sh — not used at runtime.",
+  "description": "Throwaway manifest for web/ts/third_party/rebuild.sh — not used at runtime.",
   "dependencies": {
     "preact": "10.29.7",
     "quill": "2.0.3",

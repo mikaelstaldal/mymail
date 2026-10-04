@@ -7,7 +7,7 @@
 #
 # Idempotent: a no-op once node_modules/ exists. Uses only tar/gzip (no package
 # manager), so build.sh stays free of npm. Regenerate the tarball via
-# web/ts/vendor/rebuild.sh (maintainer-only).
+# web/ts/third_party/rebuild.sh (maintainer-only).
 set -euo pipefail
 
 cd "$(dirname "${BASH_SOURCE[0]}")"

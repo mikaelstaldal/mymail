@@ -16,9 +16,9 @@ interface Props {
 
 // Renders a Lucide icon inline as an <svg> whose stroke is `currentColor`, so it
 // inherits the surrounding text colour. Returns null for an unknown name — the
-// vendored bundle carries only the icons web/ts/vendor/gen-lucide.mjs's ICONS
+// vendored bundle carries only the icons web/ts/third_party/gen-lucide.mjs's ICONS
 // list names, so a new icon has to be added there and the bundle regenerated
-// (see web/ts/vendor/rebuild.sh) before it can be used here.
+// (see web/ts/third_party/rebuild.sh) before it can be used here.
 export function Icon({ name, size = 16, strokeWidth = 2, class: cls, title }: Props) {
   const nodes = LUCIDE_ICON_NODES[name];
   if (!nodes) return null;

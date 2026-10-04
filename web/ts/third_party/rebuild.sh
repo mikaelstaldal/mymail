@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Maintainer-only script. Fetches the pinned upstream sources for the vendored
 # browser libraries (Preact, Quill, Lucide) via npm and copies each into
-# web/static/vendor/, plus Preact's .d.ts type stubs into web/ts/vendor/preact/.
-# It also vendors the test-only jsdom install tree under web/ts/vendor/test/.
+# web/static/third_party/, plus Preact's .d.ts type stubs into web/ts/third_party/preact/.
+# It also vendors the test-only jsdom install tree under web/ts/third_party/test/.
 #
 # Preact and Quill ship prebuilt, self-contained files — Preact's dist/*.module.js
 # ESM modules and Quill's dist/quill.js UMD global + dist/quill.snow.css — so no
@@ -33,7 +33,7 @@ set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")"
 
 VENDOR_DIR="$(pwd)"
-BROWSER_OUT="$VENDOR_DIR/../../static/vendor"
+BROWSER_OUT="$VENDOR_DIR/../../static/third_party"
 PREACT_OUT="$BROWSER_OUT/preact"    # runtime ESM modules served to the browser
 QUILL_OUT="$BROWSER_OUT/quill"      # Quill UMD global + snow theme CSS
 LUCIDE_OUT="$BROWSER_OUT/lucide"    # generated icon-geometry ESM module
@@ -58,8 +58,8 @@ LUCIDE_VER="$(pkgver lucide-static)"
 # --- 1. Preact runtime modules + type stubs --------------------------------
 #
 # Preact ships prebuilt self-contained ESM (dist/*.module.js) plus its own .d.ts.
-# The runtime modules go to web/static/vendor/preact/ (served, version-stamped,
-# loaded via the import map); the .d.ts go to web/ts/vendor/preact/ (compile-time
+# The runtime modules go to web/static/third_party/preact/ (served, version-stamped,
+# loaded via the import map); the .d.ts go to web/ts/third_party/preact/ (compile-time
 # only, resolved via the tsconfig `paths` entries, so they are NOT version-stamped).
 
 mkdir -p "$PREACT_OUT" "$PREACT_TYPES/src" "$PREACT_TYPES/hooks/src" "$PREACT_TYPES/jsx-runtime/src"
@@ -170,10 +170,10 @@ echo "Wrote $TEST_DIR/jsdom-node_modules.tar.gz (jsdom $(node -p "require('$TEST
 cat <<EOF
 
 Reminder: update web/static/index.html to reference:
-  import map: preact             -> ./vendor/preact/preact-$PREACT_VER.module.js
-  import map: preact/hooks       -> ./vendor/preact/hooks-$PREACT_VER.module.js
-  import map: preact/jsx-runtime -> ./vendor/preact/jsx-runtime-$PREACT_VER.module.js
-  import map: lucide-icons       -> ./vendor/lucide/lucide-$LUCIDE_VER.js
-  <link ... href="vendor/quill/quill-$QUILL_VER.snow.css">
-  <script src="vendor/quill/quill-$QUILL_VER.js"></script>
+  import map: preact             -> ./third_party/preact/preact-$PREACT_VER.module.js
+  import map: preact/hooks       -> ./third_party/preact/hooks-$PREACT_VER.module.js
+  import map: preact/jsx-runtime -> ./third_party/preact/jsx-runtime-$PREACT_VER.module.js
+  import map: lucide-icons       -> ./third_party/lucide/lucide-$LUCIDE_VER.js
+  <link ... href="third_party/quill/quill-$QUILL_VER.snow.css">
+  <script src="third_party/quill/quill-$QUILL_VER.js"></script>
 EOF

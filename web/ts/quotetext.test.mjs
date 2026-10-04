@@ -1,6 +1,6 @@
 // node:test coverage for web/ts/util/quotetext.ts (exercised via its compiled
 // output, web/static/util/quotetext.js). Run via build.sh or directly:
-//   web/ts/vendor/test/unpack.sh && node --test web/ts/quotetext.test.mjs
+//   web/ts/third_party/test/unpack.sh && node --test web/ts/quotetext.test.mjs
 //
 // quoteHtmlToText produces the text/plain alternative for a reply or forward.
 // It is the *only* producer of that half of the message: the editor gives us
@@ -20,7 +20,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 // The module under test reads DOMParser and Node off the global object, so the
 // DOM has to be installed before it runs.
-const { JSDOM } = await import(path.resolve(__dirname, 'vendor/test/jsdom.js'));
+const { JSDOM } = await import(path.resolve(__dirname, 'third_party/test/jsdom.js'));
 const { window } = new JSDOM('');
 globalThis.window = window;
 globalThis.document = window.document;

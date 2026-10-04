@@ -1,6 +1,6 @@
 // Maintainer-only generator, invoked by rebuild.sh. Reads lucide-static's
 // icon-nodes.json (every icon's SVG child elements as [tag, attrs] pairs) and
-// emits web/static/vendor/lucide/lucide-<version>.js — a plain ESM module
+// emits web/static/third_party/lucide/lucide-<version>.js — a plain ESM module
 // exporting LUCIDE_ICON_NODES for <Icon> (web/ts/components/Icon.tsx) to build
 // an <svg> from.
 //
@@ -69,8 +69,8 @@ const body = Object.entries(picked)
 
 writeFileSync(
   outPath,
-  `// AUTO-GENERATED — do not edit. Regenerate via web/ts/vendor/rebuild.sh.\n` +
+  `// AUTO-GENERATED — do not edit. Regenerate via web/ts/third_party/rebuild.sh.\n` +
   `// Source: lucide-static ${version} (ISC License). ${ICONS.length} icons,\n` +
-  `// selected by the ICONS list in web/ts/vendor/gen-lucide.mjs.\n` +
+  `// selected by the ICONS list in web/ts/third_party/gen-lucide.mjs.\n` +
   `export const LUCIDE_ICON_NODES = {\n${body}\n};\n`,
 );

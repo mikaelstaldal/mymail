@@ -2,7 +2,7 @@
   "name": "mymail-vendor-rebuild-test",
   "private": true,
   "type": "module",
-  "description": "Throwaway manifest for web/ts/vendor/rebuild.sh's test-only jsdom install — not used at runtime.",
+  "description": "Throwaway manifest for web/ts/third_party/rebuild.sh's test-only jsdom install — not used at runtime.",
   "dependencies": {
     "jsdom": "29.1.1"
   }

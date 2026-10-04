@@ -50,7 +50,7 @@ the trigger is the push itself. See `AGENTS.md` § E2E Tests.
 - Quill rich-text editor (vendored, no CDN dependency).
 - Lucide icons, rendered inline as SVG by `components/Icon.tsx` (vendored, no
   CDN dependency). The vendored bundle carries only the icons the UI names —
-  see the `ICONS` list in `web/ts/vendor/gen-lucide.mjs`. The UI uses no emoji
+  see the `ICONS` list in `web/ts/third_party/gen-lucide.mjs`. The UI uses no emoji
   or other Unicode glyphs as icons.
 - Plain CSS for styling. The palette, type scale and control styling are
   MyCal's, so the two apps read as one product; the theme is selected by
