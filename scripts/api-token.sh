@@ -1,0 +1,142 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+usage() {
+  cat <<'EOF'
+Usage:
+  api-token.sh [--url BASE_URL] [--user USER | --netrc-file FILE] create --name NAME --lifetime NUMBER[s|m|h|d] --folders ID[,ID...]
+  api-token.sh [--url BASE_URL] [--user USER | --netrc-file FILE] revoke ID
+
+The default BASE_URL is http://127.0.0.1:8080. --user prompts for the Basic
+Auth password; --netrc-file supports unattended use. Create prints only the
+token secret to stdout and its revocation ID to stderr.
+MYMAIL_URL and MYMAIL_USER provide defaults for --url and --user.
+EOF
+}
+
+die() {
+  printf 'api-token.sh: %s\n' "$*" >&2
+  exit 1
+}
+
+base_url=${MYMAIL_URL:-http://127.0.0.1:8080}
+username=${MYMAIL_USER:-}
+user_given=false
+netrc_file=
+netrc_given=false
+command_name=
+token_id=
+name=
+lifetime=
+folders=
+
+while (($#)); do
+  case $1 in
+    create|revoke)
+      [[ -z $command_name ]] || die 'choose one command'
+      command_name=$1
+      shift
+      ;;
+    --url|--user|--netrc-file|--name|--lifetime|--folders)
+      option=$1
+      (($# >= 2)) || die "$option needs a value"
+      value=$2
+      case $option in
+        --url) base_url=$value ;;
+        --user) username=$value; user_given=true ;;
+        --netrc-file) netrc_file=$value; netrc_given=true ;;
+        --name) name=$value ;;
+        --lifetime) lifetime=$value ;;
+        --folders) folders=$value ;;
+      esac
+      shift 2
+      ;;
+    -h|--help)
+      usage
+      exit 0
+      ;;
+    *)
+      if [[ $command_name == revoke && -z $token_id ]]; then
+        token_id=$1
+        shift
+      else
+        die "unexpected argument: $1"
+      fi
+      ;;
+  esac
+done
+
+[[ -n $command_name ]] || { usage >&2; exit 2; }
+[[ $base_url == http://* || $base_url == https://* ]] || die 'URL must start with http:// or https://'
+[[ $base_url != *'?'* && $base_url != *'#'* ]] || die 'URL must not contain a query or fragment'
+base_url=${base_url%/}
+[[ $user_given != true || $netrc_given != true ]] || die 'use either --user or --netrc-file'
+if [[ $netrc_given == true ]]; then username=; fi
+[[ $username != *:* ]] || die '--user expects a username only; use --netrc-file for unattended authentication'
+
+curl_args=(--silent --show-error --connect-timeout 5 --max-time 30 --header 'Accept: application/json')
+if [[ -n $username ]]; then
+  curl_args+=(--basic --user "$username")
+elif [[ -n $netrc_file ]]; then
+  [[ -r $netrc_file ]] || die "cannot read netrc file: $netrc_file"
+  curl_args+=(--netrc-file "$netrc_file")
+fi
+
+if [[ $command_name == create ]]; then
+  [[ -n $name && -n $lifetime && -n $folders ]] || die 'create needs --name, --lifetime, and --folders'
+  name_bytes=$(printf '%s' "$name" | wc -c)
+  [[ $name_bytes -le 200 && ! $name =~ [[:cntrl:]] ]] || die 'name must be 1–200 bytes without control characters'
+  [[ $folders =~ ^[1-9][0-9]*(,[1-9][0-9]*)*$ ]] || die 'folders must be comma-separated positive IDs'
+  [[ $lifetime =~ ^([1-9][0-9]*)([smhd])$ ]] || die 'lifetime must be a positive number followed by s, m, h, or d'
+  amount=${BASH_REMATCH[1]}
+  unit=${BASH_REMATCH[2]}
+  [[ ${#amount} -le 9 ]] || die 'lifetime exceeds ten years'
+  case $unit in
+    s) multiplier=1 ;;
+    m) multiplier=60 ;;
+    h) multiplier=3600 ;;
+    d) multiplier=86400 ;;
+  esac
+  ((10#$amount <= 315360000 / multiplier)) || die 'lifetime exceeds ten years'
+  seconds=$((10#$amount * multiplier))
+  expiry_epoch=$(( $(date -u +%s) + seconds ))
+  if expires_at=$(date -u -d "@$expiry_epoch" '+%Y-%m-%dT%H:%M:%SZ' 2>/dev/null); then
+    : # GNU date
+  elif expires_at=$(date -u -r "$expiry_epoch" '+%Y-%m-%dT%H:%M:%SZ' 2>/dev/null); then
+    : # BSD/macOS date
+  else
+    die 'date cannot format the expiry time'
+  fi
+  backslash=$'\\'
+  escaped_backslash=$'\\\\'
+  json_name=${name//"$backslash"/"$escaped_backslash"}
+  json_name=${json_name//\"/\\\"}
+  payload=$(printf '{"name":"%s","expires_at":"%s","folder_ids":[%s]}' "$json_name" "$expires_at" "$folders")
+  curl_args+=(--request POST --header 'Content-Type: application/json' --data "$payload")
+  endpoint=$base_url/api/v1/tokens
+else
+  [[ -z $name && -z $lifetime && -z $folders ]] || die 'revoke takes only a token ID'
+  [[ $token_id =~ ^[1-9][0-9]*$ ]] || die 'revoke needs a positive token ID'
+  curl_args+=(--request DELETE)
+  endpoint=$base_url/api/v1/tokens/$token_id
+fi
+
+# curl writes the status on its own final line. The body stays in memory, so a
+# newly created secret is never written to a temporary file.
+response=$(curl "${curl_args[@]}" --write-out $'\n%{http_code}' "$endpoint") || die 'request failed'
+status=${response##*$'\n'}
+body=${response%$'\n'*}
+
+if [[ $command_name == create ]]; then
+  [[ $status == 201 ]] || die "HTTP $status: $body"
+  token_pattern='"token"[[:space:]]*:[[:space:]]*"(mymail_[A-Za-z0-9_-]{43})"'
+  id_pattern='"id"[[:space:]]*:[[:space:]]*([1-9][0-9]*)'
+  [[ $body =~ $token_pattern ]] || die 'server response has no token'
+  token=${BASH_REMATCH[1]}
+  [[ $body =~ $id_pattern ]] || die 'server response has no token ID'
+  printf 'Token ID: %s\n' "${BASH_REMATCH[1]}" >&2
+  printf '%s\n' "$token"
+else
+  [[ $status == 204 ]] || die "HTTP $status: $body"
+  printf 'Revoked token ID %s\n' "$token_id" >&2
+fi

@@ -107,6 +107,25 @@ mymail -import -data /var/lib/mymail \
   work:maildir:/home/user/Maildir/.Work
 ```
 
+## API token CLI
+
+`scripts/api-token.sh` manages folder-scoped API tokens using `curl` and Bash. It uses the
+server's token API; `--user` prompts for the Basic Auth password when authentication is enabled. The default URL is
+`http://127.0.0.1:8080`; set `--url` for another server.
+
+```bash
+./scripts/api-token.sh --url https://mail.example.com --user myuser \
+  create --name 'Archive reader' --lifetime 7d --folders 1,100
+./scripts/api-token.sh --url https://mail.example.com --user myuser revoke 12
+```
+
+Creation prints **only the token secret to stdout** and the numeric token ID to stderr. Save that
+ID for revocation. Lifetimes accept `s`, `m`, `h`, or `d` (up to ten years). For unattended use,
+pass `--netrc-file PATH` instead of `--user`; keep that file readable only by its owner.
+`MYMAIL_URL` and `MYMAIL_USER` can supply defaults; an explicit `--netrc-file` overrides
+`MYMAIL_USER`.
+Run `./scripts/api-token.sh --help` for the complete syntax.
+
 ## Demo mode
 
 Demo mode runs the full web UI with no backend at all. A service worker

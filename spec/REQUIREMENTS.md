@@ -635,6 +635,8 @@ an expiry time, and at least one existing folder ID. Its secret is returned only
 list responses contain metadata but never the secret. Revocation takes effect immediately.
 Tokens are sent as `Authorization: Bearer <token>`. The server stores a SHA-256 hash of each
 random 256-bit secret and rejects it at or after its expiry time.
+The `scripts/api-token.sh` CLI uses those management endpoints to create a token from a lifetime
+and folder IDs or revoke one by ID; it prints the newly created secret to stdout.
 
 Initially a token grants read access to its selected folders through `GET /folders` (filtered),
 `GET /folders/{folder_id}/messages`, `GET /messages/search` with an allowed `folder_id`,
