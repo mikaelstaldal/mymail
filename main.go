@@ -47,7 +47,7 @@ func main() {
 	demoBundle := flag.String("demo-bundle", "", "Write a self-contained static demo bundle to this new directory and exit (takes no -data)")
 	port := flag.Int("port", 8080, "HTTP listen port")
 	addr := flag.String("addr", "127.0.0.1", "Bind address")
-	publicURL := flag.String("public-url", "", "Public-facing base URL for CSRF validation, e.g. https://example.com (defaults to http://<addr>:<port>)")
+	publicURL := flag.String("public-url", "", "Public-facing base URL for CSRF and Host validation, e.g. https://example.com (required for wildcard bind addresses)")
 	dataDir := flag.String("data", "data/", "Data directory")
 	basicAuthFile := flag.String("basic-auth-file", "", "Path to htpasswd file")
 	basicAuthRealm := flag.String("basic-auth-realm", "mymail", "Auth realm")
@@ -416,7 +416,7 @@ func runServer(dataDir, addr string, port int, publicURL, basicAuthFile, basicAu
 		csp += " " + inlineScriptCSPHash(configScript)
 	}
 	commonMiddleware := func(h http.Handler) http.Handler {
-		h = csrf.Middleware(serverOrigin)(h)
+		h = csrf.MiddlewareOrigins(append([]string{browserOrigin(serverOrigin)}, localCSRFOrigins(addr, port)...)...)(h)
 		return httputil.SecurityHeaders(httputil.SecurityHeadersOptions{
 			CSP:            csp,
 			ReferrerPolicy: "same-origin",
@@ -425,6 +425,10 @@ func runServer(dataDir, addr string, port int, publicURL, basicAuthFile, basicAu
 	}
 	httpHandler := selectAuthentication(mux, authMiddleware, tokenStore, commonMiddleware)
 	httpHandler = http.MaxBytesHandler(httpHandler, maxRequestBody)
+	httpHandler, err = hostGuard(addr, port, publicURL, httpHandler)
+	if err != nil {
+		log.Fatalf("error: %v", err)
+	}
 
 	serverAddr := fmt.Sprintf("%s:%d", addr, port)
 	srv := &http.Server{

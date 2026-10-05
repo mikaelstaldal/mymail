@@ -74,11 +74,15 @@ mymail [flags]
 | `-addr`             | `127.0.0.1` | Bind address                                                                |
 | `-port`             | `8080`      | HTTP listen port                                                            |
 | `-data`             | `data/`     | Data directory (contains the SQLite file)                                   |
-| `-public-url`       | _(auto)_    | Public-facing base URL for CSRF validation, e.g. `https://mail.example.com` |
+| `-public-url`       | _(auto)_    | Public URL for CSRF and Host validation; required with a wildcard `-addr`   |
 | `-basic-auth-file`  | _(none)_    | Path to htpasswd file; enables HTTP Basic Auth when set                     |
 | `-basic-auth-realm` | `mymail`    | Auth realm shown to browsers                                                |
 | `-sendmail`         | `sendmail`  | Path or name of the sendmail binary                                         |
 | `-demo-server`      | _(off)_     | Serve the web UI in demo mode: no database, no REST API (see below)         |
+
+Without Basic Auth, use a loopback bind address. Requests with an unrecognized Host are rejected, including requests
+through a DNS-rebound hostname. For a reverse proxy, set `-public-url` to its external URL and preserve that Host when
+forwarding requests. The proxy must also prevent direct access to the backend if it provides authentication.
 
 ### LDA mode
 

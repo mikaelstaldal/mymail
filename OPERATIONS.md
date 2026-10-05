@@ -248,7 +248,8 @@ server {
 
     location / {
         proxy_pass         http://127.0.0.1:8080;
-        proxy_set_header   Host              $host;
+        # Preserve the port when the public URL uses a non-default port.
+        proxy_set_header   Host              $http_host;
         proxy_set_header   X-Real-IP         $remote_addr;
         proxy_set_header   X-Forwarded-For   $proxy_add_x_forwarded_for;
         proxy_set_header   X-Forwarded-Proto $scheme;
@@ -258,6 +259,10 @@ server {
     }
 }
 ```
+
+MyMail returns HTTP 421 when a request's Host differs from the configured public URL or a local listener authority.
+If an existing reverse proxy rewrites Host to an upstream name, configure it to preserve the public Host. A wildcard
+bind address now requires `-public-url`; local health checks may continue to use `localhost` and the listen port.
 
 Enable and test:
 

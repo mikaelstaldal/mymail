@@ -52,6 +52,7 @@ Starts an HTTP server that serves the REST API and the embedded web UI.
 | `-data`             | `data/`     | Data directory (stores the database)                                                                                 |
 | `-basic-auth-file`  | ``          | Path to htpasswd file; if set, enables HTTP Basic Auth                                                               |
 | `-basic-auth-realm` | `mymail`    | Auth realm shown to clients                                                                                          |
+| `-public-url`       | ``          | Public-facing URL used for CSRF and Host validation; required for wildcard bind addresses                            |
 | `-sendmail`         | `sendmail`  | Path to the sendmail binary (resolved via `PATH` if not absolute)                                                    |
 | `-lda-socket`       | ``          | UNIX socket path for LDA delivery; if set, the server listens on this socket for incoming messages from `mymail-lda` |
 
@@ -60,8 +61,12 @@ verifies that it exists and is executable. If the lookup fails the server logs a
 exit code; it does not start serving HTTP. This makes the misconfiguration visible at boot rather than deferring it to
 the first send (which would otherwise return 500 to the user).
 
-> **Security note:** If `-basic-auth-file` is not set, all requests are accepted without authentication. This mode is
-> only safe when `-addr` is bound to a loopback address (`127.0.0.1` or `::1`), which is the default.
+> **Security note:** If `-basic-auth-file` is not set, requests are accepted without authentication after Host
+> validation. This mode is only suitable for a loopback listener (`127.0.0.1` or `::1`, the default). Loopback binding
+> alone is not authentication: hostile websites may be able to reach it through DNS rebinding. The server accepts only
+> the configured public URL's authority and local listener authorities, rejecting other Host headers on every route.
+> `-public-url` is required when `-addr` is a wildcard address. Reverse proxies should pass the configured Host, and
+> must not expose the backend directly without equivalent access control.
 >
 > **TLS and reverse proxy note:** mymail does not terminate TLS itself. For any deployment that is not loopback-only,
 > place mymail behind a TLS-terminating reverse proxy. HTTP Basic Auth must not be used over plain HTTP on a non-loopback
@@ -625,7 +630,7 @@ per-message opt-in for external images is provided via `has_external_images` in 
 ### Authentication
 
 Optional HTTP Basic Auth over all endpoints (API + static UI). Passwords stored as bcrypt hashes in an htpasswd file. If
-not configured, all requests are accepted without authentication (loopback-only deployments).
+not configured, requests with an allowed Host are accepted without authentication (loopback-only deployments).
 
 The htpasswd file is read strictly at startup: every non-blank line must be a `username:bcrypt-hash` pair, usernames
 must be unique, and the file must not be empty. Anything else aborts startup naming the file — and, for a line it can
