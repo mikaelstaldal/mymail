@@ -19,6 +19,7 @@ var migrations = [][]string{
 	schemaV3,
 	schemaV4,
 	schemaV5,
+	schemaV6,
 }
 
 // OpenDB opens the SQLite database at path, enables foreign keys, sets the
@@ -299,4 +300,30 @@ var schemaV5 = []string{
 		folder_id INTEGER NOT NULL REFERENCES folders(id) ON DELETE CASCADE,
 		PRIMARY KEY (token_id, folder_id)
 	)`,
+}
+
+// schemaV6 prevents a revoked token's ID from being assigned to a replacement.
+// Rebuild both tables together to preserve folder grants and their foreign key.
+var schemaV6 = []string{
+	`CREATE TABLE api_tokens_new (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		name TEXT NOT NULL,
+		slug TEXT NOT NULL UNIQUE CHECK (slug <> ''),
+		token_hash BLOB NOT NULL UNIQUE,
+		created_at TEXT NOT NULL,
+		expires_at TEXT NOT NULL
+	)`,
+	`INSERT INTO api_tokens_new(id,name,slug,token_hash,created_at,expires_at)
+		SELECT id,name,slug,token_hash,created_at,expires_at FROM api_tokens`,
+	`CREATE TABLE api_token_folders_new (
+		token_id INTEGER NOT NULL REFERENCES api_tokens_new(id) ON DELETE CASCADE,
+		folder_id INTEGER NOT NULL REFERENCES folders(id) ON DELETE CASCADE,
+		PRIMARY KEY (token_id, folder_id)
+	)`,
+	`INSERT INTO api_token_folders_new(token_id,folder_id)
+		SELECT token_id,folder_id FROM api_token_folders`,
+	`DROP TABLE api_token_folders`,
+	`DROP TABLE api_tokens`,
+	`ALTER TABLE api_tokens_new RENAME TO api_tokens`,
+	`ALTER TABLE api_token_folders_new RENAME TO api_token_folders`,
 }

@@ -71,7 +71,7 @@ func TestOpenDBAndInitSchema(t *testing.T) {
 	// Schema version must match the latest migration.
 	var v int
 	db.QueryRow("PRAGMA user_version").Scan(&v)
-	assert.Equal(t, 5, v, "user_version")
+	assert.Equal(t, 6, v, "user_version")
 
 	// All tables must exist.
 	tables := []string{
@@ -121,7 +121,7 @@ func TestOpenDBAndInitSchema(t *testing.T) {
 	err = InitSchema(db)
 	assert.NoError(t, err, "second InitSchema")
 	db.QueryRow("PRAGMA user_version").Scan(&v)
-	assert.Equal(t, 5, v, "user_version after second run")
+	assert.Equal(t, 6, v, "user_version after second run")
 
 	// Basic FK cascade: insert a message row then delete it; attachment should cascade.
 	_, err = db.Exec(`INSERT INTO folders(id,name,slug,position) VALUES(1,'Inbox','inbox',0)`)
@@ -164,6 +164,35 @@ func TestAPITokenSlugSchema(t *testing.T) {
 	_, err = db.Exec(`DELETE FROM api_tokens WHERE slug='reader'`)
 	require.NoError(t, err)
 	require.NoError(t, insert("reader", 4), "revocation frees a slug")
+}
+
+func TestAPITokenMigrationPreservesGrantsAndDoesNotReuseIDs(t *testing.T) {
+	db, err := sqlite.Open(filepath.Join(t.TempDir(), "mymail.sqlite"), 0, nil)
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, db.Close()) })
+	require.NoError(t, sqlite.MigrateStrict(context.Background(), db, migrations[:5]))
+	_, err = db.Exec(`INSERT INTO folders(id,name,slug,position) VALUES(1,'Inbox','inbox',0)`)
+	require.NoError(t, err)
+	_, err = db.Exec(`INSERT INTO api_tokens(id,name,slug,token_hash,created_at,expires_at)
+		VALUES(42,'Reader','reader',X'01','2024','2025')`)
+	require.NoError(t, err)
+	_, err = db.Exec(`INSERT INTO api_token_folders(token_id,folder_id) VALUES(42,1)`)
+	require.NoError(t, err)
+	require.NoError(t, InitSchema(db))
+	var folderID int64
+	require.NoError(t, db.QueryRow(`SELECT folder_id FROM api_token_folders WHERE token_id=42`).Scan(&folderID))
+	assert.Equal(t, int64(1), folderID)
+	_, err = db.Exec(`DELETE FROM api_tokens WHERE id=42`)
+	require.NoError(t, err)
+	var grants int
+	require.NoError(t, db.QueryRow(`SELECT COUNT(*) FROM api_token_folders WHERE token_id=42`).Scan(&grants))
+	assert.Zero(t, grants, "revocation still cascades to grants")
+	res, err := db.Exec(`INSERT INTO api_tokens(name,slug,token_hash,created_at,expires_at)
+		VALUES('Replacement','replacement',X'02','2024','2025')`)
+	require.NoError(t, err)
+	id, err := res.LastInsertId()
+	require.NoError(t, err)
+	assert.Greater(t, id, int64(42))
 }
 
 // TestOpenDBRefusesNewerSchema pins the MigrateStrict guarantee: a database

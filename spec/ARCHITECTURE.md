@@ -135,7 +135,8 @@ from strangers.
 ### Authentication
 HTTP Basic Auth via htpasswd file (bcrypt). CSRF protection via Origin/Referer validation middleware.
 Folder-scoped API tokens live in `api_tokens` and `api_token_folders`. Only a SHA-256 hash of a
-random secret is stored. The bearer middleware selects a narrow set of GET routes and opens a
+random secret is stored. Validation fetches the token and its grants in one SQL statement, so
+revocation and replacement cannot mix their identities. The bearer middleware selects a narrow set of GET routes and opens a
 read transaction. It validates the token and checks the current message or attachment folder
 inside that snapshot; repository reads that assemble the response use the same transaction.
 This keeps authorization, counts, metadata, and content consistent during concurrent changes.
@@ -146,12 +147,13 @@ downloads do not hold a database connection or pin the WAL snapshot and no secon
 is needed. A new bearer-readable route must finish its database reads before its first response
 write; a lazy database-backed reader would fail after the transaction closes. Token
 management uses separate handlers that are reached only through the full-access auth path.
-The token table keeps a numeric ID for folder relations, while the API exposes only a unique
+The token table keeps a non-reusable AUTOINCREMENT ID for folder relations, while the API exposes only a unique
 slug derived from the token name with the same algorithm and collision suffixes as folders.
 Revocation deletes by slug, allowing that slug to be reused. The token table is introduced
-with a required, unique slug in migration v5.
-The one allowed token write, `PUT /messages/{id}/read`, checks token expiry and folder membership
-inside the SQL `UPDATE`, so a concurrent folder move cannot broaden its reach.
+with a required, unique slug in migration v5; migration v6 makes IDs non-reusable.
+The one allowed token write, `PUT /messages/{id}/read`, checks the original secret's hash,
+token expiry, and folder membership inside the SQL `UPDATE`, so concurrent token rotation
+or a folder move cannot broaden its reach.
 
 ### `send_failure_count` Exposed as Boolean Only
 API exposes only `send_failed` (true when count > 0). Raw count is an implementation detail without UI value.

@@ -3,6 +3,7 @@ package token
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -88,6 +89,42 @@ func TestTokenExpiryAndInvalidFolders(t *testing.T) {
 	assert.Nil(t, allowed)
 }
 
+func TestRevokedTokenCannotUseReplacementGrant(t *testing.T) {
+	s := testStore(t)
+	old, secret, err := s.Create("reader", time.Now().Add(time.Hour), []int64{1})
+	require.NoError(t, err)
+	oldHash := sha256.Sum256([]byte(secret))
+	ok, err := s.Revoke(old.Slug)
+	require.NoError(t, err)
+	require.True(t, ok)
+	// Explicitly reuse the ID to exercise the write guard independently of
+	// AUTOINCREMENT, as a future import or schema change could supply an ID.
+	newHash := sha256.Sum256([]byte("replacement"))
+	_, err = s.DB.Exec(`INSERT INTO api_tokens(id,name,slug,token_hash,created_at,expires_at)
+		VALUES(?,?,?,?,?,?)`, old.ID, "replacement", "replacement", newHash[:],
+		time.Now().UTC().Format(time.RFC3339), time.Now().Add(time.Hour).UTC().Format(time.RFC3339))
+	require.NoError(t, err)
+	_, err = s.DB.Exec(`INSERT INTO api_token_folders(token_id,folder_id) VALUES(?,2)`, old.ID)
+	require.NoError(t, err)
+	allowed, err := s.Validate(secret)
+	require.NoError(t, err)
+	assert.Nil(t, allowed)
+	found, err := repository.NewMessageRepository(s.DB).MarkRead(context.Background(), 20, oldHash[:])
+	require.NoError(t, err)
+	assert.False(t, found)
+	var read int
+	require.NoError(t, s.DB.QueryRow(`SELECT read FROM messages WHERE id=20`).Scan(&read))
+	assert.Zero(t, read)
+	found, err = repository.NewMessageRepository(s.DB).MarkRead(context.Background(), 20, newHash[:])
+	require.NoError(t, err)
+	assert.True(t, found)
+	req := httptest.NewRequest(http.MethodPut, "/api/v1/messages/20/read", nil)
+	req.Header.Set("Authorization", "Bearer "+secret)
+	w := httptest.NewRecorder()
+	s.Bearer(http.NotFoundHandler()).ServeHTTP(w, req)
+	assert.Equal(t, http.StatusUnauthorized, w.Code)
+}
+
 func TestBearerScope(t *testing.T) {
 	s := testStore(t)
 	_, value, err := s.Create("reader", time.Now().Add(time.Hour), []int64{1})
@@ -167,6 +204,7 @@ func TestBearerReadUsesAuthorizationSnapshot(t *testing.T) {
 	}{
 		{"message move", "/api/v1/messages/10", `UPDATE messages SET folder_id=2,subject='later' WHERE id=10`},
 		{"token revocation", "/api/v1/messages/10", ""},
+		{"token rotation", "/api/v1/messages/10", ""},
 		{"attachment move", "/api/v1/attachments/1", ""},
 		{"raw", "/api/v1/messages/10/raw", `UPDATE messages SET folder_id=2,raw='later' WHERE id=10`},
 		{"headers", "/api/v1/messages/10/headers", `UPDATE messages SET folder_id=2,raw='later' WHERE id=10`},
@@ -185,7 +223,7 @@ func TestBearerReadUsesAuthorizationSnapshot(t *testing.T) {
 			require.NoError(t, err)
 			_, err = s.DB.Exec(`INSERT INTO attachments(id,message_id,filename,content_type,size,data) VALUES(1,10,'before.txt','text/plain',6,'before')`)
 			require.NoError(t, err)
-			_, secret, err := s.Create("reader", time.Now().Add(time.Hour), []int64{1})
+			original, secret, err := s.Create("reader", time.Now().Add(time.Hour), []int64{1})
 			require.NoError(t, err)
 			h := handler.New(
 				repository.NewFolderRepository(s.DB), repository.NewMessageRepository(s.DB),
@@ -206,9 +244,18 @@ func TestBearerReadUsesAuthorizationSnapshot(t *testing.T) {
 					require.NoError(t, err)
 					_, err = s.DB.Exec(`INSERT INTO folders(id,name,slug,position) VALUES(1,'Replacement','replacement',0)`)
 					require.NoError(t, err)
-				case "token revocation":
+				case "token revocation", "token rotation":
 					_, err := s.DB.Exec(`DELETE FROM api_tokens`)
 					require.NoError(t, err)
+					if tc.name == "token rotation" {
+						digest := sha256.Sum256([]byte("replacement"))
+						_, err = s.DB.Exec(`INSERT INTO api_tokens(id,name,slug,token_hash,created_at,expires_at)
+							VALUES(?,?,?,?,?,?)`, original.ID, "replacement", "replacement", digest[:],
+							time.Now().UTC().Format(time.RFC3339), time.Now().Add(time.Hour).UTC().Format(time.RFC3339))
+						require.NoError(t, err)
+						_, err = s.DB.Exec(`INSERT INTO api_token_folders(token_id,folder_id) VALUES(?,2)`, original.ID)
+						require.NoError(t, err)
+					}
 					_, err = s.DB.Exec(`UPDATE messages SET subject='later' WHERE id=10`)
 					require.NoError(t, err)
 				case "attachment move":
@@ -251,7 +298,7 @@ func TestBearerReadUsesAuthorizationSnapshot(t *testing.T) {
 					assert.NotContains(t, w.Body.String(), `"filename":"later.txt"`)
 				}
 			}
-			if tc.name == "token revocation" {
+			if tc.name == "token revocation" || tc.name == "token rotation" {
 				allowed, err := s.Validate(secret)
 				require.NoError(t, err)
 				assert.Nil(t, allowed)

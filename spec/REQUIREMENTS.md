@@ -647,6 +647,7 @@ Tokens are sent as `Authorization: Bearer <token>`. The server stores a SHA-256 
 random 256-bit secret and rejects it at or after its expiry time. The API returns a unique slug
 derived from the token name using the folder slug algorithm, with numeric suffixes for collisions.
 Revoking a token frees its slug for reuse. The token's internal numeric ID is never returned by the API.
+IDs generated after migration v6 are not reused after revocation.
 The `scripts/api-token.sh` CLI uses those management endpoints to create a token from a lifetime
 and folder IDs or revoke one by slug; it prints the newly created secret to stdout. For Basic
 authentication it can prompt for a password or read one `username:password` line from a file
@@ -663,7 +664,7 @@ use one SQLite read snapshot, so a concurrent move, revocation, or folder deleti
 make the response contain data from a later, unauthorized state. A token can also call
 `PUT /messages/{id}/read` to mark an allowed message as read.
 This operation takes no body and is idempotent; Basic-authenticated clients may use it too.
-The token's folder rule is checked atomically with this write. Other routes, cross-folder reads,
+The token's hash, expiry, and folder rule are checked atomically with this write. Other routes, cross-folder reads,
 and other writes return 403. An invalid or expired
 token returns 401. API tokens cannot manage other tokens or serve the web UI.
 

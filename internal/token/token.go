@@ -128,7 +128,6 @@ func (s Store) validate(value string) (int64, map[int64]bool, error) {
 }
 
 type tokenQueryer interface {
-	QueryRowContext(context.Context, string, ...any) *sql.Row
 	QueryContext(context.Context, string, ...any) (*sql.Rows, error)
 }
 
@@ -137,13 +136,22 @@ func validateWith(ctx context.Context, db tokenQueryer, value string) (int64, ma
 		return 0, nil, nil
 	}
 	digest := sha256.Sum256([]byte(value))
+	// Fetch identity and grants in one statement, so ID reuse or revocation
+	// between separate queries cannot substitute another token's folders.
+	rows, err := db.QueryContext(ctx, `SELECT t.id,t.expires_at,f.folder_id
+		FROM api_tokens t LEFT JOIN api_token_folders f ON f.token_id=t.id
+		WHERE t.token_hash=?`, digest[:])
+	if err != nil {
+		return 0, nil, err
+	}
+	defer rows.Close()
+	if !rows.Next() {
+		return 0, nil, rows.Err()
+	}
 	var id int64
 	var expiry string
-	err := db.QueryRowContext(ctx, `SELECT id,expires_at FROM api_tokens WHERE token_hash=?`, digest[:]).Scan(&id, &expiry)
-	if errors.Is(err, sql.ErrNoRows) {
-		return 0, nil, nil
-	}
-	if err != nil {
+	var folderID sql.NullInt64
+	if err := rows.Scan(&id, &expiry, &folderID); err != nil {
 		return 0, nil, err
 	}
 	until, err := time.Parse(time.RFC3339, expiry)
@@ -153,18 +161,17 @@ func validateWith(ctx context.Context, db tokenQueryer, value string) (int64, ma
 	if !time.Now().Before(until) {
 		return 0, nil, nil
 	}
-	rows, err := db.QueryContext(ctx, `SELECT folder_id FROM api_token_folders WHERE token_id=?`, id)
-	if err != nil {
-		return 0, nil, err
-	}
-	defer rows.Close()
 	allowed := map[int64]bool{}
+	if folderID.Valid {
+		allowed[folderID.Int64] = true
+	}
 	for rows.Next() {
-		var f int64
-		if err := rows.Scan(&f); err != nil {
+		if err := rows.Scan(&id, &expiry, &folderID); err != nil {
 			return 0, nil, err
 		}
-		allowed[f] = true
+		if folderID.Valid {
+			allowed[folderID.Int64] = true
+		}
 	}
 	return id, allowed, rows.Err()
 }
@@ -255,7 +262,8 @@ func (s Store) Bearer(next http.Handler) http.Handler {
 			next.ServeHTTP(w, r)
 			return
 		}
-		tokenID, allowed, err := s.validate(strings.TrimSpace(header[7:]))
+		secret := strings.TrimSpace(header[7:])
+		_, allowed, err := s.validate(secret)
 		if err != nil {
 			writeError(w, 500, "database error")
 			return
@@ -276,7 +284,8 @@ func (s Store) Bearer(next http.Handler) http.Handler {
 				writeError(w, 403, "token cannot access this resource")
 				return
 			}
-			found, err := repository.NewMessageRepository(s.DB).MarkRead(r.Context(), messageID, &tokenID)
+			digest := sha256.Sum256([]byte(secret))
+			found, err := repository.NewMessageRepository(s.DB).MarkRead(r.Context(), messageID, digest[:])
 			if err != nil {
 				writeError(w, 500, "database error")
 				return
@@ -302,7 +311,7 @@ func (s Store) Bearer(next http.Handler) http.Handler {
 		}
 		release := sync.OnceFunc(func() { _ = tx.Rollback() })
 		defer release()
-		_, allowed, err = validateWith(r.Context(), tx, strings.TrimSpace(header[7:]))
+		_, allowed, err = validateWith(r.Context(), tx, secret)
 		if err != nil {
 			writeError(w, 500, "database error")
 			return
