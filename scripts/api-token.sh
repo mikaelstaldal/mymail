@@ -4,11 +4,12 @@ set -euo pipefail
 usage() {
   cat <<'EOF'
 Usage:
-  api-token.sh [--url BASE_URL] [--user USER | --netrc-file FILE] create --name NAME --lifetime NUMBER[s|m|h|d] --folders ID[,ID...]
-  api-token.sh [--url BASE_URL] [--user USER | --netrc-file FILE] revoke SLUG
+  api-token.sh [--url BASE_URL] [--user USER | --credentials FILE|-] create --name NAME --lifetime NUMBER[s|m|h|d] --folders ID[,ID...]
+  api-token.sh [--url BASE_URL] [--user USER | --credentials FILE|-] revoke SLUG
 
 The default BASE_URL is http://127.0.0.1:8080. --user prompts for the Basic
-Auth password; --netrc-file supports unattended use. Create prints only the
+Auth password; --credentials reads one username:password line from a file, or
+from standard input when FILE is -. Create prints only the
 token secret to stdout and its revocation slug to stderr.
 MYMAIL_URL and MYMAIL_USER provide defaults for --url and --user.
 EOF
@@ -22,8 +23,8 @@ die() {
 base_url=${MYMAIL_URL:-http://127.0.0.1:8080}
 username=${MYMAIL_USER:-}
 user_given=false
-netrc_file=
-netrc_given=false
+credentials_source=
+credentials_given=false
 command_name=
 token_slug=
 name=
@@ -37,14 +38,14 @@ while (($#)); do
       command_name=$1
       shift
       ;;
-    --url|--user|--netrc-file|--name|--lifetime|--folders)
+    --url|--user|--credentials|--name|--lifetime|--folders)
       option=$1
       (($# >= 2)) || die "$option needs a value"
       value=$2
       case $option in
         --url) base_url=$value ;;
         --user) username=$value; user_given=true ;;
-        --netrc-file) netrc_file=$value; netrc_given=true ;;
+        --credentials) credentials_source=$value; credentials_given=true ;;
         --name) name=$value ;;
         --lifetime) lifetime=$value ;;
         --folders) folders=$value ;;
@@ -70,16 +71,32 @@ done
 [[ $base_url == http://* || $base_url == https://* ]] || die 'URL must start with http:// or https://'
 [[ $base_url != *'?'* && $base_url != *'#'* ]] || die 'URL must not contain a query or fragment'
 base_url=${base_url%/}
-[[ $user_given != true || $netrc_given != true ]] || die 'use either --user or --netrc-file'
-if [[ $netrc_given == true ]]; then username=; fi
-[[ $username != *:* ]] || die '--user expects a username only; use --netrc-file for unattended authentication'
+[[ $user_given != true || $credentials_given != true ]] || die 'use either --user or --credentials'
+if [[ $credentials_given == true ]]; then username=; fi
+[[ $username != *:* ]] || die '--user expects a username only; use --credentials for unattended authentication'
 
 curl_args=(--silent --show-error --connect-timeout 5 --max-time 30 --header 'Accept: application/json')
-if [[ -n $username ]]; then
+if [[ $credentials_given == true ]]; then
+  credentials=
+  if [[ $credentials_source == - ]]; then
+    if [[ -t 0 ]]; then
+      printf 'Username:password: ' >&2
+      IFS= read -rs credentials || :
+      printf '\n' >&2
+      [[ -n $credentials ]] || die 'standard input has no credentials'
+    else
+      IFS= read -r credentials || [[ -n $credentials ]] || die 'standard input has no credentials'
+    fi
+  else
+    [[ -r $credentials_source && ! -d $credentials_source ]] || die "cannot read credentials file: $credentials_source"
+    IFS= read -r credentials < "$credentials_source" || [[ -n $credentials ]] || die 'credentials file is empty'
+  fi
+  credentials=${credentials%$'\r'}
+  [[ $credentials == *:* && -n ${credentials%%:*} && -n ${credentials#*:} && ! $credentials =~ [[:cntrl:]] ]] ||
+    die 'credentials must be one username:password line without control characters'
+  curl_args+=(--basic)
+elif [[ -n $username ]]; then
   curl_args+=(--basic --user "$username")
-elif [[ -n $netrc_file ]]; then
-  [[ -r $netrc_file ]] || die "cannot read netrc file: $netrc_file"
-  curl_args+=(--netrc-file "$netrc_file")
 fi
 
 if [[ $command_name == create ]]; then
@@ -123,7 +140,17 @@ fi
 
 # curl writes the status on its own final line. The body stays in memory, so a
 # newly created secret is never written to a temporary file.
-response=$(curl "${curl_args[@]}" --write-out $'\n%{http_code}' "$endpoint") || die 'request failed'
+if [[ $credentials_given == true ]]; then
+  # Feed curl its config on stdin so the password stays out of command arguments.
+  backslash=$'\\'
+  escaped_backslash=$'\\\\'
+  config_credentials=${credentials//"$backslash"/"$escaped_backslash"}
+  config_credentials=${config_credentials//\"/\\\"}
+  response=$(printf 'user = "%s"\n' "$config_credentials" |
+    curl --config - "${curl_args[@]}" --write-out $'\n%{http_code}' "$endpoint") || die 'request failed'
+else
+  response=$(curl "${curl_args[@]}" --write-out $'\n%{http_code}' "$endpoint") || die 'request failed'
+fi
 status=${response##*$'\n'}
 body=${response%$'\n'*}
 

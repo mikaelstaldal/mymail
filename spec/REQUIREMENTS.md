@@ -638,7 +638,9 @@ random 256-bit secret and rejects it at or after its expiry time. The API return
 derived from the token name using the folder slug algorithm, with numeric suffixes for collisions.
 Revoking a token frees its slug for reuse. The token's internal numeric ID is never returned by the API.
 The `scripts/api-token.sh` CLI uses those management endpoints to create a token from a lifetime
-and folder IDs or revoke one by slug; it prints the newly created secret to stdout.
+and folder IDs or revoke one by slug; it prints the newly created secret to stdout. For Basic
+authentication it can prompt for a password or read one `username:password` line from a file
+or standard input.
 
 Initially a token grants read access to its selected folders through `GET /folders` (filtered),
 `GET /folders/{folder_id}/messages`, `GET /messages/search` with an allowed `folder_id`,

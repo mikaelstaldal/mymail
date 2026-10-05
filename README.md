@@ -120,10 +120,11 @@ server's token API; `--user` prompts for the Basic Auth password when authentica
 ```
 
 Creation prints **only the token secret to stdout** and its slug to stderr. Save that
-slug for revocation. Lifetimes accept `s`, `m`, `h`, or `d` (up to ten years). For unattended use,
-pass `--netrc-file PATH` instead of `--user`; keep that file readable only by its owner.
-`MYMAIL_URL` and `MYMAIL_USER` can supply defaults; an explicit `--netrc-file` overrides
-`MYMAIL_USER`.
+slug for revocation. Lifetimes accept `s`, `m`, `h`, or `d` (up to ten years). To supply Basic
+Auth credentials without a password prompt, use `--credentials PATH` with a file containing one
+`username:password` line, or `--credentials -` to read that line from standard input. Keep the
+file readable only by its owner. `MYMAIL_URL` and `MYMAIL_USER` can supply defaults; an explicit
+`--credentials` overrides `MYMAIL_USER`.
 Run `./scripts/api-token.sh --help` for the complete syntax.
 
 ## Demo mode
