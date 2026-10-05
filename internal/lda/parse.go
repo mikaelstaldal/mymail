@@ -3,6 +3,7 @@ package lda
 import (
 	"bytes"
 	"encoding/base64"
+	"fmt"
 	"io"
 	"mime"
 	"mime/multipart"
@@ -19,11 +20,20 @@ import (
 	"github.com/mikaelstaldal/mymail/internal/sanitize"
 )
 
-const maxRefsBytes = 16 * 1024
+const (
+	maxRefsBytes        = 16 * 1024
+	maxMIMEDepth        = 30
+	maxMIMEParts        = 1000
+	maxMIMEWorkBytes    = 256 << 20
+	maxMIMEDecodedBytes = 64 << 20
+)
 
 // ParseMessage parses a raw RFC 5322 message into a ParsedMessage.
-// Returns an error only if net/mail.ReadMessage fails (hard failure).
+// Malformed messages and messages exceeding MIME resource limits return an error.
 func ParseMessage(raw []byte) (*model.ParsedMessage, error) {
+	if len(raw) > MaxMessageBytes {
+		return nil, fmt.Errorf("message exceeds %d bytes", MaxMessageBytes)
+	}
 	msg, err := mail.ReadMessage(bytes.NewReader(raw))
 	if err != nil {
 		return nil, err
@@ -76,14 +86,17 @@ func ParseMessage(raw []byte) (*model.ParsedMessage, error) {
 	}
 
 	state := &mimeState{
-		cidMap: make(map[string][]byte),
-		cidCT:  make(map[string]string),
+		cidMap:    make(map[string][]byte),
+		cidCT:     make(map[string]string),
+		workBytes: int64(len(bodyBytes)),
 	}
 	ct := msg.Header.Get("Content-Type")
 	if ct == "" {
 		ct = "text/plain"
 	}
-	traversePart(ct, msg.Header.Get("Content-Transfer-Encoding"), msg.Header, bodyBytes, state)
+	if err := traversePart(ct, msg.Header.Get("Content-Transfer-Encoding"), msg.Header, bodyBytes, state, 0); err != nil {
+		return nil, err
+	}
 
 	rawHTML := ""
 	if state.bodyHTML != nil {
@@ -137,11 +150,14 @@ func ParseMessage(raw []byte) (*model.ParsedMessage, error) {
 // --- MIME traversal ---
 
 type mimeState struct {
-	bodyText *string
-	bodyHTML *string
-	cidMap   map[string][]byte
-	cidCT    map[string]string
-	pending  []pendingPart
+	bodyText     *string
+	bodyHTML     *string
+	cidMap       map[string][]byte
+	cidCT        map[string]string
+	pending      []pendingPart
+	parts        int
+	workBytes    int64
+	decodedBytes int64
 }
 
 type pendingPart struct {
@@ -156,7 +172,10 @@ type headerGetter interface {
 }
 
 // traversePart processes one MIME part (leaf or multipart) depth-first.
-func traversePart(rawCT, rawCTE string, headers headerGetter, rawBody []byte, state *mimeState) {
+func traversePart(rawCT, rawCTE string, headers headerGetter, rawBody []byte, state *mimeState, depth int) error {
+	if depth > maxMIMEDepth {
+		return fmt.Errorf("MIME nesting exceeds %d levels", maxMIMEDepth)
+	}
 	mediaType, params, err := mime.ParseMediaType(rawCT)
 	if err != nil {
 		mediaType = "application/octet-stream"
@@ -165,24 +184,27 @@ func traversePart(rawCT, rawCTE string, headers headerGetter, rawBody []byte, st
 	mediaType = strings.ToLower(mediaType)
 
 	if mediaType == "message/rfc822" {
-		return
+		return nil
 	}
 
 	if strings.HasPrefix(mediaType, "multipart/") {
 		boundary := params["boundary"]
 		if boundary == "" {
-			return
+			return nil
 		}
 		mr := multipart.NewReader(bytes.NewReader(rawBody), boundary)
 		if mediaType == "multipart/alternative" {
-			traverseAlternative(mr, state)
+			return traverseAlternative(mr, state, depth)
 		} else {
-			traverseMultipartParts(mr, state)
+			return traverseMultipartParts(mr, state, depth)
 		}
-		return
 	}
 
-	body := decodeCTE(rawBody, rawCTE)
+	body, err := decodeCTE(rawBody, rawCTE, maxMIMEDecodedBytes-state.decodedBytes)
+	if err != nil {
+		return err
+	}
+	state.decodedBytes += int64(len(body))
 
 	disposition := ""
 	dispFilename := ""
@@ -234,21 +256,53 @@ func traversePart(rawCT, rawCTE string, headers headerGetter, rawBody []byte, st
 			contentType: mediaType, data: body,
 		})
 	}
+	return nil
 }
 
-func traverseMultipartParts(mr *multipart.Reader, state *mimeState) {
+func traverseMultipartParts(mr *multipart.Reader, state *mimeState, depth int) error {
 	for {
 		p, err := mr.NextPart()
 		if err != nil {
-			break
+			return nil // Keep partial content from malformed multipart messages.
 		}
-		body, _ := io.ReadAll(p)
+		if err := state.countPart(); err != nil {
+			return err
+		}
+		body, err := state.readPart(p)
+		if err != nil {
+			return err
+		}
 		ct := p.Header.Get("Content-Type")
 		if ct == "" {
 			ct = "text/plain"
 		}
-		traversePart(ct, p.Header.Get("Content-Transfer-Encoding"), p.Header, body, state)
+		if err := traversePart(ct, p.Header.Get("Content-Transfer-Encoding"), p.Header, body, state, depth+1); err != nil {
+			return err
+		}
 	}
+}
+
+func (state *mimeState) countPart() error {
+	state.parts++
+	if state.parts > maxMIMEParts {
+		return fmt.Errorf("MIME part count exceeds %d", maxMIMEParts)
+	}
+	return nil
+}
+
+func (state *mimeState) readPart(p *multipart.Part) ([]byte, error) {
+	remaining := int64(maxMIMEWorkBytes) - state.workBytes
+	if remaining < 0 {
+		return nil, fmt.Errorf("MIME work exceeds %d bytes", maxMIMEWorkBytes)
+	}
+	body, _ := io.ReadAll(io.LimitReader(p, remaining+1))
+	state.workBytes += int64(len(body))
+	if state.workBytes > maxMIMEWorkBytes {
+		return nil, fmt.Errorf("MIME work exceeds %d bytes", maxMIMEWorkBytes)
+	}
+	// A malformed part may end with unexpected EOF. Keep the bytes already read,
+	// as the parser did before resource limits were added.
+	return body, nil
 }
 
 type rawPart struct {
@@ -260,14 +314,20 @@ type rawPart struct {
 
 // traverseAlternative picks the most-preferred sub-part per RFC 2046
 // (last part is most preferred). HTML/multipart beats plain text.
-func traverseAlternative(mr *multipart.Reader, state *mimeState) {
+func traverseAlternative(mr *multipart.Reader, state *mimeState, depth int) error {
 	var parts []rawPart
 	for {
 		p, err := mr.NextPart()
 		if err != nil {
-			break
+			break // Keep earlier alternatives from malformed messages.
 		}
-		body, _ := io.ReadAll(p)
+		if err := state.countPart(); err != nil {
+			return err
+		}
+		body, err := state.readPart(p)
+		if err != nil {
+			return err
+		}
 		ct := p.Header.Get("Content-Type")
 		if ct == "" {
 			ct = "text/plain"
@@ -291,21 +351,32 @@ func traverseAlternative(mr *multipart.Reader, state *mimeState) {
 
 	if htmlIdx >= 0 {
 		p := parts[htmlIdx]
-		traversePart(p.ct, p.cte, p.headers, p.body, state)
+		if err := traversePart(p.ct, p.cte, p.headers, p.body, state, depth+1); err != nil {
+			return err
+		}
 	}
 	if plainIdx >= 0 && state.bodyText == nil {
 		p := parts[plainIdx]
-		traversePart(p.ct, p.cte, p.headers, p.body, state)
+		if err := traversePart(p.ct, p.cte, p.headers, p.body, state, depth+1); err != nil {
+			return err
+		}
 	}
+	return nil
 }
 
 // --- Decoding helpers ---
 
-func decodeCTE(data []byte, cte string) []byte {
+func decodeCTE(data []byte, cte string, remaining int64) ([]byte, error) {
+	if remaining < 0 {
+		return nil, fmt.Errorf("decoded MIME data exceeds %d bytes", maxMIMEDecodedBytes)
+	}
 	switch strings.ToLower(strings.TrimSpace(cte)) {
 	case "quoted-printable":
-		decoded, _ := io.ReadAll(quotedprintable.NewReader(bytes.NewReader(data)))
-		return decoded
+		decoded, _ := io.ReadAll(io.LimitReader(quotedprintable.NewReader(bytes.NewReader(data)), remaining+1))
+		if int64(len(decoded)) > remaining {
+			return nil, fmt.Errorf("decoded MIME data exceeds %d bytes", maxMIMEDecodedBytes)
+		}
+		return decoded, nil
 	case "base64":
 		filtered := data[:0:0]
 		for _, b := range data {
@@ -313,14 +384,23 @@ func decodeCTE(data []byte, cte string) []byte {
 				filtered = append(filtered, b)
 			}
 		}
+		if int64(base64.StdEncoding.DecodedLen(len(filtered))) > remaining+2 {
+			return nil, fmt.Errorf("decoded MIME data exceeds %d bytes", maxMIMEDecodedBytes)
+		}
 		out := make([]byte, base64.StdEncoding.DecodedLen(len(filtered)))
 		n, err := base64.StdEncoding.Decode(out, filtered)
 		if err != nil {
 			n, _ = base64.RawStdEncoding.Decode(out, filtered)
 		}
-		return out[:n]
+		if int64(n) > remaining {
+			return nil, fmt.Errorf("decoded MIME data exceeds %d bytes", maxMIMEDecodedBytes)
+		}
+		return out[:n], nil
 	default:
-		return data
+		if int64(len(data)) > remaining {
+			return nil, fmt.Errorf("decoded MIME data exceeds %d bytes", maxMIMEDecodedBytes)
+		}
+		return data, nil
 	}
 }
 

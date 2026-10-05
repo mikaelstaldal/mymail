@@ -1,6 +1,9 @@
 package lda
 
 import (
+	"fmt"
+	"mime/multipart"
+	"net/textproto"
 	"strings"
 	"testing"
 
@@ -8,6 +11,115 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+func nestedMIME(depth int, kind string) []byte {
+	part := "Content-Type: text/plain\r\n\r\nleaf"
+	for i := depth - 1; i >= 0; i-- {
+		boundary := fmt.Sprintf("b%d", i)
+		part = "Content-Type: multipart/" + kind + "; boundary=" + boundary + "\r\n\r\n--" + boundary +
+			"\r\n" + part + "\r\n--" + boundary + "--\r\n"
+	}
+	return []byte(part)
+}
+
+func TestParseMessage_MIMEDepthLimit(t *testing.T) {
+	for _, kind := range []string{"mixed", "alternative"} {
+		t.Run(kind, func(t *testing.T) {
+			pm, err := ParseMessage(nestedMIME(maxMIMEDepth, kind))
+			require.NoError(t, err)
+			assert.Contains(t, pm.BodyText, "leaf")
+
+			pm, err = ParseMessage(nestedMIME(maxMIMEDepth+1, kind))
+			require.ErrorContains(t, err, "MIME nesting exceeds")
+			assert.Nil(t, pm)
+		})
+	}
+}
+
+func TestParseMessage_MIMEPartLimit(t *testing.T) {
+	for _, count := range []int{maxMIMEParts, maxMIMEParts + 1} {
+		t.Run(fmt.Sprint(count), func(t *testing.T) {
+			var raw strings.Builder
+			raw.WriteString("Content-Type: multipart/mixed; boundary=b\r\n\r\n")
+			for i := 0; i < count; i++ {
+				raw.WriteString("--b\r\nContent-Type: application/octet-stream\r\n\r\nx\r\n")
+			}
+			raw.WriteString("--b--\r\n")
+			pm, err := ParseMessage([]byte(raw.String()))
+			if count <= maxMIMEParts {
+				require.NoError(t, err)
+				assert.Len(t, pm.Attachments, count)
+			} else {
+				require.ErrorContains(t, err, "MIME part count exceeds")
+				assert.Nil(t, pm)
+			}
+		})
+	}
+}
+
+func TestParseMessage_MalformedMultipartKeepsParsedContent(t *testing.T) {
+	cases := []struct {
+		name     string
+		raw      string
+		wantText string
+		wantHTML string
+	}{
+		{
+			name:     "missing closing boundary",
+			raw:      "Content-Type: multipart/mixed; boundary=b\r\n\r\n--b\r\nContent-Type: text/plain\r\n\r\nhello",
+			wantText: "hello",
+		},
+		{
+			name:     "bad later part header",
+			raw:      "Content-Type: multipart/mixed; boundary=b\r\n\r\n--b\r\nContent-Type: text/plain\r\n\r\nhello\r\n--b\r\nbad header\r\n\r\nignored\r\n--b--\r\n",
+			wantText: "hello",
+		},
+		{
+			name:     "bad later alternative header",
+			raw:      "Content-Type: multipart/alternative; boundary=b\r\n\r\n--b\r\nContent-Type: text/html\r\n\r\n<p>hello</p>\r\n--b\r\nbad header\r\n\r\nignored\r\n--b--\r\n",
+			wantHTML: "hello",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			pm, err := ParseMessage([]byte(tc.raw))
+			require.NoError(t, err)
+			assert.Contains(t, pm.BodyText, tc.wantText)
+			assert.Contains(t, pm.BodyHTML, tc.wantHTML)
+		})
+	}
+}
+
+func TestParseMessage_MIMEByteBudgets(t *testing.T) {
+	state := &mimeState{workBytes: maxMIMEWorkBytes - 1}
+	mr := multipart.NewReader(strings.NewReader("--b\r\n\r\nxy\r\n--b--\r\n"), "b")
+	p, err := mr.NextPart()
+	require.NoError(t, err)
+	_, err = state.readPart(p)
+	require.ErrorContains(t, err, "MIME work exceeds")
+
+	state = &mimeState{decodedBytes: maxMIMEDecodedBytes - 1}
+	err = traversePart("text/plain", "base64", textproto.MIMEHeader{}, []byte("eHk="), state, 0)
+	require.ErrorContains(t, err, "decoded MIME data exceeds")
+
+	for _, tc := range []struct {
+		name string
+		cte  string
+		data string
+	}{
+		{"plain", "", "xy"},
+		{"quoted printable", "quoted-printable", "xy"},
+		{"base64", "base64", "eHk="},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			decoded, err := decodeCTE([]byte(tc.data), tc.cte, 2)
+			require.NoError(t, err)
+			assert.Equal(t, "xy", string(decoded))
+			_, err = decodeCTE([]byte(tc.data), tc.cte, 1)
+			require.ErrorContains(t, err, "decoded MIME data exceeds")
+		})
+	}
+}
 
 func TestParseMessage_PlainText(t *testing.T) {
 	raw := []byte(
