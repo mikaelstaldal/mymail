@@ -135,8 +135,13 @@ from strangers.
 ### Authentication
 HTTP Basic Auth via htpasswd file (bcrypt). CSRF protection via Origin/Referer validation middleware.
 Folder-scoped API tokens live in `api_tokens` and `api_token_folders`. Only a SHA-256 hash of a
-random secret is stored. The bearer middleware selects a narrow set of GET routes, looks up the
-current message or attachment folder in SQLite, and checks expiry on every request. Token
+random secret is stored. The bearer middleware selects a narrow set of GET routes and opens a
+read transaction. It validates the token and checks the current message or attachment folder
+inside that snapshot; repository reads that assemble the response use the same transaction.
+This keeps authorization, counts, metadata, and content consistent during concurrent changes.
+The middleware buffers the scoped GET response (spilling large responses to a temporary file)
+and releases the read transaction before writing to the client, so slow downloads do not hold
+a database connection or pin the WAL snapshot. Token
 management uses separate handlers that are reached only through the full-access auth path.
 The token table keeps a numeric ID for folder relations, while the API exposes only a unique
 slug derived from the token name with the same algorithm and collision suffixes as folders.

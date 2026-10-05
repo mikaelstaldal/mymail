@@ -1,6 +1,8 @@
 package token
 
 import (
+	"bytes"
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -8,6 +10,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/mikaelstaldal/mymail/internal/api"
+	"github.com/mikaelstaldal/mymail/internal/handler"
 	"github.com/mikaelstaldal/mymail/internal/repository"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -155,6 +159,142 @@ func TestBearerScope(t *testing.T) {
 	h.ServeHTTP(w, req)
 	assert.Equal(t, 401, w.Code)
 	assert.Equal(t, "Bearer", w.Header().Get("WWW-Authenticate"))
+}
+
+func TestBearerReadUsesAuthorizationSnapshot(t *testing.T) {
+	for _, tc := range []struct {
+		name, path, change string
+	}{
+		{"message move", "/api/v1/messages/10", `UPDATE messages SET folder_id=2,subject='later' WHERE id=10`},
+		{"token revocation", "/api/v1/messages/10", ""},
+		{"attachment move", "/api/v1/attachments/1", ""},
+		{"raw", "/api/v1/messages/10/raw", `UPDATE messages SET folder_id=2,raw='later' WHERE id=10`},
+		{"headers", "/api/v1/messages/10/headers", `UPDATE messages SET folder_id=2,raw='later' WHERE id=10`},
+		{"body", "/api/v1/messages/10/body", `UPDATE messages SET folder_id=2,body_html='<p>later</p>' WHERE id=10`},
+		{"folder list", "/api/v1/folders", `UPDATE folders SET name='Later' WHERE id=1`},
+		{"folder recreation", "/api/v1/folders", ""},
+		{"folder messages", "/api/v1/folders/1/messages", `UPDATE messages SET folder_id=2,subject='later' WHERE id=10`},
+		{"search", "/api/v1/messages/search?q=before&folder_id=1", `UPDATE messages SET folder_id=2,subject='later',body_text='later' WHERE id=10`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s := testStore(t)
+			var mode string
+			require.NoError(t, s.DB.QueryRow(`PRAGMA journal_mode=WAL`).Scan(&mode))
+			require.Equal(t, "wal", mode)
+			_, err := s.DB.Exec(`UPDATE messages SET subject='before',body_text='before',body_html='<p>before</p>',raw=? WHERE id=10`, []byte("Subject: before\r\n\r\nbefore"))
+			require.NoError(t, err)
+			_, err = s.DB.Exec(`INSERT INTO attachments(id,message_id,filename,content_type,size,data) VALUES(1,10,'before.txt','text/plain',6,'before')`)
+			require.NoError(t, err)
+			_, secret, err := s.Create("reader", time.Now().Add(time.Hour), []int64{1})
+			require.NoError(t, err)
+			h := handler.New(
+				repository.NewFolderRepository(s.DB), repository.NewMessageRepository(s.DB),
+				repository.NewAttachmentRepository(s.DB), repository.NewDraftRepository(s.DB),
+				repository.NewContactRepository(s.DB), repository.NewIdentityRepository(s.DB),
+				repository.NewFilterRepository(s.DB), repository.NewSpamFilterRepository(s.DB), "",
+			)
+			server, err := api.NewServer(h, api.WithErrorHandler(handler.WriteError))
+			require.NoError(t, err)
+			// The writer commits after middleware authorization but before the
+			// generated handler asks its repositories for response data.
+			next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				switch tc.name {
+				case "folder recreation":
+					_, err := s.DB.Exec(`UPDATE messages SET folder_id=2 WHERE folder_id=1`)
+					require.NoError(t, err)
+					_, err = s.DB.Exec(`DELETE FROM folders WHERE id=1`)
+					require.NoError(t, err)
+					_, err = s.DB.Exec(`INSERT INTO folders(id,name,slug,position) VALUES(1,'Replacement','replacement',0)`)
+					require.NoError(t, err)
+				case "token revocation":
+					_, err := s.DB.Exec(`DELETE FROM api_tokens`)
+					require.NoError(t, err)
+					_, err = s.DB.Exec(`UPDATE messages SET subject='later' WHERE id=10`)
+					require.NoError(t, err)
+				case "attachment move":
+					_, err := s.DB.Exec(`UPDATE messages SET folder_id=2 WHERE id=10`)
+					require.NoError(t, err)
+					_, err = s.DB.Exec(`UPDATE attachments SET filename='later.txt',data='later' WHERE id=1`)
+					require.NoError(t, err)
+				case "message move":
+					_, err := s.DB.Exec(tc.change)
+					require.NoError(t, err)
+					_, err = s.DB.Exec(`UPDATE attachments SET filename='later.txt' WHERE id=1`)
+					require.NoError(t, err)
+				default:
+					_, err := s.DB.Exec(tc.change)
+					require.NoError(t, err)
+				}
+				http.StripPrefix("/api/v1", server).ServeHTTP(w, r)
+			})
+			req := httptest.NewRequest(http.MethodGet, tc.path, nil)
+			req.Header.Set("Authorization", "Bearer "+secret)
+			w := httptest.NewRecorder()
+			s.Bearer(next).ServeHTTP(w, req)
+			require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+			switch tc.name {
+			case "attachment move":
+				assert.Equal(t, "before", w.Body.String())
+				assert.Equal(t, `attachment; filename="before.txt"`, w.Header().Get("Content-Disposition"))
+			case "raw", "headers", "body":
+				assert.Contains(t, w.Body.String(), "before")
+				assert.NotContains(t, w.Body.String(), "later")
+			case "folder list", "folder recreation":
+				assert.Contains(t, w.Body.String(), `"name":"Inbox"`)
+				assert.NotContains(t, w.Body.String(), `"name":"Later"`)
+				assert.NotContains(t, w.Body.String(), `"name":"Replacement"`)
+			default:
+				assert.Contains(t, w.Body.String(), `"folder_id":1`)
+				assert.Contains(t, w.Body.String(), `"subject":"before"`)
+				if tc.name == "message move" {
+					assert.Contains(t, w.Body.String(), `"filename":"before.txt"`)
+					assert.NotContains(t, w.Body.String(), `"filename":"later.txt"`)
+				}
+			}
+			if tc.name == "token revocation" {
+				allowed, err := s.Validate(secret)
+				require.NoError(t, err)
+				assert.Nil(t, allowed)
+			}
+		})
+	}
+}
+
+type writeHookResponse struct {
+	http.ResponseWriter
+	onWrite func()
+}
+
+func (w writeHookResponse) Write(p []byte) (int, error) {
+	w.onWrite()
+	return w.ResponseWriter.Write(p)
+}
+
+func TestBearerReleasesReadTransactionBeforeSendingResponse(t *testing.T) {
+	s := testStore(t)
+	s.DB.SetMaxOpenConns(1)
+	_, secret, err := s.Create("reader", time.Now().Add(time.Hour), []int64{1})
+	require.NoError(t, err)
+	payload := bytes.Repeat([]byte("x"), responseMemoryLimit+1)
+	next := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, err := w.Write(payload)
+		require.NoError(t, err)
+	})
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/messages/10/raw", nil)
+	req.Header.Set("Authorization", "Bearer "+secret)
+	rec := httptest.NewRecorder()
+	checked := false
+	w := writeHookResponse{ResponseWriter: rec, onWrite: func() {
+		checked = true
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+		defer cancel()
+		var n int
+		err := s.DB.QueryRowContext(ctx, `SELECT COUNT(*) FROM messages`).Scan(&n)
+		require.NoError(t, err, "response write must not retain the sole database connection")
+	}}
+	s.Bearer(next).ServeHTTP(w, req)
+	assert.True(t, checked)
+	assert.Equal(t, payload, rec.Body.Bytes())
 }
 
 func TestManagement(t *testing.T) {

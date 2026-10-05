@@ -1,6 +1,7 @@
 package token
 
 import (
+	"context"
 	"crypto/rand"
 	"crypto/sha256"
 	"database/sql"
@@ -122,13 +123,22 @@ func (s Store) Validate(value string) (map[int64]bool, error) {
 }
 
 func (s Store) validate(value string) (int64, map[int64]bool, error) {
+	return validateWith(context.Background(), s.DB, value)
+}
+
+type tokenQueryer interface {
+	QueryRowContext(context.Context, string, ...any) *sql.Row
+	QueryContext(context.Context, string, ...any) (*sql.Rows, error)
+}
+
+func validateWith(ctx context.Context, db tokenQueryer, value string) (int64, map[int64]bool, error) {
 	if !strings.HasPrefix(value, "mymail_") || len(value) != 50 {
 		return 0, nil, nil
 	}
 	digest := sha256.Sum256([]byte(value))
 	var id int64
 	var expiry string
-	err := s.DB.QueryRow(`SELECT id,expires_at FROM api_tokens WHERE token_hash=?`, digest[:]).Scan(&id, &expiry)
+	err := db.QueryRowContext(ctx, `SELECT id,expires_at FROM api_tokens WHERE token_hash=?`, digest[:]).Scan(&id, &expiry)
 	if errors.Is(err, sql.ErrNoRows) {
 		return 0, nil, nil
 	}
@@ -142,7 +152,7 @@ func (s Store) validate(value string) (int64, map[int64]bool, error) {
 	if !time.Now().Before(until) {
 		return 0, nil, nil
 	}
-	rows, err := s.DB.Query(`SELECT folder_id FROM api_token_folders WHERE token_id=?`, id)
+	rows, err := db.QueryContext(ctx, `SELECT folder_id FROM api_token_folders WHERE token_id=?`, id)
 	if err != nil {
 		return 0, nil, err
 	}
@@ -281,9 +291,30 @@ func (s Store) Bearer(next http.Handler) http.Handler {
 			writeError(w, 403, "token cannot access this resource")
 			return
 		}
+		// Pin authorization and every read used to build this response to one
+		// SQLite snapshot. A move or revocation after the snapshot cannot make
+		// the handler fetch newer, out-of-scope data.
+		tx, err := s.DB.BeginTx(r.Context(), &sql.TxOptions{ReadOnly: true})
+		if err != nil {
+			writeError(w, 500, "database error")
+			return
+		}
+		defer tx.Rollback()
+		_, allowed, err = validateWith(r.Context(), tx, strings.TrimSpace(header[7:]))
+		if err != nil {
+			writeError(w, 500, "database error")
+			return
+		}
+		if allowed == nil {
+			w.Header().Set("WWW-Authenticate", "Bearer")
+			writeError(w, 401, "unauthorized")
+			return
+		}
+		r = r.WithContext(repository.WithReadTransaction(r.Context(), tx))
 		if len(parts) == 3 && parts[2] == "folders" {
 			rec := httptest.NewRecorder()
 			next.ServeHTTP(rec, r)
+			_ = tx.Rollback()
 			if rec.Code != http.StatusOK {
 				for k, v := range rec.Header() {
 					w.Header()[k] = v
@@ -330,18 +361,29 @@ func (s Store) Bearer(next http.Handler) http.Handler {
 			}
 			id, e := strconv.ParseInt(parts[3], 10, 64)
 			if e == nil {
-				_ = s.DB.QueryRow(`SELECT folder_id FROM messages WHERE id=?`, id).Scan(&folderID)
+				_ = tx.QueryRowContext(r.Context(), `SELECT folder_id FROM messages WHERE id=?`, id).Scan(&folderID)
 			}
 		case len(parts) == 4 && parts[2] == "attachments":
 			id, e := strconv.ParseInt(parts[3], 10, 64)
 			if e == nil {
-				_ = s.DB.QueryRow(`SELECT m.folder_id FROM attachments a JOIN messages m ON m.id=a.message_id WHERE a.id=?`, id).Scan(&folderID)
+				_ = tx.QueryRowContext(r.Context(), `SELECT m.folder_id FROM attachments a JOIN messages m ON m.id=a.message_id WHERE a.id=?`, id).Scan(&folderID)
 			}
 		}
 		if folderID == 0 || !allowed[folderID] {
 			writeError(w, 403, "token cannot access this resource")
 			return
 		}
-		next.ServeHTTP(w, r)
+		buffer := newResponseBuffer()
+		defer buffer.Close()
+		next.ServeHTTP(buffer, r)
+		_ = tx.Rollback()
+		if buffer.err != nil {
+			writeError(w, 500, "response buffer error")
+			return
+		}
+		if err := buffer.CopyTo(w); err != nil {
+			// The client may already have received headers when copying fails.
+			return
+		}
 	})
 }

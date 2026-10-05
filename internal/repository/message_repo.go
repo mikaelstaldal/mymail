@@ -333,6 +333,7 @@ func scanDBMessageNoRaw(scan func(...any) error) (model.DBMessage, error) {
 // their clause more than this one does: they sort through a temp B-tree, where
 // no index is imposing an order to fall back on.
 func (r *MessageRepository) ListMessages(ctx context.Context, folderID int64, limit, offset int, unread, flagged *bool) ([]oas.MessageSummary, int, error) {
+	q := queryer(ctx, r.db)
 	conditions := []string{"m.folder_id = ?"}
 	filterArgs := []any{folderID}
 
@@ -354,14 +355,14 @@ func (r *MessageRepository) ListMessages(ctx context.Context, folderID int64, li
 	where := strings.Join(conditions, " AND ")
 
 	var total int
-	if err := r.db.QueryRowContext(ctx,
+	if err := q.QueryRowContext(ctx,
 		`SELECT COUNT(*) FROM messages m WHERE `+where, filterArgs...,
 	).Scan(&total); err != nil {
 		return nil, 0, err
 	}
 
 	listArgs := append(filterArgs, limit, offset)
-	rows, err := r.db.QueryContext(ctx,
+	rows, err := q.QueryContext(ctx,
 		`SELECT `+summaryColumns+` FROM messages m WHERE `+where+` ORDER BY m.date DESC, m.id ASC LIMIT ? OFFSET ?`,
 		listArgs...,
 	)
@@ -412,7 +413,7 @@ func (r *MessageRepository) GetMessage(ctx context.Context, id int64) (model.DBM
 // GetMessageDetail returns the full DBMessage row without the raw BLOB, or ErrNotFound.
 // Use this for API responses; use GetMessage only when raw is genuinely needed.
 func (r *MessageRepository) GetMessageDetail(ctx context.Context, id int64) (model.DBMessage, error) {
-	row := r.db.QueryRowContext(ctx,
+	row := queryer(ctx, r.db).QueryRowContext(ctx,
 		`SELECT `+dbMessageColumnsNoRaw+` FROM messages WHERE id = ?`, id,
 	)
 	m, err := scanDBMessageNoRaw(row.Scan)
@@ -852,7 +853,7 @@ func (r *MessageRepository) MoveMessages(ctx context.Context, ids []int64, folde
 // Returns ErrNotFound if the message does not exist.
 func (r *MessageRepository) GetRawMessage(ctx context.Context, id int64) ([]byte, error) {
 	var raw []byte
-	err := r.db.QueryRowContext(ctx, `SELECT raw FROM messages WHERE id = ?`, id).Scan(&raw)
+	err := queryer(ctx, r.db).QueryRowContext(ctx, `SELECT raw FROM messages WHERE id = ?`, id).Scan(&raw)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
 	}
@@ -1459,6 +1460,7 @@ func (r *MessageRepository) SearchMessages(
 	sort SearchSort,
 	limit, offset int,
 ) ([]oas.MessagesSearchGetOKItemsItem, int, error) {
+	qdb := queryer(ctx, r.db)
 	// Bound the query so a pathologically slow search fails fast with a clean
 	// error instead of running past the HTTP server's WriteTimeout (which would
 	// trip the connection write deadline mid-response and log a confusing
@@ -1508,7 +1510,7 @@ func (r *MessageRepository) SearchMessages(
 	// Count query.
 	var total int
 	countSQL := `SELECT COUNT(*) FROM messages_fts JOIN messages m ON messages_fts.rowid = m.id WHERE ` + whereClause
-	if err := r.db.QueryRowContext(ctx, countSQL, filterArgs...).Scan(&total); err != nil {
+	if err := qdb.QueryRowContext(ctx, countSQL, filterArgs...).Scan(&total); err != nil {
 		return nil, 0, err
 	}
 
@@ -1525,7 +1527,7 @@ func (r *MessageRepository) SearchMessages(
 	WHERE ` + whereClause + ` ORDER BY ` + sort.orderBy() + ` LIMIT ? OFFSET ?`
 
 	mainArgs := append(filterArgs, limit, offset)
-	rows, err := r.db.QueryContext(ctx, mainSQL, mainArgs...)
+	rows, err := qdb.QueryContext(ctx, mainSQL, mainArgs...)
 	if err != nil {
 		return nil, 0, err
 	}

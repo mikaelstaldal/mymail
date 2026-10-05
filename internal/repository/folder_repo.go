@@ -96,7 +96,7 @@ LEFT JOIN (
 
 // ListFolders returns all folders ordered by position ASC, id ASC, each with its unread count.
 func (r *FolderRepository) ListFolders(ctx context.Context) ([]oas.Folder, error) {
-	rows, err := r.db.QueryContext(ctx, folderSelectSQL+` ORDER BY f.position ASC, f.id ASC`)
+	rows, err := queryer(ctx, r.db).QueryContext(ctx, folderSelectSQL+` ORDER BY f.position ASC, f.id ASC`)
 	if err != nil {
 		return nil, err
 	}
@@ -132,7 +132,7 @@ func (r *FolderRepository) GetFolderByID(ctx context.Context, id int64) (oas.Fol
 // FolderExists returns nil if the folder exists, ErrNotFound otherwise.
 func (r *FolderRepository) FolderExists(ctx context.Context, id int64) error {
 	var dummy int
-	err := r.db.QueryRowContext(ctx, `SELECT 1 FROM folders WHERE id = ?`, id).Scan(&dummy)
+	err := queryer(ctx, r.db).QueryRowContext(ctx, `SELECT 1 FROM folders WHERE id = ?`, id).Scan(&dummy)
 	if errors.Is(err, sql.ErrNoRows) {
 		return ErrNotFound
 	}

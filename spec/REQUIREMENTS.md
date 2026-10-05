@@ -658,7 +658,10 @@ Initially a token grants read access to its selected folders through `GET /folde
 `GET /folders/{folder_id}/messages`, `GET /messages/search` with an allowed `folder_id`,
 `GET /messages/{id}` and its `raw`, `headers`, and `body` resources, and
 `GET /attachments/{id}`. A message or attachment is checked against its current folder on every
-request. A token can also call `PUT /messages/{id}/read` to mark an allowed message as read.
+request. Token validation, folder authorization, and all queries that assemble a GET response
+use one SQLite read snapshot, so a concurrent move, revocation, or folder deletion cannot
+make the response contain data from a later, unauthorized state. A token can also call
+`PUT /messages/{id}/read` to mark an allowed message as read.
 This operation takes no body and is idempotent; Basic-authenticated clients may use it too.
 The token's folder rule is checked atomically with this write. Other routes, cross-folder reads,
 and other writes return 403. An invalid or expired

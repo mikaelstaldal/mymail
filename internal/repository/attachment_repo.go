@@ -35,7 +35,7 @@ func (r *AttachmentRepository) InsertAttachment(ctx context.Context, att model.D
 // ListAttachments returns metadata for all attachments belonging to messageID,
 // ordered by id. The data BLOB is excluded.
 func (r *AttachmentRepository) ListAttachments(ctx context.Context, messageID int64) ([]oas.AttachmentMeta, error) {
-	rows, err := r.db.QueryContext(ctx,
+	rows, err := queryer(ctx, r.db).QueryContext(ctx,
 		`SELECT id, filename, content_type, size
 		 FROM attachments WHERE message_id = ? ORDER BY id`,
 		messageID,
@@ -65,7 +65,7 @@ func (r *AttachmentRepository) ListAttachments(ctx context.Context, messageID in
 // GetAttachment returns the full attachment row including the data BLOB, or ErrNotFound.
 func (r *AttachmentRepository) GetAttachment(ctx context.Context, id int64) (model.DBAttachment, error) {
 	var a model.DBAttachment
-	err := r.db.QueryRowContext(ctx,
+	err := queryer(ctx, r.db).QueryRowContext(ctx,
 		`SELECT id, message_id, filename, content_type, size, data
 		 FROM attachments WHERE id = ?`,
 		id,
