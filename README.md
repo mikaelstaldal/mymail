@@ -111,7 +111,9 @@ mymail -import -data /var/lib/mymail \
 
 `scripts/api-token.sh` manages folder-scoped API tokens using `curl` and Bash. It uses the
 server's token API; `--user` prompts for the Basic Auth password when authentication is enabled. The default URL is
-`http://127.0.0.1:8080`; set `--url` for another server.
+`http://127.0.0.1:8080`; set `--url` for another server. Remote URLs must use HTTPS with a valid
+certificate. Plain HTTP is accepted only for literal `127.0.0.1` or `[::1]` destinations,
+and those requests bypass proxy settings. URLs with embedded credentials are rejected.
 
 ```bash
 ./scripts/api-token.sh --url https://mail.example.com --user myuser \

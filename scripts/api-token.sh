@@ -11,6 +11,8 @@ The default BASE_URL is http://127.0.0.1:8080. --user prompts for the Basic
 Auth password; --credentials reads one username:password line from a file, or
 from standard input when FILE is -. Create prints only the
 token secret to stdout and its revocation slug to stderr.
+Remote URLs must use HTTPS. Plain HTTP is allowed only for literal loopback
+hosts 127.0.0.1 and [::1]. URLs must not contain embedded credentials.
 MYMAIL_URL and MYMAIL_USER provide defaults for --url and --user.
 EOF
 }
@@ -70,12 +72,36 @@ done
 [[ -n $command_name ]] || { usage >&2; exit 2; }
 [[ $base_url == http://* || $base_url == https://* ]] || die 'URL must start with http:// or https://'
 [[ $base_url != *'?'* && $base_url != *'#'* ]] || die 'URL must not contain a query or fragment'
+[[ ! $base_url =~ [[:cntrl:][:space:]\\] ]] || die 'URL must not contain whitespace, control characters, or backslashes'
+url_scheme=${base_url%%://*}
+url_remainder=${base_url#*://}
+url_authority=${url_remainder%%/*}
+[[ -n $url_authority ]] || die 'URL must have a host'
+if [[ $url_authority == \[* ]]; then
+  [[ $url_authority =~ ^\[([0-9A-Fa-f:.]+)\](:[0-9]+)?$ ]] || die 'invalid URL authority'
+  url_host=${BASH_REMATCH[1]}
+  # curl validates the full IPv6 address; brackets and port delimiters are
+  # checked here before deciding whether plain HTTP is safe.
+  [[ $url_host == *:* ]] || die 'invalid URL authority'
+  url_host="[$url_host]"
+else
+  [[ $url_authority =~ ^([A-Za-z0-9.-]+)(:[0-9]+)?$ ]] || die 'invalid URL authority'
+  url_host=${BASH_REMATCH[1]}
+fi
+if [[ $url_scheme == http ]]; then
+  [[ $url_host == 127.0.0.1 || $url_host == '[::1]' ]] ||
+    die 'plain HTTP is allowed only for 127.0.0.1 or [::1]; use HTTPS for remote URLs'
+fi
 base_url=${base_url%/}
 [[ $user_given != true || $credentials_given != true ]] || die 'use either --user or --credentials'
 if [[ $credentials_given == true ]]; then username=; fi
 [[ $username != *:* ]] || die '--user expects a username only; use --credentials for unattended authentication'
 
 curl_args=(--silent --show-error --connect-timeout 5 --max-time 30 --header 'Accept: application/json')
+curl_args+=(--proto "=$url_scheme" --proto-redir '=https' --max-redirs 0)
+if [[ $url_scheme == http ]]; then
+  curl_args+=(--noproxy '*')
+fi
 if [[ $credentials_given == true ]]; then
   credentials=
   if [[ $credentials_source == - ]]; then
@@ -147,9 +173,9 @@ if [[ $credentials_given == true ]]; then
   config_credentials=${credentials//"$backslash"/"$escaped_backslash"}
   config_credentials=${config_credentials//\"/\\\"}
   response=$(printf 'user = "%s"\n' "$config_credentials" |
-    curl --config - "${curl_args[@]}" --write-out $'\n%{http_code}' "$endpoint") || die 'request failed'
+    curl --disable --config - "${curl_args[@]}" --write-out $'\n%{http_code}' "$endpoint") || die 'request failed'
 else
-  response=$(curl "${curl_args[@]}" --write-out $'\n%{http_code}' "$endpoint") || die 'request failed'
+  response=$(curl --disable "${curl_args[@]}" --write-out $'\n%{http_code}' "$endpoint") || die 'request failed'
 fi
 status=${response##*$'\n'}
 body=${response%$'\n'*}

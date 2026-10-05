@@ -650,7 +650,9 @@ Revoking a token frees its slug for reuse. The token's internal numeric ID is ne
 The `scripts/api-token.sh` CLI uses those management endpoints to create a token from a lifetime
 and folder IDs or revoke one by slug; it prints the newly created secret to stdout. For Basic
 authentication it can prompt for a password or read one `username:password` line from a file
-or standard input.
+or standard input. The CLI requires HTTPS for remote URLs; plain HTTP is permitted only for
+literal `127.0.0.1` and `[::1]` loopback hosts, with proxies bypassed. It rejects URL userinfo
+and ignores curl configuration files so they cannot change request transport or redirects.
 
 Initially a token grants read access to its selected folders through `GET /folders` (filtered),
 `GET /folders/{folder_id}/messages`, `GET /messages/search` with an allowed `folder_id`,

@@ -40,6 +40,7 @@ run tsc --project web/ts/demo/tsconfig.json
 # tar only; no npm/npx/yarn — see web/ts/third_party/test/unpack.sh.
 run web/ts/third_party/test/unpack.sh
 run node --test web/ts/quotetext.test.mjs web/ts/wrap.test.mjs web/ts/address.test.mjs web/ts/signature.test.mjs web/ts/confirm.test.mjs web/ts/demo.test.mjs web/ts/icslinks.test.mjs web/ts/date.test.mjs
+run bash scripts/test-api-token.sh
 
 run go generate ./...
 run go build -trimpath -buildvcs=true -tags netgo -o "$OUTPUT_DIR/mymail" .
