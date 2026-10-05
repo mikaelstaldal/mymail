@@ -262,38 +262,104 @@ func TestBearerReadUsesAuthorizationSnapshot(t *testing.T) {
 
 type writeHookResponse struct {
 	http.ResponseWriter
-	onWrite func()
+	onHeader func()
+	onWrite  func([]byte)
+}
+
+func (w writeHookResponse) WriteHeader(status int) {
+	w.onHeader()
+	w.ResponseWriter.WriteHeader(status)
 }
 
 func (w writeHookResponse) Write(p []byte) (int, error) {
-	w.onWrite()
+	w.onWrite(p)
 	return w.ResponseWriter.Write(p)
 }
 
 func TestBearerReleasesReadTransactionBeforeSendingResponse(t *testing.T) {
+	for _, explicitHeader := range []bool{false, true} {
+		name := "implicit header"
+		if explicitHeader {
+			name = "explicit header"
+		}
+		t.Run(name, func(t *testing.T) {
+			s := testStore(t)
+			s.DB.SetMaxOpenConns(1)
+			_, secret, err := s.Create("reader", time.Now().Add(time.Hour), []int64{1})
+			require.NoError(t, err)
+			payload := bytes.Repeat([]byte("x"), 2<<20)
+			next := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				if explicitHeader {
+					w.WriteHeader(http.StatusOK)
+				}
+				_, err := w.Write(payload)
+				require.NoError(t, err)
+			})
+			req := httptest.NewRequest(http.MethodGet, "/api/v1/messages/10/raw", nil)
+			req.Header.Set("Authorization", "Bearer "+secret)
+			rec := httptest.NewRecorder()
+			checkConnection := func() {
+				ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+				defer cancel()
+				var n int
+				err := s.DB.QueryRowContext(ctx, `SELECT COUNT(*) FROM messages`).Scan(&n)
+				require.NoError(t, err, "response write must not retain the sole database connection")
+			}
+			checkedHeader, checkedWrite := false, false
+			w := writeHookResponse{ResponseWriter: rec, onHeader: func() {
+				checkedHeader = true
+				checkConnection()
+			}, onWrite: func(p []byte) {
+				checkedWrite = true
+				checkConnection()
+				assert.True(t, &payload[0] == &p[0], "the writer wrapper must pass this slice through")
+			}}
+			s.Bearer(next).ServeHTTP(w, req)
+			assert.Equal(t, explicitHeader, checkedHeader)
+			assert.True(t, checkedWrite)
+			assert.Equal(t, payload, rec.Body.Bytes())
+		})
+	}
+}
+
+func TestBearerGeneratedRawReleasesBeforeWriting(t *testing.T) {
 	s := testStore(t)
 	s.DB.SetMaxOpenConns(1)
+	payload := bytes.Repeat([]byte("raw"), 1<<19)
+	_, err := s.DB.Exec(`UPDATE messages SET raw=? WHERE id=10`, payload)
+	require.NoError(t, err)
 	_, secret, err := s.Create("reader", time.Now().Add(time.Hour), []int64{1})
 	require.NoError(t, err)
-	payload := bytes.Repeat([]byte("x"), responseMemoryLimit+1)
-	next := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		_, err := w.Write(payload)
-		require.NoError(t, err)
-	})
+	h := handler.New(
+		repository.NewFolderRepository(s.DB), repository.NewMessageRepository(s.DB),
+		repository.NewAttachmentRepository(s.DB), repository.NewDraftRepository(s.DB),
+		repository.NewContactRepository(s.DB), repository.NewIdentityRepository(s.DB),
+		repository.NewFilterRepository(s.DB), repository.NewSpamFilterRepository(s.DB), "",
+	)
+	server, err := api.NewServer(h, api.WithErrorHandler(handler.WriteError))
+	require.NoError(t, err)
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/messages/10/raw", nil)
 	req.Header.Set("Authorization", "Bearer "+secret)
 	rec := httptest.NewRecorder()
-	checked := false
-	w := writeHookResponse{ResponseWriter: rec, onWrite: func() {
-		checked = true
+	checkConnection := func() {
 		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 		defer cancel()
 		var n int
 		err := s.DB.QueryRowContext(ctx, `SELECT COUNT(*) FROM messages`).Scan(&n)
-		require.NoError(t, err, "response write must not retain the sole database connection")
+		require.NoError(t, err, "the generated response must release the sole connection before writing")
+	}
+	checkedHeader, checkedWrite := false, false
+	w := writeHookResponse{ResponseWriter: rec, onHeader: func() {
+		checkedHeader = true
+		checkConnection()
+	}, onWrite: func(_ []byte) {
+		checkedWrite = true
+		checkConnection()
 	}}
-	s.Bearer(next).ServeHTTP(w, req)
-	assert.True(t, checked)
+	s.Bearer(http.StripPrefix("/api/v1", server)).ServeHTTP(w, req)
+	assert.True(t, checkedHeader)
+	assert.True(t, checkedWrite)
+	assert.Equal(t, http.StatusOK, rec.Code)
 	assert.Equal(t, payload, rec.Body.Bytes())
 }
 

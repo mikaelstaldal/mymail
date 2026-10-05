@@ -139,9 +139,12 @@ random secret is stored. The bearer middleware selects a narrow set of GET route
 read transaction. It validates the token and checks the current message or attachment folder
 inside that snapshot; repository reads that assemble the response use the same transaction.
 This keeps authorization, counts, metadata, and content consistent during concurrent changes.
-The middleware buffers the scoped GET response (spilling large responses to a temporary file)
-and releases the read transaction before writing to the client, so slow downloads do not hold
-a database connection or pin the WAL snapshot. Token
+The generated handlers finish their database reads before encoding responses; raw messages and
+attachments are returned as readers over the byte slices already fetched. The bearer middleware
+releases the read transaction at the first response write, before bytes reach the client, so slow
+downloads do not hold a database connection or pin the WAL snapshot and no second response buffer
+is needed. A new bearer-readable route must finish its database reads before its first response
+write; a lazy database-backed reader would fail after the transaction closes. Token
 management uses separate handlers that are reached only through the full-access auth path.
 The token table keeps a numeric ID for folder relations, while the API exposes only a unique
 slug derived from the token name with the same algorithm and collision suffixes as folders.

@@ -13,6 +13,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/mikaelstaldal/mymail/internal/repository"
@@ -299,7 +300,8 @@ func (s Store) Bearer(next http.Handler) http.Handler {
 			writeError(w, 500, "database error")
 			return
 		}
-		defer tx.Rollback()
+		release := sync.OnceFunc(func() { _ = tx.Rollback() })
+		defer release()
 		_, allowed, err = validateWith(r.Context(), tx, strings.TrimSpace(header[7:]))
 		if err != nil {
 			writeError(w, 500, "database error")
@@ -314,7 +316,7 @@ func (s Store) Bearer(next http.Handler) http.Handler {
 		if len(parts) == 3 && parts[2] == "folders" {
 			rec := httptest.NewRecorder()
 			next.ServeHTTP(rec, r)
-			_ = tx.Rollback()
+			release()
 			if rec.Code != http.StatusOK {
 				for k, v := range rec.Header() {
 					w.Header()[k] = v
@@ -373,17 +375,6 @@ func (s Store) Bearer(next http.Handler) http.Handler {
 			writeError(w, 403, "token cannot access this resource")
 			return
 		}
-		buffer := newResponseBuffer()
-		defer buffer.Close()
-		next.ServeHTTP(buffer, r)
-		_ = tx.Rollback()
-		if buffer.err != nil {
-			writeError(w, 500, "response buffer error")
-			return
-		}
-		if err := buffer.CopyTo(w); err != nil {
-			// The client may already have received headers when copying fails.
-			return
-		}
+		next.ServeHTTP(releaseReadWriter{ResponseWriter: w, release: release}, r)
 	})
 }
