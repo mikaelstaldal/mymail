@@ -149,6 +149,12 @@ test('normalizeReferences truncates by dropping the oldest entries', () => {
   assert.ok(!joined.includes('ref-0-'), 'the oldest is what gets dropped');
 });
 
+test('normalizeReferences handles a large list with a bounded suffix', () => {
+  const joined = normalizeReferences(Array(20_000).fill('<x@y>'));
+  assert.equal(joined.split('\n').length, 1000);
+  assert.equal(normalizeReferences(['<old>', 'x'.repeat(MAX_REFS_BYTES + 1)]), '');
+});
+
 // ---------------------------------------------------------------------------
 // Addresses — parity with service.ParseAddressList and
 // repository.parseAndFoldAddress

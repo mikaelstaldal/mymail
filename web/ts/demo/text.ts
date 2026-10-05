@@ -95,17 +95,17 @@ function stripAngleBrackets(s: string): string {
  * what threading needs. Mirrors handler.normalizeReferences.
  */
 function normalizeReferences(refs: string[]): string {
-  let cleaned = refs
-    .map((r) => stripAngleBrackets(stripHeaderControls(r)))
-    .filter((r) => r !== '');
-  let joined = cleaned.join('\n');
-  if (byteLength(joined) <= MAX_REFS_BYTES) return joined;
-  while (cleaned.length > 0) {
-    cleaned = cleaned.slice(1);
-    joined = cleaned.join('\n');
-    if (byteLength(joined) <= MAX_REFS_BYTES) break;
+  const cleaned: string[] = [];
+  let bytes = 0;
+  for (let i = refs.length - 1; i >= 0; i--) {
+    const ref = stripAngleBrackets(stripHeaderControls(refs[i]));
+    if (ref === '') continue;
+    const length = byteLength(ref) + (cleaned.length > 0 ? 1 : 0);
+    if (bytes + length > MAX_REFS_BYTES || cleaned.length >= MAX_REFS_COUNT) break;
+    bytes += length;
+    cleaned.push(ref);
   }
-  return joined;
+  return cleaned.reverse().join('\n');
 }
 
 // ── Addresses ────────────────────────────────────────────────────────────────

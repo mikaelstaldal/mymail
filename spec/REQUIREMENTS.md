@@ -338,6 +338,8 @@ When invoked as `mymail -lda`:
     - Resolves `cid:` inline image references to `data:` URIs before sanitizing.
     - Sanitizes the HTML body.
     - Collects attachments.
+    - Keeps up to 1,000 newest non-empty `References` entries that fit in 16 KiB when joined with newlines. Rejects a message whose
+      unfolded `References` header exceeds 256 KiB before splitting it into entries; this is a permanent parse failure.
     - Rejects messages larger than 64 MiB and MIME structures deeper than 30 levels, with more than 1,000 parts,
       more than 256 MiB of cumulative multipart-body reads, or more than 64 MiB of cumulative decoded leaf data.
       A limit violation is a permanent parse failure, including for delivery over the LDA socket.
@@ -415,6 +417,7 @@ The send flow:
     - User-supplied header values (`to_addr`, `cc_addr`, `bcc_addr`, `reply_to_addr`, `subject`, `in_reply_to`, every
       element of `references`, and the identity display name) are sanitized to strip CR, LF, and NUL control characters
       before encoding.
+      Up to 1,000 newest non-empty `references` entries fitting in 16 KiB when joined with newlines are retained.
     - Display names in `From`, `To`, `Cc`, `Bcc`, and `Reply-To` are serialized as valid RFC 5322 addresses. In
       particular, an ASCII name containing a comma stays quoted so it cannot become a separate recipient.
       A malformed recipient address list fails message construction instead of being emitted unchanged.

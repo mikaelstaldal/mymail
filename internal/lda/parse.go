@@ -22,6 +22,8 @@ import (
 
 const (
 	maxRefsBytes        = 16 * 1024
+	maxRefsCount        = 1000
+	maxRefsHeaderBytes  = 256 * 1024
 	maxMIMEDepth        = 30
 	maxMIMEParts        = 1000
 	maxMIMEWorkBytes    = 256 << 20
@@ -66,8 +68,13 @@ func ParseMessage(raw []byte) (*model.ParsedMessage, error) {
 
 	var refs []string
 	if r := msg.Header.Get("References"); r != "" {
+		if len(r) > maxRefsHeaderBytes {
+			return nil, fmt.Errorf("references header exceeds %d bytes", maxRefsHeaderBytes)
+		}
 		for _, tok := range strings.Fields(r) {
-			refs = append(refs, stripAngles(tok))
+			if ref := stripAngles(tok); ref != "" {
+				refs = append(refs, ref)
+			}
 		}
 	}
 	refs = truncateRefs(refs)
@@ -414,8 +421,16 @@ func stripAngles(s string) string {
 }
 
 func truncateRefs(refs []string) []string {
-	for len(refs) > 0 && len(strings.Join(refs, "\n")) > maxRefsBytes {
-		refs = refs[1:]
+	total := 0
+	for i := len(refs) - 1; i >= 0; i-- {
+		length := len(refs[i])
+		if i < len(refs)-1 {
+			length++ // newline separator
+		}
+		if total+length > maxRefsBytes || len(refs)-i > maxRefsCount {
+			return refs[i+1:]
+		}
+		total += length
 	}
 	return refs
 }

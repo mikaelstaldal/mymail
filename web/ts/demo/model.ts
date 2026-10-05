@@ -44,6 +44,7 @@ const MAX_SIGNATURE_LEN = 51_200;
 const MAX_SCORE_HEADER_LEN = 200;
 /** References header budget; oldest entries are dropped first. */
 const MAX_REFS_BYTES = 16 * 1024;
+const MAX_REFS_COUNT = 1000;
 /** Transitive-closure cap for threading (repository.GetMessageThread). */
 const THREAD_CAP = 1000;
 /** How much of body_text the search snippet is built from. */

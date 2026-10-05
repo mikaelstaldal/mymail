@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"mime/multipart"
 	"net/textproto"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -142,6 +143,49 @@ func TestParseMessage_PlainText(t *testing.T) {
 	assert.Equal(t, "test123@example.com", *pm.MessageID)
 	assert.Empty(t, pm.Attachments)
 	assert.Equal(t, "sender@example.com", pm.FromAddr)
+}
+
+func TestParseMessage_FoldedReferencesBoundedWork(t *testing.T) {
+	raw := []byte("From: a@example.com\r\nReferences: " +
+		strings.Repeat("<x@y>\r\n ", 20_000) + "\r\n\r\nhello")
+	var before, after runtime.MemStats
+	runtime.ReadMemStats(&before)
+	pm, err := ParseMessage(raw)
+	runtime.ReadMemStats(&after)
+	require.NoError(t, err)
+	require.Len(t, pm.References, maxRefsCount)
+	assert.Equal(t, "x@y", pm.References[0])
+	assert.Equal(t, "x@y", pm.References[len(pm.References)-1])
+	assert.Less(t, after.TotalAlloc-before.TotalAlloc, uint64(64<<20))
+}
+
+func TestParseMessage_ReferencesHeaderLimit(t *testing.T) {
+	raw := []byte("References: " + strings.Repeat("<x@y>\r\n ", 50_000) + "\r\n\r\nhello")
+	pm, err := ParseMessage(raw)
+	require.ErrorContains(t, err, "references header exceeds")
+	assert.Nil(t, pm)
+	for _, tc := range []struct {
+		length  int
+		wantErr bool
+	}{
+		{maxRefsHeaderBytes, false},
+		{maxRefsHeaderBytes + 1, true},
+	} {
+		raw := []byte("References: " + strings.Repeat("x", tc.length) + "\r\n\r\nhello")
+		_, err := ParseMessage(raw)
+		if tc.wantErr {
+			require.ErrorContains(t, err, "references header exceeds")
+		} else {
+			require.NoError(t, err)
+		}
+	}
+}
+
+func TestTruncateRefs(t *testing.T) {
+	assert.Equal(t, []string{"new"}, truncateRefs([]string{strings.Repeat("x", maxRefsBytes), "new"}))
+	assert.Empty(t, truncateRefs([]string{"old", strings.Repeat("x", maxRefsBytes+1)}))
+	assert.Equal(t, []string{"old", "new"}, truncateRefs([]string{"old", "new"}))
+	assert.Len(t, truncateRefs(strings.Fields(strings.Repeat("a ", maxRefsCount+1))), maxRefsCount)
 }
 
 func TestParseMessage_MultipartAlternative_HTMLPreferred(t *testing.T) {

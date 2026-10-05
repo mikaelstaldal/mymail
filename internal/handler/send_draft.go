@@ -54,30 +54,34 @@ func stripAngleBrackets(s string) string {
 }
 
 const maxRefsBytes = 16 * 1024
+const maxRefsCount = 1000
 
 // normalizeReferences strips angle brackets and control chars from each element,
 // joins with "\n", and truncates to 16 KiB by dropping oldest entries.
 func normalizeReferences(refs []string) string {
-	cleaned := make([]string, 0, len(refs))
-	for _, r := range refs {
+	// Walk from newest to oldest so only the retained suffix is allocated.
+	cleaned := make([]string, 0)
+	bytes := 0
+	for i := len(refs) - 1; i >= 0; i-- {
+		r := refs[i]
 		r = service.StripHeaderControls(r)
 		r = stripAngleBrackets(r)
 		if r != "" {
+			length := len(r)
+			if len(cleaned) > 0 {
+				length++ // newline separator
+			}
+			if bytes+length > maxRefsBytes || len(cleaned) >= maxRefsCount {
+				break
+			}
+			bytes += length
 			cleaned = append(cleaned, r)
 		}
 	}
-	joined := strings.Join(cleaned, "\n")
-	if len(joined) <= maxRefsBytes {
-		return joined
+	for i, j := 0, len(cleaned)-1; i < j; i, j = i+1, j-1 {
+		cleaned[i], cleaned[j] = cleaned[j], cleaned[i]
 	}
-	for len(cleaned) > 0 {
-		cleaned = cleaned[1:]
-		joined = strings.Join(cleaned, "\n")
-		if len(joined) <= maxRefsBytes {
-			break
-		}
-	}
-	return joined
+	return strings.Join(cleaned, "\n")
 }
 
 // sendFieldsValidated holds all compose fields after validation and stripping.
