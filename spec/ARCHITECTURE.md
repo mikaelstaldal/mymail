@@ -15,6 +15,7 @@ Layered architecture: `handler → service → repository → SQLite`
 mymail/
 ├── main.go                   # Entry point, CLI flags, routing, startup
 ├── cmd/
+│   ├── cli/                  # Token-only REST API client binary
 │   └── lda/                  # Thin LDA client binary (forwards to server via UNIX socket)
 ├── internal/
 │   ├── api/                  # Code generated from OpenAPI specification (do not edit)
@@ -101,6 +102,10 @@ The full `mymail` binary carries embedded web assets, ogen-generated HTTP stubs,
 
 During MIME parsing, CID image resolution in `internal/sanitize` returns the IDs of images actually embedded in the sanitized HTML. The LDA uses that bounded set to distinguish inline images from stored attachments; it does not scan raw HTML text for CID substrings.
 The MIME traversal carries shared depth, part-count, cumulative-read, and decoded-byte limits across nested multipart and alternative branches. Limit violations abort parsing before any database write and return the LDA's permanent parse error.
+
+### Token-Only REST API Client
+
+`cmd/cli` builds `mymail-cli` as a separate static Go binary using only the standard library at runtime. It exposes exactly the API token routes: scoped folder and message reads, attachment download, and mark-read. It never accepts Basic credentials or an API token on the command line. The token comes from a file or stdin; response bytes go to stdout, making JSON and downloads usable in pipelines. HTTP is restricted to literal loopback addresses; remote servers require HTTPS. Redirects and environment proxies are disabled so a bearer secret cannot be forwarded to a different endpoint.
 
 ### Header-Based Spam Detection
 Reads spam verdicts from headers set by the MTA pipeline (SpamAssassin, Rspamd, etc.). No built-in classifier.

@@ -673,6 +673,16 @@ The token's hash, expiry, and folder rule are checked atomically with this write
 and other writes return 403. An invalid or expired
 token returns 401. API tokens cannot manage other tokens or serve the web UI.
 
+The separate `mymail-cli` binary provides the token-accessible REST operations for scripts and agents:
+`folders list`; `messages list FOLDER_ID`, `search`, `get ID`, `raw ID`, `headers ID`, `body ID`,
+and `read ID`; and `attachments get ID`. Search requires an explicit folder ID. `messages read`
+uses the idempotent `PUT` route. The client accepts exactly one of `-token-file PATH` and
+`-token-stdin`; it does not accept Basic credentials or token arguments. Its built-in `help`
+lists commands and flags. JSON and downloaded bytes are written unchanged to stdout; errors
+go to stderr and cause a nonzero exit. HTTP is allowed only for literal loopback IP addresses;
+remote URLs require HTTPS. The client rejects URL credentials, paths, queries, and fragments,
+does not follow redirects, and ignores environment HTTP proxies.
+
 ### CSRF Protection
 
 All state-changing HTTP methods (POST, PUT, PATCH, DELETE) are protected via Origin/Referer validation:
