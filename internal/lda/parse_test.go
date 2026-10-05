@@ -1,6 +1,7 @@
 package lda
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/mikaelstaldal/mymail/internal/service"
@@ -83,6 +84,41 @@ func TestParseMessage_CIDInlineImage(t *testing.T) {
 	assert.Empty(t, pm.Attachments, "inline image should not be an attachment")
 	assert.Contains(t, pm.BodyHTML, "data:image/gif;base64,")
 	assert.NotContains(t, pm.BodyHTML, "cid:")
+}
+
+func TestParseMessage_CIDReferencesOnlyFromResolvableImages(t *testing.T) {
+	const cid = "img001@example.com"
+	cases := []struct {
+		name        string
+		html        string
+		contentID   string
+		contentType string
+		data        string
+	}{
+		{"repeated CID text", strings.Repeat("cid:", 20_000) + cid, cid, "image/gif", "GIF"},
+		{"CID in another attribute", `<div title="cid:` + cid + `">text</div>`, cid, "image/gif", "GIF"},
+		{"malformed empty source", `<img src="cid:">`, cid, "image/gif", "GIF"},
+		{"oversized image source", `<img src="cid:` + strings.Repeat("x", 1025) + `">`, strings.Repeat("x", 1025), "image/gif", "GIF"},
+		{"too many images", strings.Repeat(`<img src="cid:`+cid+`">`, 65), cid, "image/gif", "GIF"},
+		{"unsupported image type", `<img src="cid:` + cid + `">`, cid, "image/svg+xml", "GIF"},
+		{"image in object", `<object><img src="cid:` + cid + `"></object>`, cid, "image/gif", "GIF"},
+		{"image in template", `<template><img src="cid:` + cid + `"></template>`, cid, "image/gif", "GIF"},
+		{"image too large", `<img src="cid:` + cid + `">`, cid, "image/gif", strings.Repeat("x", 1*1024*1024+1)},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			raw := []byte("Content-Type: multipart/related; boundary=rel\r\n\r\n" +
+				"--rel\r\nContent-Type: text/html\r\n\r\n" + tc.html + "\r\n" +
+				"--rel\r\nContent-Type: " + tc.contentType + "\r\nContent-Id: <" + tc.contentID + ">\r\n\r\n" + tc.data + "\r\n" +
+				"--rel--\r\n")
+			pm, err := ParseMessage(raw)
+			require.NoError(t, err)
+			require.Len(t, pm.Attachments, 1)
+			assert.Equal(t, tc.data, string(pm.Attachments[0].Data))
+			assert.NotContains(t, pm.BodyHTML, "data:image/gif;base64,")
+			assert.NotContains(t, pm.BodyHTML, `src="cid:`)
+		})
+	}
 }
 
 func TestParseMessage_CharsetISO8859(t *testing.T) {

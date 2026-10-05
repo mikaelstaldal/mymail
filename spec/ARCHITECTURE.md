@@ -95,6 +95,8 @@ Filters run in the LDA before the message lands in Inbox so badge counts and not
 ### Socket-Based LDA Delivery
 The full `mymail` binary carries embedded web assets, ogen-generated HTTP stubs, and SQLite — roughly 14 MB RSS per process. When Postfix spawns two concurrent LDA invocations this overhead doubles. To reduce per-invocation memory cost a separate minimal `mymail-lda` binary (≈3 MB RSS, no SQLite, no HTTP server code) forwards raw RFC 5322 messages to the running server over a UNIX socket. The server handles all database access; the LDA client has no direct DB dependency. If the socket is unreachable the client exits 75 so the MTA retries later.
 
+During MIME parsing, CID image resolution in `internal/sanitize` returns the IDs of images actually embedded in the sanitized HTML. The LDA uses that bounded set to distinguish inline images from stored attachments; it does not scan raw HTML text for CID substrings.
+
 ### Header-Based Spam Detection
 Reads spam verdicts from headers set by the MTA pipeline (SpamAssassin, Rspamd, etc.). No built-in classifier.
 

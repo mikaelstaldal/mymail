@@ -298,17 +298,22 @@ func hasOwnBlockFormat(n *html.Node) bool {
 
 const (
 	maxCIDImages = 64
+	maxCIDLength = 1024
 	maxTotalSize = 10 * 1024 * 1024
 	maxImageSize = 1 * 1024 * 1024
 )
 
 // ResolveCID resolves cid: src attributes to inline data URIs, then sanitizes.
+// It also returns the Content-IDs actually embedded, for excluding those MIME
+// parts from the attachment list. CID values longer than maxCIDLength are
+// rejected before lookup or copying.
 // cidMap maps Content-ID (without angle brackets) to raw bytes.
 // cidContentTypes maps the same keys to MIME content types.
-func ResolveCID(h string, cidMap map[string][]byte, cidContentTypes map[string]string) string {
+func ResolveCID(h string, cidMap map[string][]byte, cidContentTypes map[string]string) (string, map[string]bool) {
+	used := make(map[string]bool)
 	doc, err := html.Parse(strings.NewReader(h))
 	if err != nil {
-		return policy.Sanitize(h)
+		return policy.Sanitize(h), used
 	}
 
 	// Count cid: images.
@@ -331,10 +336,14 @@ func ResolveCID(h string, cidMap map[string][]byte, cidContentTypes map[string]s
 				})
 			}
 		})
-		return policy.Sanitize(renderBodyFragment(doc))
+		return policy.Sanitize(renderBodyFragment(doc)), used
 	}
 
 	totalBytes := 0
+	// A resolved image can still be removed with its parent by the HTML
+	// sanitizer (for example, inside <object>). Track candidates by URI and
+	// count them as used only if an img src survives sanitization.
+	candidates := make(map[string][]string)
 	walkNodes(doc, func(n *html.Node) {
 		if n.Type != html.ElementNode || n.Data != "img" {
 			return
@@ -344,11 +353,21 @@ func ResolveCID(h string, cidMap map[string][]byte, cidContentTypes map[string]s
 				continue
 			}
 			cid := a.Val[4:] // strip "cid:"
+			if len(cid) == 0 || len(cid) > maxCIDLength {
+				n.Attr = append(n.Attr[:i], n.Attr[i+1:]...)
+				break
+			}
 			data, found := cidLookup(cidMap, cid)
-			ct := cidContentTypeLookup(cidContentTypes, cid)
 			if found && len(data) <= maxImageSize && totalBytes+len(data) <= maxTotalSize {
-				totalBytes += len(data)
-				n.Attr[i].Val = fmt.Sprintf("data:%s;base64,%s", ct, base64.StdEncoding.EncodeToString(data))
+				ct := cidContentTypeLookup(cidContentTypes, cid)
+				uri := fmt.Sprintf("data:%s;base64,%s", ct, base64.StdEncoding.EncodeToString(data))
+				if reSrc.MatchString(uri) {
+					totalBytes += len(data)
+					n.Attr[i].Val = uri
+					candidates[uri] = append(candidates[uri], strings.ToLower(cid))
+				} else {
+					n.Attr = append(n.Attr[:i], n.Attr[i+1:]...)
+				}
 			} else {
 				n.Attr = append(n.Attr[:i], n.Attr[i+1:]...)
 			}
@@ -356,7 +375,33 @@ func ResolveCID(h string, cidMap map[string][]byte, cidContentTypes map[string]s
 		}
 	})
 
-	return policy.Sanitize(renderBodyFragment(doc))
+	clean := policy.Sanitize(renderBodyFragment(doc))
+	z := html.NewTokenizer(strings.NewReader(clean))
+	for {
+		tt := z.Next()
+		if tt == html.ErrorToken {
+			break
+		}
+		if tt != html.StartTagToken && tt != html.SelfClosingTagToken {
+			continue
+		}
+		name, hasAttr := z.TagName()
+		if string(name) != "img" || !hasAttr {
+			continue
+		}
+		for {
+			key, val, more := z.TagAttr()
+			if string(key) == "src" {
+				for _, cid := range candidates[string(val)] {
+					used[cid] = true
+				}
+			}
+			if !more {
+				break
+			}
+		}
+	}
+	return clean, used
 }
 
 // HasExternalImages reports whether the HTML contains any <img> with an http
@@ -388,7 +433,7 @@ func HasExternalImages(h string) bool {
 }
 
 func isCIDSrc(val string) bool {
-	return strings.HasPrefix(strings.ToLower(val), "cid:")
+	return len(val) >= 4 && strings.EqualFold(val[:4], "cid:")
 }
 
 func walkNodes(n *html.Node, fn func(*html.Node)) {

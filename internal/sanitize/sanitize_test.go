@@ -345,6 +345,30 @@ func TestSentHTMLSurvivesBeingReceived(t *testing.T) {
 	}
 }
 
+func TestResolveCIDReportsOnlySanitizedImages(t *testing.T) {
+	cases := []struct {
+		name string
+		html string
+		id   string
+		want bool
+	}{
+		{"mixed case", `<img src="CID:A@B">`, "A@B", true},
+		{"empty value", `<img src="cid:">`, "A@B", false},
+		{"maximum length", `<img src="cid:` + strings.Repeat("a", 1024) + `">`, strings.Repeat("a", 1024), true},
+		{"over maximum length", `<img src="cid:` + strings.Repeat("a", 1025) + `">`, strings.Repeat("a", 1025), false},
+		{"maximum images", strings.Repeat(`<img src="cid:A@B">`, 64), "A@B", true},
+		{"over maximum images", strings.Repeat(`<img src="cid:A@B">`, 65), "A@B", false},
+		{"removed parent", `<object><img src="cid:A@B"></object>`, "A@B", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			clean, used := ResolveCID(tc.html, map[string][]byte{tc.id: []byte("GIF")}, map[string]string{tc.id: "image/gif"})
+			assert.Equal(t, tc.want, used[strings.ToLower(tc.id)])
+			assert.Equal(t, tc.want, strings.Contains(clean, "data:image/gif;base64,"))
+		})
+	}
+}
+
 // Fragments mirroring what MyNotes' email export emits (web/ts/util/emailhtml.ts).
 var roundTripSamples = map[string]string{
 	"callout": `<blockquote style="margin:0.75em 0;padding:0.6em 1em;border:1px solid #e5e7eb;` +

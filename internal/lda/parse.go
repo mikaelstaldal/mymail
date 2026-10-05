@@ -90,7 +90,7 @@ func ParseMessage(raw []byte) (*model.ParsedMessage, error) {
 		rawHTML = *state.bodyHTML
 	}
 
-	usedCIDs := extractCIDRefs(rawHTML)
+	bodyHTML, usedCIDs := sanitize.ResolveCID(rawHTML, state.cidMap, state.cidCT)
 
 	var attachments []model.DBAttachment
 	for _, p := range state.pending {
@@ -107,8 +107,6 @@ func ParseMessage(raw []byte) (*model.ParsedMessage, error) {
 	if attachments == nil {
 		attachments = []model.DBAttachment{}
 	}
-
-	bodyHTML := sanitize.HTML(sanitize.ResolveCID(rawHTML, state.cidMap, state.cidCT))
 
 	bodyText := ""
 	if state.bodyText != nil {
@@ -338,35 +336,6 @@ func stripAngles(s string) string {
 func truncateRefs(refs []string) []string {
 	for len(refs) > 0 && len(strings.Join(refs, "\n")) > maxRefsBytes {
 		refs = refs[1:]
-	}
-	return refs
-}
-
-// extractCIDRefs returns the set of cid: values (lowercase, no angle brackets)
-// referenced in img src attributes within rawHTML.
-func extractCIDRefs(rawHTML string) map[string]bool {
-	refs := make(map[string]bool)
-	lower := strings.ToLower(rawHTML)
-	pos := 0
-	for {
-		idx := strings.Index(lower[pos:], "cid:")
-		if idx < 0 {
-			break
-		}
-		absIdx := pos + idx
-		start := absIdx + 4
-		end := start
-		for end < len(rawHTML) {
-			c := rawHTML[end]
-			if c == '"' || c == '\'' || c == ' ' || c == '\t' || c == '\r' || c == '\n' || c == '>' {
-				break
-			}
-			end++
-		}
-		if end > start {
-			refs[strings.ToLower(rawHTML[start:end])] = true
-		}
-		pos = absIdx + 1
 	}
 	return refs
 }

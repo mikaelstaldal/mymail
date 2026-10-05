@@ -580,6 +580,7 @@ raw RFC 5322 blob.
 Before sanitization, all `<img src="cid:...">` references are resolved to `data:` URIs:
 
 - Per-message limits: maximum 64 inline images; maximum 10 MiB total decoded bytes.
+- Only `cid:` values in `<img src>` attributes are considered. Values longer than 1024 bytes have their `src` removed. MIME parts are excluded from the attachment list only when their image data is embedded successfully.
 - Per-image limit: images larger than 1 MiB have their `src` removed (browser renders broken image placeholder).
 - Images resolved in document order; once the total size limit is reached, remaining `cid:` references have their `src`
   removed.
