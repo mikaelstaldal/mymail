@@ -748,6 +748,8 @@ On first load the UI reads `localStorage` for the last selected folder and navig
 +------------------------------------------------------|
 ```
 
+Hovering a folder in the sidebar shows a tooltip with its slug and numeric id, e.g. `inbox (id 1)`.
+
 ### Views
 
 1. **Folder view** — Paginated message list. Unread messages shown in bold. **Mark all as read** button marks all

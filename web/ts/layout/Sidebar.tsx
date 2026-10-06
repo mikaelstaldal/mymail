@@ -30,7 +30,7 @@ function FolderItem({ folder, active }: FolderItemProps) {
   const icon = FOLDER_ICONS[folder.slug] ?? 'folder';
   return (
     <li class={active ? 'folder-item active' : 'folder-item'}>
-      <a href={href}>
+      <a href={href} title={`${folder.slug} (id ${folder.id})`}>
         <Icon name={icon} class="folder-icon" />
         {folder.name}
         {folder.unread_count > 0 && (
