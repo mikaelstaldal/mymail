@@ -15,7 +15,7 @@ import (
 
 const DefaultURL = "http://127.0.0.1:8080"
 
-// URLDefault returns the configured server origin, or the local default.
+// URLDefault returns the configured server base URL, or the local default.
 func URLDefault() string {
 	if value := os.Getenv("MYMAIL_URL"); value != "" {
 		return value
@@ -23,14 +23,14 @@ func URLDefault() string {
 	return DefaultURL
 }
 
-// ParseOrigin rejects URL components that could redirect credentials or alter routes.
-func ParseOrigin(raw string) (*url.URL, error) {
+// ParseBaseURL accepts a server URL with an optional deployment path prefix.
+func ParseBaseURL(raw string) (*url.URL, error) {
 	if strings.ContainsRune(raw, '\\') || strings.IndexFunc(raw, unicode.IsSpace) >= 0 || strings.IndexFunc(raw, unicode.IsControl) >= 0 {
 		return nil, errors.New("-url must not contain whitespace, controls, or backslashes")
 	}
 	u, err := url.Parse(raw)
-	if err != nil || u == nil || u.Host == "" || u.User != nil || u.RawQuery != "" || u.ForceQuery || u.Fragment != "" || (u.Path != "" && u.Path != "/") {
-		return nil, errors.New("-url must be a server origin without credentials, path, query, or fragment")
+	if err != nil || u == nil || u.Host == "" || u.User != nil || u.RawQuery != "" || u.ForceQuery || u.Fragment != "" {
+		return nil, errors.New("-url must be a server URL without credentials, query, or fragment")
 	}
 	if u.Scheme != "https" && (u.Scheme != "http" || !isLiteralLoopback(u.Hostname())) {
 		return nil, errors.New("-url requires HTTPS except for literal loopback addresses")
@@ -42,6 +42,16 @@ func ParseOrigin(raw string) (*url.URL, error) {
 		}
 	}
 	return u, nil
+}
+
+// APIURL appends an API resource beneath the deployment prefix, preserving escaping.
+func APIURL(base *url.URL, resource string, query url.Values) string {
+	endpoint := *base
+	escapedPath := strings.TrimRight(base.EscapedPath(), "/") + "/api/v1" + resource
+	endpoint.Path, _ = url.PathUnescape(escapedPath)
+	endpoint.RawPath = escapedPath
+	endpoint.RawQuery = query.Encode()
+	return endpoint.String()
 }
 
 func isLiteralLoopback(host string) bool {

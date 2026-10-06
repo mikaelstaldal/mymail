@@ -20,7 +20,7 @@ import (
 const usage = `Usage: mymail-cli [global flags] <command> [command flags]
 
 Global flags (before the command):
-  -url URL          Server origin (default MYMAIL_URL or http://127.0.0.1:8080)
+  -url URL          Server base URL, including optional path (default MYMAIL_URL or http://127.0.0.1:8080)
   -token-file PATH  Read API token from a file
   -token-stdin      Read API token from standard input
 
@@ -53,7 +53,7 @@ func main() {
 func run(args []string, stdin io.Reader, stdout io.Writer) error {
 	flags := flag.NewFlagSet("mymail-cli", flag.ContinueOnError)
 	flags.SetOutput(io.Discard)
-	base := flags.String("url", clihttp.URLDefault(), "server origin")
+	base := flags.String("url", clihttp.URLDefault(), "server base URL")
 	tokenFile := flags.String("token-file", "", "token file")
 	tokenStdin := flags.Bool("token-stdin", false, "read token from stdin")
 	if err := flags.Parse(args); err != nil {
@@ -68,7 +68,7 @@ func run(args []string, stdin io.Reader, stdout io.Writer) error {
 		_, _ = io.WriteString(stdout, usage)
 		return nil
 	}
-	endpoint, err := clihttp.ParseOrigin(*base)
+	endpoint, err := clihttp.ParseBaseURL(*base)
 	if err != nil {
 		return err
 	}
@@ -99,9 +99,7 @@ func run(args []string, stdin io.Reader, stdout io.Writer) error {
 	if token == "" || strings.ContainsAny(token, " \t\r\n") {
 		return errors.New("token input must contain one token")
 	}
-	endpoint.Path = "/api/v1" + path
-	endpoint.RawQuery = query.Encode()
-	request, err := http.NewRequest(method, endpoint.String(), nil)
+	request, err := http.NewRequest(method, clihttp.APIURL(endpoint, path, query), nil)
 	if err != nil {
 		return err
 	}

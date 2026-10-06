@@ -73,7 +73,6 @@ func TestRejectUnsafeOrInvalidRequests(t *testing.T) {
 	tests := [][]string{
 		{"-url", "http://example.com", "-token-stdin", "folders", "list"},
 		{"-url", "https://user:pass@example.com", "-token-stdin", "folders", "list"},
-		{"-url", "https://example.com/other", "-token-stdin", "folders", "list"},
 		{"-token-stdin", "messages", "search", "-q", "test"},
 		{"-token-stdin", "messages", "search", "-folder", "2", "-q", " "},
 		{"-token-stdin", "messages", "list", "1", "-limit", "201"},
@@ -129,6 +128,32 @@ func TestEnvironmentURLAndFlagOverride(t *testing.T) {
 	t.Setenv("MYMAIL_URL", "http://example.com")
 	output.Reset()
 	require.NoError(t, run([]string{"-url", server.URL, "-token-stdin", "folders", "list"}, strings.NewReader("mymail_secret"), &output))
+}
+
+func TestServerURLWithPath(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, "/suite/mymail/api/v1/messages/search", r.URL.Path)
+		assert.Equal(t, "hello world", r.URL.Query().Get("q"))
+		assert.Equal(t, "Bearer mymail_secret", r.Header.Get("Authorization"))
+		_, _ = w.Write([]byte(`{"total":0,"items":[]}`))
+	}))
+	defer server.Close()
+	for _, suffix := range []string{"", "/"} {
+		for _, source := range []string{"flag", "environment"} {
+			t.Run(source+suffix, func(t *testing.T) {
+				args := []string{"-token-stdin"}
+				baseURL := server.URL + "/suite/mymail" + suffix
+				if source == "flag" {
+					args = append(args, "-url", baseURL)
+				} else {
+					t.Setenv("MYMAIL_URL", baseURL)
+				}
+				args = append(args, "messages", "search", "-folder", "1", "-q", "hello world")
+				var output bytes.Buffer
+				require.NoError(t, run(args, strings.NewReader("mymail_secret"), &output))
+			})
+		}
+	}
 }
 
 func TestUnicodeSearchLimits(t *testing.T) {

@@ -660,7 +660,7 @@ it reads one `username:password` line from a file or standard input, or prompts 
 disabled for the password when given a username (`-user` or `MYMAIL_USER`). Credentials are optional
 when the server has no Basic authentication configured; passwords are never command arguments.
 It requires HTTPS for remote URLs and permits plain HTTP only for literal loopback IP
-addresses. It rejects URL userinfo, paths, queries, and fragments, bypasses environment proxies,
+addresses. It rejects URL userinfo, queries, and fragments, bypasses environment proxies,
 and does not follow redirects.
 
 Initially a token grants read access to its selected folders through `GET /folders` (filtered),
@@ -683,9 +683,11 @@ uses the idempotent `PUT` route. The client accepts exactly one of `-token-file 
 `-token-stdin`; it does not accept Basic credentials or token arguments. Its built-in `help`
 lists commands and flags. JSON and downloaded bytes are written unchanged to stdout; errors
 go to stderr and cause a nonzero exit. HTTP is allowed only for literal loopback IP addresses;
-remote URLs require HTTPS. The client rejects URL credentials, paths, queries, and fragments,
+remote URLs require HTTPS. The client rejects URL credentials, queries, and fragments,
 does not follow redirects, and ignores environment HTTP proxies.
-Both CLI binaries use `MYMAIL_URL` as the default server origin when set; an explicit `-url` overrides it.
+Both CLI binaries use `MYMAIL_URL` as the default server base URL when set; an explicit `-url` overrides it.
+Both accept a deployment path prefix, with or without a trailing slash: `https://mail.example.com/mymail`
+uses `/mymail/api/v1/...` for API requests.
 
 ### CSRF Protection
 

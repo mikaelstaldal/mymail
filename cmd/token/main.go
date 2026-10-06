@@ -23,7 +23,7 @@ import (
 const usage = `Usage: mymail-token [global flags] <command> [command flags]
 
 Global flags (before the command):
-  -url URL                Server origin (default MYMAIL_URL or http://127.0.0.1:8080)
+  -url URL                Server base URL, including optional path (default MYMAIL_URL or http://127.0.0.1:8080)
   -user USER              Basic username (default MYMAIL_USER); prompt for password
   -credentials-file PATH  Read one username:password line from a file
   -credentials-stdin      Read one username:password line from standard input
@@ -53,7 +53,7 @@ func main() {
 func run(args []string, stdin io.Reader, stdout, stderr io.Writer) error {
 	flags := flag.NewFlagSet("mymail-token", flag.ContinueOnError)
 	flags.SetOutput(io.Discard)
-	base := flags.String("url", clihttp.URLDefault(), "server origin")
+	base := flags.String("url", clihttp.URLDefault(), "server base URL")
 	user := flags.String("user", os.Getenv("MYMAIL_USER"), "Basic username")
 	credentialsFile := flags.String("credentials-file", "", "Basic credentials file")
 	credentialsStdin := flags.Bool("credentials-stdin", false, "read Basic credentials from stdin")
@@ -69,7 +69,7 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer) error {
 		_, _ = io.WriteString(stdout, usage)
 		return nil
 	}
-	endpoint, err := clihttp.ParseOrigin(*base)
+	endpoint, err := clihttp.ParseBaseURL(*base)
 	if err != nil {
 		return err
 	}
@@ -121,8 +121,7 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer) error {
 		}
 		useBasic = true
 	}
-	endpoint.Path = "/api/v1" + path
-	request, err := http.NewRequest(method, endpoint.String(), bytes.NewReader(body))
+	request, err := http.NewRequest(method, clihttp.APIURL(endpoint, path, nil), bytes.NewReader(body))
 	if err != nil {
 		return err
 	}

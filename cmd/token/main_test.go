@@ -18,6 +18,35 @@ import (
 
 const testSecret = "mymail_abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQ"
 
+func TestServerURLWithPath(t *testing.T) {
+	t.Setenv("MYMAIL_USER", "")
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, "/suite/mymail/api/v1/tokens/sample", r.URL.Path)
+		user, password, ok := r.BasicAuth()
+		assert.True(t, ok)
+		assert.Equal(t, "agent", user)
+		assert.Equal(t, "password", password)
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer server.Close()
+	for _, suffix := range []string{"", "/"} {
+		for _, source := range []string{"flag", "environment"} {
+			t.Run(source+suffix, func(t *testing.T) {
+				args := []string{"-credentials-stdin"}
+				baseURL := server.URL + "/suite/mymail" + suffix
+				if source == "flag" {
+					args = append(args, "-url", baseURL)
+				} else {
+					t.Setenv("MYMAIL_URL", baseURL)
+				}
+				args = append(args, "revoke", "sample")
+				var stdout, stderr bytes.Buffer
+				require.NoError(t, run(args, strings.NewReader("agent:password"), &stdout, &stderr))
+			})
+		}
+	}
+}
+
 func TestCreateWithStdinCredentialsAndEnvironmentURL(t *testing.T) {
 	t.Setenv("MYMAIL_USER", "")
 	now := time.Now()

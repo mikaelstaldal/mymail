@@ -118,7 +118,8 @@ mymail -import -data /var/lib/mymail \
 for a password prompt with terminal echo disabled. Credentials are optional on servers
 without Basic auth. `MYMAIL_USER` supplies the default username for the prompt.
 `MYMAIL_URL` sets the default server URL for both `mymail-token` and `mymail-cli`; an explicit
-`-url` overrides it. Remote URLs require HTTPS. Plain HTTP is accepted for literal loopback
+`-url` overrides it. Both accept a path prefix, for example `https://mail.example.com/mymail`,
+with or without a trailing slash; API requests then use `/mymail/api/v1/...`. Remote URLs require HTTPS. Plain HTTP is accepted for literal loopback
 IP addresses. The clients reject embedded URL credentials, bypass proxy settings, and do not
 follow redirects.
 
