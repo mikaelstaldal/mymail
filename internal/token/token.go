@@ -48,6 +48,9 @@ func (s Store) Create(name string, expiry time.Time, folders []int64) (Record, s
 	}
 	defer tx.Rollback()
 	record = Record{Name: strings.TrimSpace(name), CreatedAt: time.Now().UTC().Format(time.RFC3339), ExpiresAt: expiry.UTC().Format(time.RFC3339), FolderIDs: folders}
+	if _, err := tx.Exec(`DELETE FROM api_tokens WHERE expires_at <= ?`, record.CreatedAt); err != nil {
+		return Record{}, "", err
+	}
 	base := repository.SlugifyName(record.Name)
 	for number := 1; ; number++ {
 		record.Slug = repository.SlugCandidate(base, number)

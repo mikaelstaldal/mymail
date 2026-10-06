@@ -163,6 +163,8 @@ The token table keeps a non-reusable AUTOINCREMENT ID for folder relations, whil
 slug derived from the token name with the same algorithm and collision suffixes as folders.
 Revocation deletes by slug, allowing that slug to be reused. The token table is introduced
 with a required, unique slug in migration v5; migration v6 makes IDs non-reusable.
+Token creation deletes expired tokens before inserting the new token in the same transaction;
+foreign-key cascades remove their folder grants. A failed creation rolls back the cleanup.
 The one allowed token write, `PUT /messages/{id}/read`, checks the original secret's hash,
 token expiry, and folder membership inside the SQL `UPDATE`, so concurrent token rotation
 or a folder move cannot broaden its reach.

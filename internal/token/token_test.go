@@ -73,6 +73,47 @@ func TestTokenSlugCollisionAndReuse(t *testing.T) {
 	assert.Equal(t, "re-sume", r.Slug)
 }
 
+func TestTokenCreationCleansExpiredTokens(t *testing.T) {
+	s := testStore(t)
+	expired, expiredSecret, err := s.Create("reader", time.Now().Add(time.Hour), []int64{1, 2})
+	require.NoError(t, err)
+	valid, validSecret, err := s.Create("active", time.Now().Add(time.Hour), []int64{2})
+	require.NoError(t, err)
+	otherExpired, _, err := s.Create("other", time.Now().Add(time.Hour), []int64{2})
+	require.NoError(t, err)
+	_, err = s.DB.Exec(`UPDATE api_tokens SET expires_at=? WHERE id IN (?,?)`, time.Now().Add(-time.Minute).UTC().Format(time.RFC3339), expired.ID, otherExpired.ID)
+	require.NoError(t, err)
+
+	// A failed creation must roll back both the insert and cleanup.
+	_, _, err = s.Create("reader", time.Now().Add(time.Hour), []int64{99})
+	require.Error(t, err)
+	var count int
+	require.NoError(t, s.DB.QueryRow(`SELECT COUNT(*) FROM api_tokens WHERE id=?`, expired.ID).Scan(&count))
+	assert.Equal(t, 1, count)
+	require.NoError(t, s.DB.QueryRow(`SELECT COUNT(*) FROM api_token_folders WHERE token_id=?`, expired.ID).Scan(&count))
+	assert.Equal(t, 2, count)
+
+	replacement, _, err := s.Create("reader", time.Now().Add(time.Hour), []int64{1})
+	require.NoError(t, err)
+	assert.Equal(t, expired.Slug, replacement.Slug)
+	assert.Greater(t, replacement.ID, valid.ID)
+	items, err := s.List()
+	require.NoError(t, err)
+	require.Len(t, items, 2)
+	assert.Equal(t, replacement.ID, items[0].ID)
+	assert.Equal(t, valid.ID, items[1].ID)
+	require.NoError(t, s.DB.QueryRow(`SELECT COUNT(*) FROM api_token_folders WHERE token_id=?`, expired.ID).Scan(&count))
+	assert.Zero(t, count)
+	require.NoError(t, s.DB.QueryRow(`SELECT COUNT(*) FROM api_token_folders WHERE token_id=?`, otherExpired.ID).Scan(&count))
+	assert.Zero(t, count)
+	allowed, err := s.Validate(validSecret)
+	require.NoError(t, err)
+	assert.Equal(t, map[int64]bool{2: true}, allowed)
+	allowed, err = s.Validate(expiredSecret)
+	require.NoError(t, err)
+	assert.Nil(t, allowed)
+}
+
 func TestTokenExpiryAndInvalidFolders(t *testing.T) {
 	s := testStore(t)
 	_, _, err := s.Create("reader", time.Now().Add(time.Hour), []int64{99})

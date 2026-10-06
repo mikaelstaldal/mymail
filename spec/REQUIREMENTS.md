@@ -648,6 +648,8 @@ Full-access users can create, list, and revoke API tokens from Settings → API 
 `GET /api/v1/tokens`, `POST /api/v1/tokens`, and `DELETE /api/v1/tokens/{slug}`. A token has a name,
 an expiry time, and at least one existing folder ID. Its secret is returned only when created;
 list responses contain metadata but never the secret. Revocation takes effect immediately.
+Creating a token first removes all expired tokens and their folder grants, freeing their slugs
+for reuse. Cleanup and creation are atomic: failed creation leaves existing tokens unchanged.
 Tokens are sent as `Authorization: Bearer <token>`. The server stores a SHA-256 hash of each
 random 256-bit secret and rejects it at or after its expiry time. The API returns a unique slug
 derived from the token name using the folder slug algorithm, with numeric suffixes for collisions.
