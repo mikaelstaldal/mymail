@@ -2,7 +2,9 @@ package main
 
 import (
 	"bytes"
+	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -77,6 +79,10 @@ func TestRejectUnsafeOrInvalidRequests(t *testing.T) {
 		{"-token-stdin", "messages", "search", "-folder", "2", "-q", " "},
 		{"-token-stdin", "messages", "list", "1", "-limit", "201"},
 		{"-token-stdin", "messages", "get", "-1"},
+		{"-token-stdin", "messages", "text"},
+		{"-token-stdin", "messages", "text", "0"},
+		{"-token-stdin", "messages", "text", "9", "extra"},
+		{"-token-stdin", "messages", "text", "9", "-external"},
 		{"-token-stdin", "messages", "get", "1", "extra"},
 		{"-token-stdin", "messages", "list", "1", "extra"},
 		{"-token-stdin", "messages", "search", "-folder", "1", "-q", "test", "extra"},
@@ -206,5 +212,48 @@ func TestTokenFileAndStdinWithOrWithoutNewline(t *testing.T) {
 				assert.Equal(t, `{"total":0,"items":[]}`, output.String())
 			})
 		}
+	}
+}
+
+func TestMessageText(t *testing.T) {
+	for _, text := range []string{"", "Hello", "  å\r\n\"quoted\"\t\n"} {
+		t.Run(text, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				assert.Equal(t, http.MethodGet, r.Method)
+				assert.Equal(t, "/api/v1/messages/9", r.URL.RequestURI())
+				assert.Equal(t, "Bearer mymail_secret", r.Header.Get("Authorization"))
+				require.NoError(t, json.NewEncoder(w).Encode(map[string]any{"body_text": text, "subject": "excluded", "body_html": "<p>excluded</p>"}))
+			}))
+			defer server.Close()
+			var output bytes.Buffer
+			require.NoError(t, run([]string{"-url", server.URL, "-token-stdin", "messages", "text", "9"}, strings.NewReader("mymail_secret"), &output))
+			assert.Equal(t, text, output.String())
+		})
+	}
+}
+
+func TestMessageTextErrors(t *testing.T) {
+	for _, tt := range []struct {
+		name      string
+		status    int
+		body      string
+		errorText string
+	}{
+		{"malformed JSON", 200, "{", "decode message"},
+		{"wrong body type", 200, `{"body_text":123}`, "decode message"},
+		{"out of scope", 403, `{"error":"out of scope"}`, "HTTP 403"},
+		{"missing message", 404, `{"error":"not found"}`, "HTTP 404"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.WriteHeader(tt.status)
+				_, _ = io.WriteString(w, tt.body)
+			}))
+			defer server.Close()
+			var output bytes.Buffer
+			err := run([]string{"-url", server.URL, "-token-stdin", "messages", "text", "9"}, strings.NewReader("mymail_secret"), &output)
+			require.ErrorContains(t, err, tt.errorText)
+			assert.Empty(t, output.String())
+		})
 	}
 }

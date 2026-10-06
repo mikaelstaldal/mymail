@@ -2,6 +2,7 @@
 package main
 
 import (
+	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
@@ -31,13 +32,15 @@ Commands:
                   [-sort relevance|date_asc|date_desc] [-date-from RFC3339]
                   [-date-to RFC3339] [-from ADDR] [-to ADDR]
   messages get ID
+  messages text ID
   messages raw ID
   messages headers ID
   messages body ID [-external]
   messages read ID
   attachments get ID
 
-JSON responses and downloaded bytes go to stdout unchanged. Errors go to stderr.
+JSON responses and downloaded bytes go to stdout unchanged; messages text writes
+only the stored plain-text body, without adding a newline. Errors go to stderr.
 Only token-accessible API routes are exposed. Search always requires a folder.
 HTTP is allowed only for literal loopback addresses; remote servers require HTTPS.
 Redirects and environment HTTP proxies are disabled.
@@ -117,6 +120,16 @@ func run(args []string, stdin io.Reader, stdout io.Writer) error {
 	}
 	if response.StatusCode == http.StatusNoContent {
 		return nil
+	}
+	if command[0] == "messages" && command[1] == "text" {
+		var message struct {
+			BodyText string `json:"body_text"`
+		}
+		if err := json.NewDecoder(response.Body).Decode(&message); err != nil {
+			return fmt.Errorf("decode message: %w", err)
+		}
+		_, err = io.WriteString(stdout, message.BodyText)
+		return err
 	}
 	_, err = io.Copy(stdout, response.Body)
 	return err
@@ -227,7 +240,7 @@ func parseCommand(args []string) (string, string, url.Values, error) {
 				query.Set("flagged", "true")
 			}
 			return http.MethodGet, "/folders/" + id + "/messages", query, nil
-		case "get", "raw", "headers", "body", "read":
+		case "get", "text", "raw", "headers", "body", "read":
 			if args[1] == "body" {
 				fs := commandFlags("messages body")
 				external := fs.Bool("external", false, "allow external images in HTML")
@@ -243,7 +256,7 @@ func parseCommand(args []string) (string, string, url.Values, error) {
 			} else if len(args) != 3 {
 				return bad()
 			}
-			if args[1] == "get" {
+			if args[1] == "get" || args[1] == "text" {
 				return http.MethodGet, "/messages/" + id, query, nil
 			}
 			if args[1] == "read" {
