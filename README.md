@@ -113,25 +113,28 @@ mymail -import -data /var/lib/mymail \
 
 ## API token CLI
 
-`scripts/api-token.sh` manages folder-scoped API tokens using `curl` and Bash. It uses the
-server's token API; `--user` prompts for the Basic Auth password when authentication is enabled. The default URL is
-`http://127.0.0.1:8080`; set `--url` for another server. Remote URLs must use HTTPS with a valid
-certificate. Plain HTTP is accepted only for literal `127.0.0.1` or `[::1]` destinations,
-and those requests bypass proxy settings. URLs with embedded credentials are rejected.
+`mymail-token` manages folder-scoped API tokens. When Basic auth is configured, put one
+`username:password` line in a private file, pipe it to `-credentials-stdin`, or use `-user`
+for a password prompt with terminal echo disabled. Credentials are optional on servers
+without Basic auth. `MYMAIL_USER` supplies the default username for the prompt.
+`MYMAIL_URL` sets the default server URL for both `mymail-token` and `mymail-cli`; an explicit
+`-url` overrides it. Remote URLs require HTTPS. Plain HTTP is accepted for literal loopback
+IP addresses. The clients reject embedded URL credentials, bypass proxy settings, and do not
+follow redirects.
 
 ```bash
-./scripts/api-token.sh --url https://mail.example.com --user myuser \
-  create --name 'Archive reader' --lifetime 7d --folders 1,100
-./scripts/api-token.sh --url https://mail.example.com --user myuser revoke archive-reader
+MYMAIL_URL=https://mail.example.com mymail-token -credentials-file ./basic-credentials \
+  create -name 'Archive reader' -lifetime 7d -folders 1,100
+MYMAIL_URL=https://mail.example.com mymail-token -credentials-file ./basic-credentials \
+  revoke archive-reader
 ```
 
 Creation prints **only the token secret to stdout** and its slug to stderr. Save that
-slug for revocation. Lifetimes accept `s`, `m`, `h`, or `d` (up to ten years). To supply Basic
-Auth credentials without a password prompt, use `--credentials PATH` with a file containing one
-`username:password` line, or `--credentials -` to read that line from standard input. Keep the
-file readable only by its owner. `MYMAIL_URL` and `MYMAIL_USER` can supply defaults; an explicit
-`--credentials` overrides `MYMAIL_USER`.
-Run `./scripts/api-token.sh --help` for the complete syntax.
+slug for revocation. Lifetimes accept `s`, `m`, `h`, or `d` (up to ten years). Use
+`-credentials-stdin` instead of `-credentials-file` to read credentials from standard input.
+Put global flags before the command, as in `mymail-cli`. Keep credential and token files
+readable only by their owner. Run `mymail-token help` and
+`mymail-cli help` for the full command syntax.
 
 ## Demo mode
 

@@ -116,6 +116,21 @@ func TestHelp(t *testing.T) {
 	assert.Contains(t, output.String(), "messages search")
 }
 
+func TestEnvironmentURLAndFlagOverride(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"total":0,"items":[]}`))
+	}))
+	defer server.Close()
+	t.Setenv("MYMAIL_URL", server.URL)
+	var output bytes.Buffer
+	require.NoError(t, run([]string{"-token-stdin", "folders", "list"}, strings.NewReader("mymail_secret"), &output))
+	assert.Contains(t, output.String(), `"items":[]`)
+
+	t.Setenv("MYMAIL_URL", "http://example.com")
+	output.Reset()
+	require.NoError(t, run([]string{"-url", server.URL, "-token-stdin", "folders", "list"}, strings.NewReader("mymail_secret"), &output))
+}
+
 func TestUnicodeSearchLimits(t *testing.T) {
 	queryText := strings.Repeat("å", 300)
 	addressText := strings.Repeat("é", 150)

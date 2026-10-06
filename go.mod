@@ -14,6 +14,7 @@ require (
 	github.com/ogen-go/ogen v1.22.0
 	github.com/stretchr/testify v1.11.1
 	golang.org/x/net v0.56.0
+	golang.org/x/term v0.44.0
 	golang.org/x/text v0.39.0
 	modernc.org/sqlite v1.52.0
 )

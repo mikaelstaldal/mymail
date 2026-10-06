@@ -653,12 +653,15 @@ random 256-bit secret and rejects it at or after its expiry time. The API return
 derived from the token name using the folder slug algorithm, with numeric suffixes for collisions.
 Revoking a token frees its slug for reuse. The token's internal numeric ID is never returned by the API.
 IDs generated after migration v6 are not reused after revocation.
-The `scripts/api-token.sh` CLI uses those management endpoints to create a token from a lifetime
-and folder IDs or revoke one by slug; it prints the newly created secret to stdout. For Basic
-authentication it can prompt for a password or read one `username:password` line from a file
-or standard input. The CLI requires HTTPS for remote URLs; plain HTTP is permitted only for
-literal `127.0.0.1` and `[::1]` loopback hosts, with proxies bypassed. It rejects URL userinfo
-and ignores curl configuration files so they cannot change request transport or redirects.
+The separate `mymail-token` binary uses those management endpoints to create a token from a name,
+lifetime (`s`, `m`, `h`, or `d`, up to ten years), and folder IDs, or revoke one by slug. It prints
+only the newly created secret to stdout and the revocation slug to stderr. For Basic authentication
+it reads one `username:password` line from a file or standard input, or prompts with terminal echo
+disabled for the password when given a username (`-user` or `MYMAIL_USER`). Credentials are optional
+when the server has no Basic authentication configured; passwords are never command arguments.
+It requires HTTPS for remote URLs and permits plain HTTP only for literal loopback IP
+addresses. It rejects URL userinfo, paths, queries, and fragments, bypasses environment proxies,
+and does not follow redirects.
 
 Initially a token grants read access to its selected folders through `GET /folders` (filtered),
 `GET /folders/{folder_id}/messages`, `GET /messages/search` with an allowed `folder_id`,
@@ -682,6 +685,7 @@ lists commands and flags. JSON and downloaded bytes are written unchanged to std
 go to stderr and cause a nonzero exit. HTTP is allowed only for literal loopback IP addresses;
 remote URLs require HTTPS. The client rejects URL credentials, paths, queries, and fragments,
 does not follow redirects, and ignores environment HTTP proxies.
+Both CLI binaries use `MYMAIL_URL` as the default server origin when set; an explicit `-url` overrides it.
 
 ### CSRF Protection
 

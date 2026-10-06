@@ -6,7 +6,6 @@ import (
 	"flag"
 	"fmt"
 	"io"
-	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -14,12 +13,14 @@ import (
 	"strings"
 	"time"
 	"unicode/utf8"
+
+	"github.com/mikaelstaldal/mymail/internal/clihttp"
 )
 
 const usage = `Usage: mymail-cli [global flags] <command> [command flags]
 
 Global flags (before the command):
-  -url URL          Server origin (default http://127.0.0.1:8080)
+  -url URL          Server origin (default MYMAIL_URL or http://127.0.0.1:8080)
   -token-file PATH  Read API token from a file
   -token-stdin      Read API token from standard input
 
@@ -52,7 +53,7 @@ func main() {
 func run(args []string, stdin io.Reader, stdout io.Writer) error {
 	flags := flag.NewFlagSet("mymail-cli", flag.ContinueOnError)
 	flags.SetOutput(io.Discard)
-	base := flags.String("url", "http://127.0.0.1:8080", "server origin")
+	base := flags.String("url", clihttp.URLDefault(), "server origin")
 	tokenFile := flags.String("token-file", "", "token file")
 	tokenStdin := flags.Bool("token-stdin", false, "read token from stdin")
 	if err := flags.Parse(args); err != nil {
@@ -67,7 +68,7 @@ func run(args []string, stdin io.Reader, stdout io.Writer) error {
 		_, _ = io.WriteString(stdout, usage)
 		return nil
 	}
-	endpoint, err := parseOrigin(*base)
+	endpoint, err := clihttp.ParseOrigin(*base)
 	if err != nil {
 		return err
 	}
@@ -106,15 +107,7 @@ func run(args []string, stdin io.Reader, stdout io.Writer) error {
 	}
 	request.Header.Set("Authorization", "Bearer "+token)
 	request.Header.Set("Accept", "application/json")
-	client := &http.Client{
-		Transport: &http.Transport{
-			Proxy:                 nil,
-			DialContext:           (&net.Dialer{Timeout: 30 * time.Second}).DialContext,
-			TLSHandshakeTimeout:   10 * time.Second,
-			ResponseHeaderTimeout: 30 * time.Second,
-		},
-		CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
-	}
+	client := clihttp.NewClient()
 	response, err := client.Do(request)
 	if err != nil {
 		return fmt.Errorf("request: %w", err)
@@ -129,28 +122,6 @@ func run(args []string, stdin io.Reader, stdout io.Writer) error {
 	}
 	_, err = io.Copy(stdout, response.Body)
 	return err
-}
-
-func parseOrigin(raw string) (*url.URL, error) {
-	u, err := url.Parse(raw)
-	if err != nil || u == nil || u.Host == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" || (u.Path != "" && u.Path != "/") {
-		return nil, errors.New("-url must be a server origin without credentials, path, query, or fragment")
-	}
-	if u.Scheme != "https" && (u.Scheme != "http" || !isLiteralLoopback(u.Hostname())) {
-		return nil, errors.New("-url requires HTTPS except for literal loopback addresses")
-	}
-	if u.Port() != "" {
-		port, err := strconv.Atoi(u.Port())
-		if err != nil || port < 1 || port > 65535 {
-			return nil, errors.New("-url has an invalid port")
-		}
-	}
-	return u, nil
-}
-
-func isLiteralLoopback(host string) bool {
-	ip := net.ParseIP(host)
-	return ip != nil && ip.IsLoopback()
 }
 
 func parseCommand(args []string) (string, string, url.Values, error) {
