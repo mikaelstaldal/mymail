@@ -151,3 +151,35 @@ func TestTokenInputLimit(t *testing.T) {
 	err = run([]string{"-token-file", file, "folders", "list"}, strings.NewReader(""), &output)
 	require.ErrorContains(t, err, "too large")
 }
+
+func TestTokenFileAndStdinWithOrWithoutNewline(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, "Bearer mymail_secret", r.Header.Get("Authorization"))
+		_, _ = w.Write([]byte(`{"total":0,"items":[]}`))
+	}))
+	defer server.Close()
+	for _, source := range []string{"file", "stdin"} {
+		for _, suffix := range []string{"", "\n"} {
+			name := source + "_without_newline"
+			if suffix != "" {
+				name = source + "_with_newline"
+			}
+			t.Run(name, func(t *testing.T) {
+				args := []string{"-url", server.URL}
+				input := strings.NewReader("")
+				if source == "file" {
+					file := t.TempDir() + "/token"
+					require.NoError(t, os.WriteFile(file, []byte("mymail_secret"+suffix), 0600))
+					args = append(args, "-token-file", file)
+				} else {
+					args = append(args, "-token-stdin")
+					input = strings.NewReader("mymail_secret" + suffix)
+				}
+				args = append(args, "folders", "list")
+				var output bytes.Buffer
+				require.NoError(t, run(args, input, &output))
+				assert.Equal(t, `{"total":0,"items":[]}`, output.String())
+			})
+		}
+	}
+}

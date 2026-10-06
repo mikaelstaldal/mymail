@@ -145,3 +145,39 @@ func TestNoAuthenticationAndUserPassword(t *testing.T) {
 	stderr.Reset()
 	require.NoError(t, run([]string{"-url", server.URL, "revoke", "named-user"}, strings.NewReader("password\n"), &stdout, &stderr))
 }
+
+func TestCredentialsFileAndStdinWithOrWithoutNewline(t *testing.T) {
+	t.Setenv("MYMAIL_USER", "")
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		user, password, ok := r.BasicAuth()
+		assert.True(t, ok)
+		assert.Equal(t, "agent", user)
+		assert.Equal(t, "password", password)
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer server.Close()
+	for _, source := range []string{"file", "stdin"} {
+		for _, suffix := range []string{"", "\n"} {
+			name := source + "_without_newline"
+			if suffix != "" {
+				name = source + "_with_newline"
+			}
+			t.Run(name, func(t *testing.T) {
+				args := []string{"-url", server.URL}
+				input := strings.NewReader("")
+				if source == "file" {
+					file := t.TempDir() + "/credentials"
+					require.NoError(t, os.WriteFile(file, []byte("agent:password"+suffix), 0600))
+					args = append(args, "-credentials-file", file)
+				} else {
+					args = append(args, "-credentials-stdin")
+					input = strings.NewReader("agent:password" + suffix)
+				}
+				args = append(args, "revoke", "sample")
+				var stdout, stderr bytes.Buffer
+				require.NoError(t, run(args, input, &stdout, &stderr))
+				assert.Empty(t, stdout.String())
+			})
+		}
+	}
+}
