@@ -35,9 +35,10 @@ mymail/
 
 Web UI assets embedded in the binary via `//go:embed`.
 
-The outer HTTP handler validates the request Host against the configured public URL and local listener authorities
+The outer HTTP handler uses `go-server-common/hostguard.Policy` to validate the request Host against the configured public URL and local listener authorities
 before API, UI, authentication, and CSRF routing. It ignores forwarded-host headers. This prevents a browser request
 using a DNS-rebound foreign hostname from reaching an unauthenticated loopback deployment.
+The same policy supplies canonical browser origins to the CSRF middleware.
 
 `e2e/` is deliberately outside `build.sh`: that script must keep working without a
 browser toolchain, so Playwright is installed by the CI workflow instead. The

@@ -25,6 +25,7 @@ import (
 
 	"github.com/mikaelstaldal/go-server-common/auth"
 	"github.com/mikaelstaldal/go-server-common/csrf"
+	"github.com/mikaelstaldal/go-server-common/hostguard"
 	"github.com/mikaelstaldal/go-server-common/httputil"
 	commonweb "github.com/mikaelstaldal/go-server-common/web"
 	"github.com/mikaelstaldal/mymail/internal/api"
@@ -407,7 +408,7 @@ func runServer(dataDir, addr string, port int, publicURL, basicAuthFile, basicAu
 
 	mux.HandleFunc("/", indexFallbackHandler(indexHTML))
 
-	serverOrigin, err := csrf.ResolveServerOrigin(publicURL, addr, port)
+	hostPolicy, err := hostguard.New(publicURL, addr, port)
 	if err != nil {
 		log.Fatalf("error: %v", err)
 	}
@@ -416,7 +417,7 @@ func runServer(dataDir, addr string, port int, publicURL, basicAuthFile, basicAu
 		csp += " " + inlineScriptCSPHash(configScript)
 	}
 	commonMiddleware := func(h http.Handler) http.Handler {
-		h = csrf.MiddlewareOrigins(append([]string{browserOrigin(serverOrigin)}, localCSRFOrigins(addr, port)...)...)(h)
+		h = csrf.MiddlewareOrigins(hostPolicy.Origins()...)(h)
 		return httputil.SecurityHeaders(httputil.SecurityHeadersOptions{
 			CSP:            csp,
 			ReferrerPolicy: "same-origin",
@@ -425,10 +426,7 @@ func runServer(dataDir, addr string, port int, publicURL, basicAuthFile, basicAu
 	}
 	httpHandler := selectAuthentication(mux, authMiddleware, tokenStore, commonMiddleware)
 	httpHandler = http.MaxBytesHandler(httpHandler, maxRequestBody)
-	httpHandler, err = hostGuard(addr, port, publicURL, httpHandler)
-	if err != nil {
-		log.Fatalf("error: %v", err)
-	}
+	httpHandler = hostPolicy.Middleware(httpHandler)
 
 	serverAddr := fmt.Sprintf("%s:%d", addr, port)
 	srv := &http.Server{

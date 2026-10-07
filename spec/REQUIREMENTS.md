@@ -72,6 +72,11 @@ the first send (which would otherwise return 500 to the user).
 > place mymail behind a TLS-terminating reverse proxy. HTTP Basic Auth must not be used over plain HTTP on a non-loopback
 > interface. Rate limiting is also the responsibility of the reverse proxy layer.
 
+Host validation accepts ASCII DNS names (use punycode for IDNs), IPv4, and bracketed IPv6.
+Trailing dots, IPv6 zones, unbracketed request IPv6, and malformed authorities are rejected.
+Bind addresses must be bare names or IPs, without brackets or a port. IPv4-mapped IPv6
+authorities retain their IPv6 identity; they do not alias plain IPv4 authorities.
+
 Identities are managed entirely through the REST API and the web UI. The initial identity is created at init time via
 `-identity-address` (see Init mode).
 The server assumes that exactly one identity marked as default exists at all times, operations that require a default

@@ -5,6 +5,8 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/mikaelstaldal/go-server-common/csrf"
+	"github.com/mikaelstaldal/go-server-common/hostguard"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -37,11 +39,12 @@ func TestHostGuard(t *testing.T) {
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			called := false
-			h, err := hostGuard(tt.addr, 8080, tt.publicURL, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			policy, err := hostguard.New(tt.publicURL, tt.addr, 8080)
+			require.NoError(t, err)
+			h := policy.Middleware(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 				called = true
 				w.WriteHeader(http.StatusOK)
 			}))
-			require.NoError(t, err)
 			req := httptest.NewRequest(tt.method, "/api/v1/messages/1", nil)
 			req.Host = tt.host
 			req.Header.Set("Origin", "http://attacker.example:8080")
@@ -59,22 +62,41 @@ func TestHostGuard(t *testing.T) {
 
 func TestHostGuardRejectsUnspecifiedDeploymentWithoutPublicURL(t *testing.T) {
 	for _, addr := range []string{"", "0.0.0.0", "::"} {
-		_, err := hostGuard(addr, 8080, "", http.NotFoundHandler())
-		require.ErrorContains(t, err, "-public-url")
+		_, err := hostguard.New("", addr, 8080)
+		require.ErrorContains(t, err, "public URL")
 	}
 }
 
 func TestHostGuardRejectsInvalidConfiguration(t *testing.T) {
-	_, err := hostGuard("127.0.0.1", 0, "", http.NotFoundHandler())
-	require.ErrorContains(t, err, "invalid HTTP port")
-	_, err = hostGuard("127.0.0.1", 8080, "https://mail.example:bad", http.NotFoundHandler())
+	_, err := hostguard.New("", "127.0.0.1", 0)
+	require.ErrorContains(t, err, "invalid listener port")
+	_, err = hostguard.New("https://mail.example:bad", "127.0.0.1", 8080)
 	require.ErrorContains(t, err, "invalid public URL")
 }
 
-func TestLocalCSRFOrigins(t *testing.T) {
-	assert.Contains(t, localCSRFOrigins("127.0.0.1", 8080), "http://localhost:8080")
-	assert.Contains(t, localCSRFOrigins("::1", 8080), "http://[::1]:8080")
-	assert.Contains(t, localCSRFOrigins("127.0.0.2", 8080), "http://127.0.0.2:8080")
-	assert.Contains(t, localCSRFOrigins("0.0.0.0", 8080), "http://localhost:8080")
-	assert.Equal(t, "https://mail.example", browserOrigin("https://MAIL.EXAMPLE:443"))
+func TestHostPolicyCSRFOrigins(t *testing.T) {
+	for _, addr := range []string{"127.0.0.1", "::1", "127.0.0.2", "0.0.0.0"} {
+		policy, err := hostguard.New("https://MAIL.EXAMPLE:443", addr, 8080)
+		require.NoError(t, err)
+		origins := policy.Origins()
+		assert.Contains(t, origins, "https://mail.example")
+		assert.Contains(t, origins, "http://localhost:8080")
+		assert.Contains(t, origins, "http://[::1]:8080")
+		if addr == "127.0.0.2" {
+			assert.Contains(t, origins, "http://127.0.0.2:8080")
+		}
+		h := policy.Middleware(csrf.MiddlewareOrigins(origins...)(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusNoContent) })))
+		for _, origin := range append(origins, "http://attacker.example:8080") {
+			req := httptest.NewRequest(http.MethodPost, "/api/v1/folders", nil)
+			req.Host = "localhost:8080"
+			req.Header.Set("Origin", origin)
+			rec := httptest.NewRecorder()
+			h.ServeHTTP(rec, req)
+			want := http.StatusNoContent
+			if origin == "http://attacker.example:8080" {
+				want = http.StatusForbidden
+			}
+			assert.Equal(t, want, rec.Code, origin)
+		}
+	}
 }
