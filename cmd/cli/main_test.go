@@ -87,7 +87,9 @@ func TestRejectUnsafeOrInvalidRequests(t *testing.T) {
 		{"-token-stdin", "messages", "list", "1", "extra"},
 		{"-token-stdin", "messages", "search", "-folder", "1", "-q", "test", "extra"},
 		{"-token-stdin", "messages", "delete", "1"},
-		{"folders", "list"},
+		{"-token-file", "token", "-token-stdin", "folders", "list"},
+		{"-token-file", "", "folders", "list"},
+		{"-token-file", "", "-token-stdin", "folders", "list"},
 	}
 	for _, args := range tests {
 		t.Run(strings.Join(args, "_"), func(t *testing.T) {
@@ -253,6 +255,31 @@ func TestMessageTextErrors(t *testing.T) {
 			var output bytes.Buffer
 			err := run([]string{"-url", server.URL, "-token-stdin", "messages", "text", "9"}, strings.NewReader("mymail_secret"), &output)
 			require.ErrorContains(t, err, tt.errorText)
+			assert.Empty(t, output.String())
+		})
+	}
+}
+
+func TestWithoutToken(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, present := r.Header["Authorization"]
+		assert.False(t, present, "Authorization header must be absent")
+		assert.Equal(t, "/api/v1/folders", r.URL.Path)
+		_, _ = io.WriteString(w, `{"items":[]}`)
+	}))
+	defer server.Close()
+	var output bytes.Buffer
+	// A nil reader also verifies that unauthenticated requests never read stdin.
+	require.NoError(t, run([]string{"-url", server.URL, "folders", "list"}, nil, &output))
+	assert.Equal(t, `{"items":[]}`, output.String())
+}
+
+func TestInvalidTokenInput(t *testing.T) {
+	for _, token := range []string{"", " \n", "first second", "first\nsecond"} {
+		t.Run(token, func(t *testing.T) {
+			var output bytes.Buffer
+			err := run([]string{"-token-stdin", "folders", "list"}, strings.NewReader(token), &output)
+			require.ErrorContains(t, err, "token input must contain one token")
 			assert.Empty(t, output.String())
 		})
 	}

@@ -1,4 +1,4 @@
-// Command cli is the token-only, script-oriented client for the MyMail API.
+// Command cli is the script-oriented client for the MyMail API.
 package main
 
 import (
@@ -24,6 +24,9 @@ Global flags (before the command):
   -url URL          Server base URL, including optional path (default MYMAIL_URL or http://127.0.0.1:8080)
   -token-file PATH  Read API token from a file
   -token-stdin      Read API token from standard input
+
+Token flags are optional and mutually exclusive. Without either, no Authorization
+header is sent.
 
 Commands:
   folders list
@@ -79,34 +82,48 @@ func run(args []string, stdin io.Reader, stdout io.Writer) error {
 	if err != nil {
 		return err
 	}
-	if (*tokenFile == "") == !*tokenStdin {
-		return errors.New("specify exactly one of -token-file or -token-stdin")
-	}
-	tokenReader := stdin
-	if !*tokenStdin {
-		file, openErr := os.Open(*tokenFile)
-		if openErr != nil {
-			return fmt.Errorf("read token: %w", openErr)
+	tokenFileProvided := false
+	flags.Visit(func(f *flag.Flag) {
+		if f.Name == "token-file" {
+			tokenFileProvided = true
 		}
-		defer func() { _ = file.Close() }()
-		tokenReader = file
+	})
+	if tokenFileProvided && *tokenStdin {
+		return errors.New("specify at most one of -token-file or -token-stdin")
 	}
-	tokenBytes, err := io.ReadAll(io.LimitReader(tokenReader, 4097))
-	if err != nil {
-		return fmt.Errorf("read token: %w", err)
+	if tokenFileProvided && *tokenFile == "" {
+		return errors.New("-token-file must specify a nonempty path")
 	}
-	if len(tokenBytes) > 4096 {
-		return errors.New("token input is too large")
-	}
-	token := strings.TrimSpace(string(tokenBytes))
-	if token == "" || strings.ContainsAny(token, " \t\r\n") {
-		return errors.New("token input must contain one token")
+	token := ""
+	if *tokenFile != "" || *tokenStdin {
+		tokenReader := stdin
+		if !*tokenStdin {
+			file, openErr := os.Open(*tokenFile)
+			if openErr != nil {
+				return fmt.Errorf("read token: %w", openErr)
+			}
+			defer func() { _ = file.Close() }()
+			tokenReader = file
+		}
+		tokenBytes, err := io.ReadAll(io.LimitReader(tokenReader, 4097))
+		if err != nil {
+			return fmt.Errorf("read token: %w", err)
+		}
+		if len(tokenBytes) > 4096 {
+			return errors.New("token input is too large")
+		}
+		token = strings.TrimSpace(string(tokenBytes))
+		if token == "" || strings.ContainsAny(token, " \t\r\n") {
+			return errors.New("token input must contain one token")
+		}
 	}
 	request, err := http.NewRequest(method, clihttp.APIURL(endpoint, path, query), nil)
 	if err != nil {
 		return err
 	}
-	request.Header.Set("Authorization", "Bearer "+token)
+	if token != "" {
+		request.Header.Set("Authorization", "Bearer "+token)
+	}
 	request.Header.Set("Accept", "application/json")
 	client := clihttp.NewClient()
 	response, err := client.Do(request)
