@@ -261,6 +261,7 @@ func TestMessageTextErrors(t *testing.T) {
 }
 
 func TestWithoutToken(t *testing.T) {
+	t.Setenv("MYMAIL_TOKEN_FILE", "")
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_, present := r.Header["Authorization"]
 		assert.False(t, present, "Authorization header must be absent")
@@ -281,6 +282,61 @@ func TestInvalidTokenInput(t *testing.T) {
 			err := run([]string{"-token-stdin", "folders", "list"}, strings.NewReader(token), &output)
 			require.ErrorContains(t, err, "token input must contain one token")
 			assert.Empty(t, output.String())
+		})
+	}
+}
+
+func TestEnvironmentTokenFile(t *testing.T) {
+	for _, tt := range []struct {
+		name      string
+		env       string
+		args      []string
+		wantToken string
+		wantError string
+	}{
+		{name: "environment default", env: "valid", wantToken: "environment_secret"},
+		{name: "file overrides environment", env: "missing", args: []string{"-token-file", "explicit"}, wantToken: "file_secret"},
+		{name: "stdin overrides environment", env: "missing", args: []string{"-token-stdin"}, wantToken: "stdin_secret"},
+		{name: "missing environment file", env: "missing", wantError: "read token"},
+		{name: "empty explicit file", env: "valid", args: []string{"-token-file", ""}, wantError: "nonempty path"},
+		{name: "conflicting explicit flags", env: "valid", args: []string{"-token-file", "explicit", "-token-stdin"}, wantError: "at most one"},
+		{name: "invalid environment token", env: "invalid", wantError: "one token"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := t.TempDir()
+			require.NoError(t, os.WriteFile(dir+"/valid", []byte("environment_secret\n"), 0600))
+			require.NoError(t, os.WriteFile(dir+"/explicit", []byte("file_secret\n"), 0600))
+			require.NoError(t, os.WriteFile(dir+"/invalid", []byte("first second"), 0600))
+			t.Setenv("MYMAIL_TOKEN_FILE", dir+"/"+tt.env)
+			requests := 0
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				requests++
+				assert.Equal(t, "Bearer "+tt.wantToken, r.Header.Get("Authorization"))
+				_, _ = io.WriteString(w, `{"items":[]}`)
+			}))
+			defer server.Close()
+			args := append([]string{"-url", server.URL}, tt.args...)
+			for i, arg := range args {
+				if arg == "explicit" {
+					args[i] = dir + "/explicit"
+				}
+			}
+			args = append(args, "folders", "list")
+			var input io.Reader
+			if tt.wantToken == "stdin_secret" {
+				input = strings.NewReader("stdin_secret\n")
+			}
+			var output bytes.Buffer
+			err := run(args, input, &output)
+			if tt.wantError != "" {
+				require.ErrorContains(t, err, tt.wantError)
+				assert.Zero(t, requests)
+				assert.Empty(t, output.String())
+			} else {
+				require.NoError(t, err)
+				assert.Equal(t, 1, requests)
+				assert.Equal(t, `{"items":[]}`, output.String())
+			}
 		})
 	}
 }

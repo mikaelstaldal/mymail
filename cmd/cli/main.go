@@ -22,11 +22,11 @@ const usage = `Usage: mymail-cli [global flags] <command> [command flags]
 
 Global flags (before the command):
   -url URL          Server base URL, including optional path (default MYMAIL_URL or http://127.0.0.1:8080)
-  -token-file PATH  Read API token from a file
+  -token-file PATH  Read API token from a file (default MYMAIL_TOKEN_FILE)
   -token-stdin      Read API token from standard input
 
-Token flags are optional and mutually exclusive. Without either, no Authorization
-header is sent.
+Token flags are optional and mutually exclusive; either overrides MYMAIL_TOKEN_FILE.
+Without a token flag or MYMAIL_TOKEN_FILE, no Authorization header is sent.
 
 Commands:
   folders list
@@ -60,7 +60,7 @@ func run(args []string, stdin io.Reader, stdout io.Writer) error {
 	flags := flag.NewFlagSet("mymail-cli", flag.ContinueOnError)
 	flags.SetOutput(io.Discard)
 	base := flags.String("url", clihttp.URLDefault(), "server base URL")
-	tokenFile := flags.String("token-file", "", "token file")
+	tokenFile := flags.String("token-file", os.Getenv("MYMAIL_TOKEN_FILE"), "token file")
 	tokenStdin := flags.Bool("token-stdin", false, "read token from stdin")
 	if err := flags.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {

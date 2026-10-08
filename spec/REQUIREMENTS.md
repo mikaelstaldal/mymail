@@ -688,7 +688,9 @@ The separate `mymail-cli` binary provides the token-accessible REST operations f
 and `read ID`; and `attachments get ID`. Search requires an explicit folder ID. `messages read`
 uses the idempotent `PUT` route. `messages text ID` writes only the stored `body_text`
 to stdout, preserving whitespace without JSON quoting or an added newline (an empty body produces no output). The client accepts at most one of `-token-file PATH` and
-`-token-stdin`. Omitting both sends no Authorization header and does not read stdin. It does not accept Basic credentials or token arguments. Its built-in `help`
+`-token-stdin`. `MYMAIL_TOKEN_FILE` supplies the default token file path; either explicit
+token option overrides it. An explicitly empty `-token-file` is rejected. Without either
+option or a nonempty `MYMAIL_TOKEN_FILE`, it sends no Authorization header and does not read stdin. It does not accept Basic credentials or token arguments. Its built-in `help`
 lists commands and flags. JSON and downloaded bytes are written unchanged to stdout; errors
 go to stderr and cause a nonzero exit. HTTP is allowed only for literal loopback IP addresses;
 remote URLs require HTTPS. The client rejects URL credentials, queries, and fragments,

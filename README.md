@@ -113,6 +113,9 @@ mymail -import -data /var/lib/mymail \
 
 ## API token CLI
 
+`MYMAIL_TOKEN_FILE` sets the default token file for `mymail-cli`. Explicit `-token-file`
+or `-token-stdin` overrides it.
+
 `mymail-token` manages folder-scoped API tokens. When Basic auth is configured, put one
 `username:password` line in a private file, pipe it to `-credentials-stdin`, or use `-user`
 for a password prompt with terminal echo disabled. Credentials are optional on servers
