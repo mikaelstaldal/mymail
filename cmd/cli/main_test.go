@@ -118,9 +118,26 @@ func TestRedirectDoesNotReceiveToken(t *testing.T) {
 }
 
 func TestHelp(t *testing.T) {
-	var output bytes.Buffer
-	require.NoError(t, run([]string{"help"}, strings.NewReader(""), &output))
-	assert.Contains(t, output.String(), "messages search")
+	for _, args := range [][]string{
+		{"help"}, {"-help"}, {"-h"},
+		{"-url", ":invalid", "-token-file", "/missing", "-help"},
+		{"messages", "search", "-help"},
+		{"-url", ":invalid", "messages", "search", "-help"},
+		{"messages", "list", "-help"},
+		{"messages", "body", "-help"},
+		{"folders", "list", "-help"},
+		{"attachments", "get", "-help"},
+		{"messages", "get", "1", "-help"},
+		{"messages", "list", "1", "-help"},
+		{"messages", "body", "1", "-help"},
+	} {
+		t.Run(strings.Join(args, " "), func(t *testing.T) {
+			var output bytes.Buffer
+			require.NoError(t, run(args, strings.NewReader(""), &output))
+			assert.Equal(t, usage, output.String())
+			assert.Contains(t, output.String(), "-help")
+		})
+	}
 }
 
 func TestEnvironmentURLAndFlagOverride(t *testing.T) {

@@ -23,6 +23,7 @@ import (
 const usage = `Usage: mymail-token [global flags] <command> [command flags]
 
 Global flags (before the command):
+  -help                   Print usage and exit successfully
   -url URL                Server base URL, including optional path (default MYMAIL_URL or http://127.0.0.1:8080)
   -user USER              Basic username (default MYMAIL_USER); prompt for password
   -credentials-file PATH  Read one username:password line from a file
@@ -69,16 +70,16 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer) error {
 		_, _ = io.WriteString(stdout, usage)
 		return nil
 	}
-	endpoint, err := clihttp.ParseBaseURL(*base)
-	if err != nil {
-		return err
-	}
 	method, path, body, err := parseCommand(command, time.Now().UTC())
 	if err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			_, _ = io.WriteString(stdout, usage)
 			return nil
 		}
+		return err
+	}
+	endpoint, err := clihttp.ParseBaseURL(*base)
+	if err != nil {
 		return err
 	}
 	if *credentialsFile != "" && *credentialsStdin {
@@ -248,6 +249,9 @@ func parseCommand(args []string, now time.Time) (string, string, []byte, error) 
 		}{*name, now.Add(duration).Format(time.RFC3339), folderIDs})
 		return http.MethodPost, "/tokens", payload, err
 	case "revoke":
+		if (len(args) == 2 || len(args) == 3) && (args[len(args)-1] == "-help" || args[len(args)-1] == "--help" || args[len(args)-1] == "-h") {
+			return "", "", nil, flag.ErrHelp
+		}
 		if len(args) != 2 || !slugPattern.MatchString(args[1]) {
 			return bad()
 		}

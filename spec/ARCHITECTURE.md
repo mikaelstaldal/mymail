@@ -2,6 +2,9 @@
 
 ## Backend
 
+Both API clients use Go flag parsing for global `-help`/`-h` and command flags. They handle
+`flag.ErrHelp` by printing usage to stdout and returning successfully before credentials or HTTP requests.
+
 ### Technology Stack
 
 - Go

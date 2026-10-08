@@ -21,6 +21,7 @@ import (
 const usage = `Usage: mymail-cli [global flags] <command> [command flags]
 
 Global flags (before the command):
+  -help             Print usage and exit successfully
   -url URL          Server base URL, including optional path (default MYMAIL_URL or http://127.0.0.1:8080)
   -token-file PATH  Read API token from a file (default MYMAIL_TOKEN_FILE)
   -token-stdin      Read API token from standard input
@@ -74,11 +75,15 @@ func run(args []string, stdin io.Reader, stdout io.Writer) error {
 		_, _ = io.WriteString(stdout, usage)
 		return nil
 	}
-	endpoint, err := clihttp.ParseBaseURL(*base)
+	method, path, query, err := parseCommand(command)
 	if err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			_, _ = io.WriteString(stdout, usage)
+			return nil
+		}
 		return err
 	}
-	method, path, query, err := parseCommand(command)
+	endpoint, err := clihttp.ParseBaseURL(*base)
 	if err != nil {
 		return err
 	}
@@ -158,6 +163,19 @@ func parseCommand(args []string) (string, string, url.Values, error) {
 	}
 	if len(args) < 2 {
 		return bad()
+	}
+	// Recognize help in place of an ID, and for commands without flag parsers.
+	command := args[0] + " " + args[1]
+	switch command {
+	case "folders list", "attachments get", "messages list", "messages search",
+		"messages get", "messages text", "messages raw", "messages headers",
+		"messages body", "messages read":
+		if len(args) == 3 && isHelp(args[2]) {
+			return "", "", nil, flag.ErrHelp
+		}
+		if command != "messages search" && len(args) == 4 && isHelp(args[3]) {
+			return "", "", nil, flag.ErrHelp
+		}
 	}
 	query := url.Values{}
 	switch args[0] {
@@ -304,4 +322,8 @@ func page(limit, offset int) error {
 		return errors.New("-limit must be 1–200 and -offset must be nonnegative")
 	}
 	return nil
+}
+
+func isHelp(arg string) bool {
+	return arg == "-help" || arg == "--help" || arg == "-h"
 }

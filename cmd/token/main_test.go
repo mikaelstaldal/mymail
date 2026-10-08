@@ -144,12 +144,21 @@ func TestResponseErrorAndRedirect(t *testing.T) {
 }
 
 func TestHelp(t *testing.T) {
-	var stdout, stderr bytes.Buffer
-	require.NoError(t, run([]string{"help"}, strings.NewReader(""), &stdout, &stderr))
-	assert.Contains(t, stdout.String(), "-credentials-stdin")
-	stdout.Reset()
-	require.NoError(t, run([]string{"create", "-h"}, strings.NewReader(""), &stdout, &stderr))
-	assert.Contains(t, stdout.String(), "create -name")
+	for _, args := range [][]string{
+		{"help"}, {"-help"}, {"-h"},
+		{"-url", ":invalid", "-credentials-file", "/missing", "-help"},
+		{"create", "-h"}, {"create", "-help"},
+		{"-url", ":invalid", "create", "-help"},
+		{"revoke", "-help"}, {"revoke", "slug", "-help"},
+	} {
+		t.Run(strings.Join(args, " "), func(t *testing.T) {
+			var stdout, stderr bytes.Buffer
+			require.NoError(t, run(args, strings.NewReader(""), &stdout, &stderr))
+			assert.Equal(t, usage, stdout.String())
+			assert.Contains(t, stdout.String(), "-help")
+			assert.Empty(t, stderr.String())
+		})
+	}
 }
 
 func TestNoAuthenticationAndUserPassword(t *testing.T) {

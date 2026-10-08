@@ -696,6 +696,9 @@ go to stderr and cause a nonzero exit. HTTP is allowed only for literal loopback
 remote URLs require HTTPS. The client rejects URL credentials, queries, and fragments,
 does not follow redirects, and ignores environment HTTP proxies.
 Both CLI binaries use `MYMAIL_URL` as the default server base URL when set; an explicit `-url` overrides it.
+Both support the global `-help` flag (also `-h`) to print commands and flags to stdout and exit
+successfully without reading credentials or contacting the server. Help requested through a
+command's flag parser also prints usage and exits successfully.
 Both accept a deployment path prefix, with or without a trailing slash: `https://mail.example.com/mymail`
 uses `/mymail/api/v1/...` for API requests.
 
