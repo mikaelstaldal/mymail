@@ -14,7 +14,7 @@ export function DeviceApproval({ resources, scopePrefix, onDecision, closeWhenDo
   const [lifetime, setLifetime] = useState('30d');
   const [error, setError] = useState('');
   const [message, setMessage] = useState('');
-  const [busy, setBusy] = useState(false);
+  const [busy, setBusy] = useState(Boolean(initial));
 
   useEffect(() => { if (request) sectionRef.current?.scrollIntoView({ block: 'start' }); }, [request]);
 
@@ -56,9 +56,12 @@ export function DeviceApproval({ resources, scopePrefix, onDecision, closeWhenDo
   const Heading = closeWhenDone ? 'h2' : 'h3';
   return <section class="device-approval" ref={sectionRef}>
     <Heading>Approve device</Heading>
-    <p>Enter the code shown by your token CLI. Approve only a request you started, and compare the code with your CLI.</p>
+    <p>{request ? 'Approve only a request you started, and compare the code below with your CLI.' : 'Enter the code shown by your token CLI. Approve only a request you started, and compare the code with your CLI.'}</p>
+    {closeWhenDone && busy && !request && <p role="status">Loading request…</p>}
+    {(!closeWhenDone || (!busy && (!request || Boolean(error)))) && <>
     <div class="settings-field"><label>User code<input type="text" aria-label="User code" value={code} maxLength={32} disabled={busy} placeholder="XXXX-XXXX" onInput={e => { setCode((e.target as HTMLInputElement).value); setRequest(null); setMessage(''); }} /></label></div>
     <button class="btn btn-ghost" type="button" disabled={busy || !code.trim()} onClick={() => void lookup(code.trim())}>Review request</button>
+    </>}
     {error && <p role="alert">{error}</p>}
     {message && <p role="status">{message}</p>}
     {request && <div>

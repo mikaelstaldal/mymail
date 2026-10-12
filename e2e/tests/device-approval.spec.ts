@@ -18,6 +18,8 @@ test('dedicated page prefills the request and attempts to close after approve or
   await expect(page.getByRole('heading', { name: 'MyMail — device login' })).toBeVisible();
   await expect(page.locator('.sidebar, .app-layout, .settings-dialog, .toolbar')).toHaveCount(0);
   await expect(page.getByText('E2E device', { exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Review request' })).toHaveCount(0);
+  await expect(page.getByLabel('User code', { exact: true })).toHaveCount(0);
   await expect(page.getByText('Requester (IP | User-Agent)', { exact: true })).toBeVisible();
   await expect(page.getByLabel('Granted lifetime')).toHaveValue('1m');
   const selected = page.locator('.device-approval input[type="checkbox"]').first();
@@ -117,9 +119,34 @@ test('approval waits for resources and does not close after a failed decision', 
   });
   await approve.click();
   await expect(page.getByRole('alert')).toContainText('decision failed');
+  await expect(page.getByLabel('User code', { exact: true })).toHaveValue(grant.user_code);
+  await expect(page.getByRole('button', { name: 'Review request' })).toBeEnabled();
   expect(await page.evaluate(() => (window as Window & { closeAttempts: number }).closeAttempts)).toBe(0);
   expect((await request.get('/api/v1/oauth/device/' + grant.user_code)).status()).toBe(200);
   await page.unroute('**/api/v1/oauth/device/*');
+  await page.getByRole('button', { name: 'Deny', exact: true }).click();
+  await expect(page.getByRole('status')).toContainText('Denied.');
+  await request.post('/api/v1/oauth/token', { form: { client_id: form.client_id, device_code: grant.device_code, grant_type: grantType } });
+});
+
+// A failed automatic lookup keeps the code available for an explicit retry.
+test('failed automatic request lookup offers code entry and retry', async ({ page, request }) => {
+  const authorization = await request.post('/api/v1/oauth/device_authorization', { form });
+  const grant = await authorization.json();
+  await page.addInitScript(() => { window.close = () => {}; });
+  let fail = true;
+  await page.route('**/api/v1/oauth/device/*', async route => {
+    if (route.request().method() === 'GET' && fail) {
+      fail = false;
+      await route.fulfill({ status: 400, contentType: 'application/json', body: '{"error":"lookup failed"}' });
+    } else await route.continue();
+  });
+  await page.goto(grant.verification_uri_complete);
+  await expect(page.getByRole('alert')).toContainText('lookup failed');
+  await expect(page.getByLabel('User code', { exact: true })).toHaveValue(grant.user_code);
+  await page.getByRole('button', { name: 'Review request' }).click();
+  await expect(page.getByText('E2E device', { exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Review request' })).toHaveCount(0);
   await page.getByRole('button', { name: 'Deny', exact: true }).click();
   await expect(page.getByRole('status')).toContainText('Denied.');
   await request.post('/api/v1/oauth/token', { form: { client_id: form.client_id, device_code: grant.device_code, grant_type: grantType } });
