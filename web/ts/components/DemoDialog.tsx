@@ -82,6 +82,7 @@ export function DemoDialog({ onClose }: Props) {
             sample messages. Please don&apos;t keep anything here that you would miss.
           </p>
         </div>
+        <p>API tokens and device login require a real server and are unavailable in this demo.</p>
         <div class="dialog-actions">
           <button ref={okRef} type="button" class="btn btn-primary" onClick={onClose}>OK</button>
         </div>

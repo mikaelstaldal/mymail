@@ -20,6 +20,7 @@ var migrations = [][]string{
 	schemaV4,
 	schemaV5,
 	schemaV6,
+	{deviceSchemaV7, deviceGrantScopeDeleteTrigger},
 }
 
 // OpenDB opens the SQLite database at path, enables foreign keys, sets the

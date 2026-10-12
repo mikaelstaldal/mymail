@@ -1,4 +1,4 @@
-// Command token manages MyMail API tokens with Basic authentication.
+// Command token manages scoped MyMail API tokens.
 package main
 
 import (
@@ -31,10 +31,13 @@ Global flags (before the command):
 
 Commands:
   create -name NAME -lifetime NUMBER[s|m|h|d] -folders ID[,ID...]
+  login -name NAME [-lifetime NUMBER[s|m|h|d]] [-folders ID[,ID...]] [-out FILE]
   revoke SLUG
 
 Global flags go before the command. Credentials are optional for servers without Basic auth.
 Create prints only the new token to stdout and its revocation slug to stderr.
+Login reads no credentials; it prints the approval URL/code to stderr, then the token to stdout
+(or a new 0600 file with -out). Default requested lifetime: 30d.
 Revoke prints confirmation to stderr. Errors produce a nonzero exit status.
 HTTP is allowed only for literal loopback addresses; remote servers require HTTPS.
 Redirects and environment HTTP proxies are disabled.
@@ -69,6 +72,22 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer) error {
 	if len(command) == 0 || command[0] == "help" {
 		_, _ = io.WriteString(stdout, usage)
 		return nil
+	}
+	if command[0] == "login" {
+		explicitCredentials := *credentialsFile != "" || *credentialsStdin
+		flags.Visit(func(f *flag.Flag) {
+			if f.Name == "user" {
+				explicitCredentials = true
+			}
+		})
+		if explicitCredentials {
+			return errors.New("login does not accept credentials")
+		}
+		err := login(command[1:], *base, stdout, stderr)
+		if errors.Is(err, flag.ErrHelp) {
+			_, err = io.WriteString(stdout, usage)
+		}
+		return err
 	}
 	method, path, body, err := parseCommand(command, time.Now().UTC())
 	if err != nil {

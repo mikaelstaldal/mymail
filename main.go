@@ -323,6 +323,7 @@ func runServer(dataDir, addr string, port int, publicURL, basicAuthFile, basicAu
 		}
 		defer db.Close()
 		tokenStore = &token.Store{DB: db}
+		token.MountDeviceGrant(mux, tokenStore.DeviceGrant(token.DeviceVerificationURI(publicURL, addr, port)))
 		mux.HandleFunc("/api/v1/tokens", tokenStore.Management)
 		mux.HandleFunc("/api/v1/tokens/", tokenStore.Management)
 
@@ -466,9 +467,11 @@ func selectAuthentication(next http.Handler, basic func(http.Handler) http.Handl
 	if store == nil {
 		return fullAccess
 	}
+	fullAccess = token.PublicDeviceAccess(fullAccess, common(next))
 	bearerAccess := common(store.Bearer(next))
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if strings.HasPrefix(strings.ToLower(r.Header.Get("Authorization")), "bearer ") {
+		scheme, _, _ := strings.Cut(r.Header.Get("Authorization"), " ")
+		if strings.EqualFold(scheme, "Bearer") {
 			bearerAccess.ServeHTTP(w, r)
 		} else {
 			fullAccess.ServeHTTP(w, r)

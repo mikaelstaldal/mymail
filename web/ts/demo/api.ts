@@ -1956,6 +1956,9 @@ async function deleteContact(state: DemoState, id: number): Promise<Response> {
  */
 async function handleApiRequest(path: string, request: Request): Promise<Response> {
   try {
+    if (path === '/tokens' || path.startsWith('/tokens/') || path.startsWith('/oauth/')) {
+      return errorResponse(new ApiError(501, 'API tokens and device login are unavailable in demo mode'));
+    }
     const url = new URL(request.url);
     const method = request.method.toUpperCase();
     const segments = path.split('/').filter((s) => s !== '').map(decodeURIComponent);

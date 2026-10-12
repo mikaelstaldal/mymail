@@ -1,6 +1,6 @@
 -- Application-owned DDL from a freshly migrated database; see AGENTS.md.
 -- This omits seed rows and is not a replacement for mymail -init.
-PRAGMA user_version = 6;
+PRAGMA user_version = 7;
 
 CREATE INDEX idx_attachments_message_id ON attachments(message_id);
 
@@ -57,6 +57,23 @@ CREATE TABLE contacts (
 		created_at TEXT    NOT NULL,
 		updated_at TEXT    NOT NULL
 	);
+
+CREATE TABLE device_authorizations (
+ device_code_hash BLOB PRIMARY KEY NOT NULL,
+ user_code TEXT UNIQUE NOT NULL,
+ client_id TEXT NOT NULL,
+ name TEXT NOT NULL,
+ requested_scope TEXT NOT NULL,
+ requested_lifetime TEXT NOT NULL,
+ requester TEXT NOT NULL,
+ created_at TEXT NOT NULL,
+ expires_at TEXT NOT NULL,
+ last_poll_at TEXT NOT NULL DEFAULT '',
+ interval INTEGER NOT NULL,
+ status TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ('pending','approved','denied')),
+ granted_scope TEXT NOT NULL DEFAULT '',
+ granted_expiry TEXT NOT NULL DEFAULT ''
+);
 
 CREATE TABLE filters (
 		id            INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -153,6 +170,13 @@ CREATE TRIGGER attachments_insert_flag
 	BEGIN
 		UPDATE messages SET has_attachments = 1 WHERE id = new.message_id;
 	END;
+
+CREATE TRIGGER device_authorizations_resource_deleted
+AFTER DELETE ON folders BEGIN
+ DELETE FROM device_authorizations
+ WHERE status='approved'
+ AND instr(' ' || granted_scope || ' ', ' folder:' || OLD.id || ' ') > 0;
+END;
 
 CREATE TRIGGER messages_fts_delete
 		AFTER DELETE ON messages

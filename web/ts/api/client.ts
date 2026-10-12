@@ -106,6 +106,10 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
 }
 
 export const api = {
+  device: {
+    get: (code: string) => request<components['schemas']['DeviceRequest']>('GET', `/oauth/device/${encodeURIComponent(code)}`),
+    decide: (code: string, decision: components['schemas']['DeviceDecision']) => request<{ approved: boolean }>('POST', `/oauth/device/${encodeURIComponent(code)}`, decision),
+  },
   tokens: {
     list: () => request<{ total: number; items: ApiToken[] }>('GET', '/tokens'),
     create: (body: { name: string; expires_at: string; folder_ids: number[] }) =>

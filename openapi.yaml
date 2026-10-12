@@ -28,6 +28,58 @@ servers:
 
 components:
   schemas:
+    DeviceAuthorization:
+      type: object
+      required: [device_code, user_code, verification_uri, verification_uri_complete, expires_in, interval]
+      properties:
+        device_code: {type: string, maxLength: 43}
+        user_code: {type: string, maxLength: 9}
+        verification_uri: {type: string, format: uri}
+        verification_uri_complete: {type: string, format: uri}
+        expires_in: {type: integer, format: int64}
+        interval: {type: integer, format: int64}
+    DeviceRequest:
+      type: object
+      required: [user_code, client_id, name, scope, lifetime, requester, created_at, expires_at]
+      properties:
+        user_code: {type: string, maxLength: 9}
+        client_id: {type: string}
+        name: {type: string, maxLength: 200}
+        scope:
+          type: array
+          items: {type: string}
+        lifetime: {type: string}
+        requester: {type: string, description: Socket IP and User-Agent; review before approving}
+        created_at: {type: string, format: date-time}
+        expires_at: {type: string, format: date-time}
+    DeviceDecision:
+      type: object
+      required: [approve]
+      properties:
+        approve: {type: boolean}
+        scope:
+          type: array
+          description: Required and nonempty when approving; selected resource scopes
+          minItems: 1
+          uniqueItems: true
+          items: {type: string, maxLength: 40}
+        lifetime: {type: string, maxLength: 20, description: Required when approving; positive duration in s/m/h/d up to ten years}
+    DeviceToken:
+      type: object
+      required: [access_token, token_type, expires_in, scope, slug]
+      properties:
+        access_token: {type: string}
+        token_type: {type: string, enum: [Bearer]}
+        expires_in: {type: integer, format: int64}
+        scope: {type: string}
+        slug: {type: string, description: Revocation slug of the issued token}
+    OAuthError:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: string
+          enum: [invalid_request, invalid_client, invalid_scope, unsupported_grant_type, authorization_pending, slow_down, access_denied, expired_token, invalid_grant, temporarily_unavailable, server_error, not_found]
     ApiToken:
       type: object
       required: [slug, name, created_at, expires_at, folder_ids]
@@ -554,6 +606,123 @@ components:
             $ref: '#/components/schemas/Error'
 
 paths:
+  /oauth/device_authorization:
+    post:
+      security: []
+      summary: Start a device login (unauthenticated; bearer credentials refused)
+      description: Defaults to a ten-minute grant and five-second polling interval. At most ten live grants and three per requester socket IP. Requested scope is a suggestion; only the approver decides.
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              type: object
+              required: [client_id, name]
+              properties:
+                client_id: {type: string, enum: [mymail-token]}
+                name: {type: string, minLength: 1, maxLength: 200}
+                scope: {type: string, maxLength: 4096, description: Space-separated folder:<id> scopes; optional}
+                lifetime: {type: string, maxLength: 20, default: 30d}
+      responses:
+        '400':
+          description: OAuth protocol error
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/OAuthError'}
+        '200':
+          description: Device code and approval URL
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/DeviceAuthorization'}
+        default:
+          description: OAuth error (400 validation, 429 cap, 500 server error; bearer credentials return 401/403)
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+  /oauth/token:
+    post:
+      security: []
+      summary: Poll a device login (unauthenticated; bearer credentials refused)
+      description: Success consumes the grant and issues an ordinary scoped token atomically. Errors are HTTP 400; slow_down increases the interval by five seconds. No refresh token is issued.
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              type: object
+              required: [grant_type, device_code, client_id]
+              properties:
+                grant_type: {type: string, enum: ['urn:ietf:params:oauth:grant-type:device_code']}
+                device_code: {type: string, maxLength: 43}
+                client_id: {type: string, enum: [mymail-token]}
+      responses:
+        '400':
+          description: OAuth protocol error
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/OAuthError'}
+        '200':
+          description: Token, returned exactly once
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/DeviceToken'}
+        default:
+          description: OAuth error
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+  /oauth/device/{user_code}:
+    parameters:
+      - in: path
+        name: user_code
+        required: true
+        schema: {type: string, minLength: 8, maxLength: 32}
+        description: Case- and hyphen-insensitive user code
+    get:
+      summary: Inspect a pending device request (full access only)
+      responses:
+        '400':
+          description: OAuth protocol error
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/OAuthError'}
+        '200':
+          description: Request details for explicit user review
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/DeviceRequest'}
+        default:
+          description: Unknown or expired code (404), authentication failure (401), or bearer credentials (403)
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+    post:
+      summary: Approve or deny a pending device request (full access only; CSRF protected)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/DeviceDecision'}
+      responses:
+        '400':
+          description: OAuth protocol error
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/OAuthError'}
+        '200':
+          description: Decision recorded; token is minted only on next poll
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [approved]
+                properties:
+                  approved: {type: boolean}
+        default:
+          description: OAuth error
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
 
   /tokens:
     get:

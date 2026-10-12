@@ -2038,3 +2038,15 @@ html, body {
   gap: 8px;
   margin-top: 16px;
 }
+
+/* Device consent must keep requester details readable on narrow screens. */
+.device-approval { margin-top: 1.5rem; }
+.device-approval label { display: block; margin: 0.5rem 0; }
+.device-approval input[type="checkbox"] { width: auto; margin-right: 0.5rem; }
+.device-requester { overflow-wrap: anywhere; }
+.device-actions { display: flex; gap: 0.5rem; margin-top: 0.75rem; }
+
+.device-approval input[type="text"] { box-sizing: border-box; width: 100%; max-width: 100%; }
+.device-approval fieldset { min-width: 0; }
+.device-approval dd { margin-left: 0; margin-bottom: 0.5rem; overflow-wrap: anywhere; }
+.device-approval dt { font-weight: 600; }

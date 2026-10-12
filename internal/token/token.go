@@ -32,7 +32,25 @@ type Record struct {
 }
 
 func (s Store) Create(name string, expiry time.Time, folders []int64) (Record, string, error) {
+	tx, err := s.DB.Begin()
+	if err != nil {
+		return Record{}, "", err
+	}
+	defer tx.Rollback()
+	record, value, err := s.createTx(tx, name, expiry, folders)
+	if err != nil {
+		return Record{}, "", err
+	}
+	if err := tx.Commit(); err != nil {
+		return Record{}, "", err
+	}
+	return record, value, nil
+}
+
+// createTx is shared by interactive issuance and the atomic device grant exchange.
+func (s Store) createTx(tx *sql.Tx, name string, expiry time.Time, folders []int64) (Record, string, error) {
 	var record Record
+	var err error
 	if strings.TrimSpace(name) == "" || len(name) > 200 || !expiry.After(time.Now()) || len(folders) == 0 {
 		return record, "", errors.New("name, future expiry, and at least one folder are required")
 	}
@@ -42,11 +60,6 @@ func (s Store) Create(name string, expiry time.Time, folders []int64) (Record, s
 	}
 	value := "mymail_" + base64.RawURLEncoding.EncodeToString(secret)
 	digest := sha256.Sum256([]byte(value))
-	tx, err := s.DB.Begin()
-	if err != nil {
-		return record, "", err
-	}
-	defer tx.Rollback()
 	record = Record{Name: strings.TrimSpace(name), CreatedAt: time.Now().UTC().Format(time.RFC3339), ExpiresAt: expiry.UTC().Format(time.RFC3339), FolderIDs: folders}
 	if _, err := tx.Exec(`DELETE FROM api_tokens WHERE expires_at <= ?`, record.CreatedAt); err != nil {
 		return Record{}, "", err
@@ -81,9 +94,6 @@ func (s Store) Create(name string, expiry time.Time, folders []int64) (Record, s
 		if _, err := tx.Exec(`INSERT INTO api_token_folders(token_id,folder_id) VALUES(?,?)`, record.ID, id); err != nil {
 			return Record{}, "", err
 		}
-	}
-	if err := tx.Commit(); err != nil {
-		return Record{}, "", err
 	}
 	return record, value, nil
 }
@@ -261,11 +271,12 @@ func (s Store) Management(w http.ResponseWriter, r *http.Request) {
 func (s Store) Bearer(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		header := r.Header.Get("Authorization")
-		if !strings.HasPrefix(strings.ToLower(header), "bearer ") {
+		scheme, secret, _ := strings.Cut(header, " ")
+		if !strings.EqualFold(scheme, "Bearer") {
 			next.ServeHTTP(w, r)
 			return
 		}
-		secret := strings.TrimSpace(header[7:])
+		secret = strings.TrimSpace(secret)
 		_, allowed, err := s.validate(secret)
 		if err != nil {
 			writeError(w, 500, "database error")
