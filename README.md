@@ -152,12 +152,13 @@ follow redirects.
 
 ```bash
 MYMAIL_URL=https://mail.example.com mymail-token -credentials-file ./basic-credentials \
-  create -name 'Archive reader' -lifetime 7d -folders 1,100
+  create -name 'Archive reader' -lifetime 7d -folders 1,100 -out ./token
 MYMAIL_URL=https://mail.example.com mymail-token -credentials-file ./basic-credentials \
   revoke archive-reader
 ```
 
-Creation prints **only the token secret to stdout** and its slug to stderr. Save that
+Creation writes the token secret to a new private file with `-out` (mode `0600`,
+no overwrite), or prints it to stdout without `-out`. Its slug goes to stderr. Save that
 slug for revocation. Lifetimes accept `s`, `m`, `h`, or `d` (up to ten years). Use
 `-credentials-stdin` instead of `-credentials-file` to read credentials from standard input.
 Put global flags before the command, as in `mymail-cli`. Keep credential and token files

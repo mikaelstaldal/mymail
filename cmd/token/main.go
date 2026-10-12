@@ -3,6 +3,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"flag"
@@ -10,9 +11,11 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"os/signal"
 	"regexp"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 	"unicode"
 
@@ -30,12 +33,12 @@ Global flags (before the command):
   -credentials-stdin      Read one username:password line from standard input
 
 Commands:
-  create -name NAME -lifetime NUMBER[s|m|h|d] -folders ID[,ID...]
+  create -name NAME -lifetime NUMBER[s|m|h|d] -folders ID[,ID...] [-out FILE]
   login -name NAME [-lifetime NUMBER[s|m|h|d]] [-folders ID[,ID...]] [-out FILE]
   revoke SLUG
 
 Global flags go before the command. Credentials are optional for servers without Basic auth.
-Create prints only the new token to stdout and its revocation slug to stderr.
+Create prints the new token to stdout (or a new 0600 file with -out) and its revocation slug to stderr.
 Login reads no credentials; it prints the approval URL/code to stderr, then the token to stdout
 (or a new 0600 file with -out). Default requested lifetime: 30d.
 Revoke prints confirmation to stderr. Errors produce a nonzero exit status.
@@ -89,7 +92,7 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer) error {
 		}
 		return err
 	}
-	method, path, body, err := parseCommand(command, time.Now().UTC())
+	method, path, body, out, err := parseCommand(command, time.Now().UTC())
 	if err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			_, _ = io.WriteString(stdout, usage)
@@ -141,7 +144,15 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer) error {
 		}
 		useBasic = true
 	}
-	request, err := http.NewRequest(method, clihttp.APIURL(endpoint, path, nil), bytes.NewReader(body))
+	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM, syscall.SIGHUP)
+	defer cancel()
+	output, err := newTokenOutput(out, stdout)
+	if err != nil {
+		return err
+	}
+	defer output.cleanup()
+
+	request, err := http.NewRequestWithContext(ctx, method, clihttp.APIURL(endpoint, path, nil), bytes.NewReader(body))
 	if err != nil {
 		return err
 	}
@@ -183,8 +194,7 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer) error {
 	if _, err := fmt.Fprintf(stderr, "Token slug: %s\n", created.Slug); err != nil {
 		return err
 	}
-	_, err = fmt.Fprintln(stdout, created.Token)
-	return err
+	return output.write(created.Token)
 }
 
 func readInput(reader io.Reader, stderr io.Writer, prompt string) (string, error) {
@@ -236,45 +246,46 @@ func readPassword(reader io.Reader, stderr io.Writer) (string, error) {
 	return password, nil
 }
 
-func parseCommand(args []string, now time.Time) (string, string, []byte, error) {
-	bad := func() (string, string, []byte, error) {
-		return "", "", nil, fmt.Errorf("invalid command or arguments\n%s", usage)
+func parseCommand(args []string, now time.Time) (string, string, []byte, string, error) {
+	bad := func() (string, string, []byte, string, error) {
+		return "", "", nil, "", fmt.Errorf("invalid command or arguments\n%s", usage)
 	}
 	switch args[0] {
 	case "create":
 		flags := flag.NewFlagSet("create", flag.ContinueOnError)
 		flags.SetOutput(io.Discard)
+		out := flags.String("out", "", "write token to a new private file")
 		name := flags.String("name", "", "token name")
 		lifetime := flags.String("lifetime", "", "token lifetime")
 		folders := flags.String("folders", "", "comma-separated folder IDs")
 		if err := flags.Parse(args[1:]); err != nil {
-			return "", "", nil, err
+			return "", "", nil, "", err
 		}
 		if flags.NArg() != 0 || strings.TrimSpace(*name) == "" || len(*name) > 200 || strings.IndexFunc(*name, unicode.IsControl) >= 0 {
-			return "", "", nil, errors.New("create needs a name of 1–200 bytes without control characters")
+			return "", "", nil, "", errors.New("create needs a name of 1–200 bytes without control characters")
 		}
 		duration, err := parseLifetime(*lifetime)
 		if err != nil {
-			return "", "", nil, err
+			return "", "", nil, "", err
 		}
 		folderIDs, err := parseFolders(*folders)
 		if err != nil {
-			return "", "", nil, err
+			return "", "", nil, "", err
 		}
 		payload, err := json.Marshal(struct {
 			Name      string  `json:"name"`
 			ExpiresAt string  `json:"expires_at"`
 			FolderIDs []int64 `json:"folder_ids"`
 		}{*name, now.Add(duration).Format(time.RFC3339), folderIDs})
-		return http.MethodPost, "/tokens", payload, err
+		return http.MethodPost, "/tokens", payload, *out, err
 	case "revoke":
 		if (len(args) == 2 || len(args) == 3) && (args[len(args)-1] == "-help" || args[len(args)-1] == "--help" || args[len(args)-1] == "-h") {
-			return "", "", nil, flag.ErrHelp
+			return "", "", nil, "", flag.ErrHelp
 		}
 		if len(args) != 2 || !slugPattern.MatchString(args[1]) {
 			return bad()
 		}
-		return http.MethodDelete, "/tokens/" + args[1], nil, nil
+		return http.MethodDelete, "/tokens/" + args[1], nil, "", nil
 	default:
 		return bad()
 	}

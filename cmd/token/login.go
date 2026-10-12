@@ -47,20 +47,11 @@ func login(args []string, base string, stdout, stderr io.Writer) error {
 	if err != nil {
 		return err
 	}
-	var outputFile *os.File
-	outputComplete := false
-	if *out != "" {
-		outputFile, err = os.OpenFile(*out, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600)
-		if err != nil {
-			return err
-		}
-		defer func() {
-			_ = outputFile.Close()
-			if !outputComplete {
-				_ = os.Remove(*out)
-			}
-		}()
+	output, err := newTokenOutput(*out, stdout)
+	if err != nil {
+		return err
 	}
+	defer output.cleanup()
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM, syscall.SIGHUP)
 	defer cancel()
 	token, err := client.Login(ctx, clihttp.NewClient(), clihttp.APIURL(endpoint, "/oauth/device_authorization", nil), clihttp.APIURL(endpoint, "/oauth/token", nil), "mymail-token", *name, strings.Join(scope, " "), *lifetime, func(a client.Authorization) error {
@@ -83,14 +74,5 @@ func login(args []string, base string, stdout, stderr io.Writer) error {
 	if _, err = fmt.Fprintf(stderr, "Token slug: %s\n", token.Slug); err != nil {
 		return err
 	}
-	if *out == "" {
-		_, err = fmt.Fprintln(stdout, token.AccessToken)
-		return err
-	}
-	_, writeErr := fmt.Fprintln(outputFile, token.AccessToken)
-	closeErr := outputFile.Close()
-	if writeErr == nil && closeErr == nil {
-		outputComplete = true
-	}
-	return errors.Join(writeErr, closeErr)
+	return output.write(token.AccessToken)
 }
