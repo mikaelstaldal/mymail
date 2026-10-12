@@ -116,7 +116,30 @@ mymail -import -data /var/lib/mymail \
 `MYMAIL_TOKEN_FILE` sets the default token file for `mymail-cli`. Explicit `-token-file`
 or `-token-stdin` overrides it.
 
-`mymail-token` manages folder-scoped API tokens. When Basic auth is configured, put one
+`mymail-token` manages folder-scoped API tokens. Use `login` to obtain a token
+without giving the CLI your Basic-auth credentials:
+
+```bash
+MYMAIL_URL=https://mail.example.com mymail-token login \
+  -name 'Archive reader' -lifetime 7d -folders 1,100 -out ./token
+```
+
+The CLI prints an approval URL and user code to stderr, then waits while you
+review the request in **Settings → API Tokens → Approve device**. Compare the
+code with your CLI, select the folders to grant, and choose a lifetime before
+approving. The login request expires after ten minutes.
+
+`-name` is required. `-folders` is an optional suggestion; the approver chooses
+the actual scope. The approval form starts with a granted lifetime of `30d`,
+so change it there if you want a different lifetime. Omit `-lifetime` to request
+`30d`; durations accept `s`, `m`,
+`h`, or `d`, up to ten years. With `-out`, the token is saved to a new file with
+mode `0600`; existing files are never overwritten. Without `-out`, only the token
+secret is printed to stdout. The revocation slug is printed to stderr; save it
+for `revoke`. `login` reads no credentials, ignores `MYMAIL_USER`, and rejects
+explicit `-user`, `-credentials-file`, or `-credentials-stdin` options.
+
+For `create` and `revoke`, when Basic auth is configured, put one
 `username:password` line in a private file, pipe it to `-credentials-stdin`, or use `-user`
 for a password prompt with terminal echo disabled. Credentials are optional on servers
 without Basic auth. `MYMAIL_USER` supplies the default username for the prompt.
