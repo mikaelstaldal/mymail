@@ -116,6 +116,10 @@ mymail -import -data /var/lib/mymail \
 `MYMAIL_TOKEN_FILE` sets the default token file for `mymail-cli`. Explicit `-token-file`
 or `-token-stdin` overrides it.
 
+Settings → API Tokens lists existing tokens and their folder scope and expiry,
+and lets you revoke them after confirmation or approve a device login. Token
+creation uses the CLI commands below.
+
 `mymail-token` manages folder-scoped API tokens. Use `login` to obtain a token
 without giving the CLI your Basic-auth credentials:
 
