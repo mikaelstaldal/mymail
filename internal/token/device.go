@@ -69,14 +69,14 @@ func DeviceVerificationURI(publicURL, addr string, port int) string {
 	if publicURL == "" {
 		publicURL = "http://" + net.JoinHostPort(addr, strconv.Itoa(port))
 	}
-	u, err := url.Parse(strings.TrimRight(publicURL, "/") + "/")
+	u, err := url.Parse(publicURL)
 	if err != nil || u.Scheme == "" || u.Host == "" {
 		return ""
 	}
-	q := u.Query()
-	q.Set("settings", "api-tokens")
-	u.RawQuery = q.Encode()
-	u.Fragment = "/settings/api-tokens"
+	u.Path = strings.TrimRight(u.Path, "/") + "/device-approval.html"
+	u.RawPath = ""
+	u.RawQuery = ""
+	u.Fragment = ""
 	return u.String()
 }
 

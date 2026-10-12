@@ -45,6 +45,7 @@ func TestLoginCommand(t *testing.T) {
 	require.NoError(t, run(args, unreadableInput{}, &stdout, &stderr))
 	assert.Empty(t, stdout.String())
 	assert.Contains(t, stderr.String(), "User code: BCDF-GHJK")
+	assert.Contains(t, stderr.String(), "Approve this request on the page above.")
 	assert.Contains(t, stderr.String(), "Token slug: reader")
 	content, err := os.ReadFile(file)
 	require.NoError(t, err)

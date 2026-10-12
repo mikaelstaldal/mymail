@@ -125,14 +125,15 @@ MYMAIL_URL=https://mail.example.com mymail-token login \
 ```
 
 The CLI prints an approval URL and user code to stderr, then waits while you
-review the request in **Settings → API Tokens → Approve device**. Compare the
+review the request on a dedicated approval page. Compare the
 code with your CLI, select the folders to grant, and choose a lifetime before
-approving. The login request expires after ten minutes.
+approving. After Approve or Deny, the page attempts to close; if your browser
+blocks this, close the tab yourself. The login request expires after ten minutes.
+Settings → API Tokens → Approve device also accepts a code entered manually.
 
 `-name` is required. `-folders` is an optional suggestion; the approver chooses
-the actual scope. The approval form starts with a granted lifetime of `30d`,
-so change it there if you want a different lifetime. Omit `-lifetime` to request
-`30d`; durations accept `s`, `m`,
+the actual scope. Requested resources and lifetime are pre-filled and can be
+changed before approval. Omit `-lifetime` to request `30d`; durations accept `s`, `m`,
 `h`, or `d`, up to ten years. With `-out`, the token is saved to a new file with
 mode `0600`; existing files are never overwritten. Without `-out`, only the token
 secret is printed to stdout. The revocation slug is printed to stderr; save it

@@ -29,7 +29,7 @@ func TestDeviceLoginFullStack(t *testing.T) {
 	require.NoError(t, err)
 	store := &token.Store{DB: db}
 	now := time.Now().UTC().Truncate(time.Second)
-	grant := store.DeviceGrant("http://localhost:8080/?settings=api-tokens")
+	grant := store.DeviceGrant(token.DeviceVerificationURI("http://localhost:8080", "127.0.0.1", 8080))
 	grant.Now = func() time.Time { return now }
 	mux := http.NewServeMux()
 	token.MountDeviceGrant(mux, grant)

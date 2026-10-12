@@ -201,6 +201,9 @@ browser.
 The shared user-visible contract is [MySuite device login](../../mysuite/spec/device-login.md).
 The token CLI's `login` command reads no Basic credentials. It prints a short code
 and approval URL, then polls while the user reviews and grants resources/lifetime
+on a dedicated `device-approval.html` page. Requested scope and lifetime are
+pre-filled and editable; a successful decision attempts to close the page, with
+a completion message if closing is blocked. Manual code entry remains available
 in Settings → API Tokens. Existing `create` and `revoke` commands remain available.
 
 The server uses `go-server-common/devicegrant` with a versioned

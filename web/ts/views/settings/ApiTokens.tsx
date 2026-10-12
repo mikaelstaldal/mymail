@@ -15,13 +15,16 @@ export function ApiTokens() {
   const [secret, setSecret] = useState('');
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
+  const [foldersLoading, setFoldersLoading] = useState(true);
 
   async function reload() {
+    setFoldersLoading(true);
     try {
       const [t, f] = await Promise.all([api.tokens.list(), api.folders.list()]);
       setTokens(t.items);
       setFolders(f.items);
     } catch (e) { setError(e instanceof Error ? e.message : 'Could not load API tokens'); }
+    finally { setFoldersLoading(false); }
   }
   useEffect(() => { void reload(); }, []);
 
@@ -63,7 +66,7 @@ export function ApiTokens() {
     <div class="settings-field"><label for="token-expiry">Expires at</label><input id="token-expiry" type="datetime-local" value={expiresAt} onInput={e => setExpiresAt((e.target as HTMLInputElement).value)} /></div>
     <fieldset><legend>Readable folders</legend>{folders.map(f => <div key={f.id} class="settings-field-check"><input id={`token-folder-${f.id}`} type="checkbox" checked={selected.includes(f.id)} onChange={e => setSelected((e.target as HTMLInputElement).checked ? [...selected, f.id] : selected.filter(id => id !== f.id))} /><label for={`token-folder-${f.id}`}>{f.name}</label></div>)}</fieldset>
     <div class="settings-form-actions"><button class="btn btn-primary" disabled={busy || !name.trim() || !expiresAt || selected.length === 0} onClick={() => void create()}>Create token</button></div>
-    <DeviceApproval resources={folders} scopePrefix="folder" onDecision={() => void reload()} />
+    <DeviceApproval resources={folders} scopePrefix="folder" resourcesLoading={foldersLoading} onDecision={() => void reload()} />
     <h3>Existing tokens</h3>
     {tokens.length === 0 ? <p>No API tokens.</p> : <ul>{tokens.map(t => <li key={t.slug}>
       <strong>{t.name}</strong> (<code>{t.slug}</code>) {new Date(t.expires_at).getTime() <= Date.now() ? '(expired)' : ''} — expires {new Date(t.expires_at).toLocaleString()} — {t.folder_ids.map(id => folders.find(f => f.id === id)?.name ?? `Folder ${id}`).join(', ')}

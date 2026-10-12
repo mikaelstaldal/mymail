@@ -71,7 +71,7 @@ func login(args []string, base string, stdout, stderr io.Writer) error {
 		if uri == "" {
 			uri = a.VerificationURI
 		}
-		_, err := fmt.Fprintf(stderr, "Open %s\nUser code: %s\nApprove this request in Settings → API Tokens.\n", uri, a.UserCode)
+		_, err := fmt.Fprintf(stderr, "Open %s\nUser code: %s\nApprove this request on the page above.\n", uri, a.UserCode)
 		return err
 	})
 	if err != nil {

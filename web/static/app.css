@@ -2050,3 +2050,12 @@ html, body {
 .device-approval fieldset { min-width: 0; }
 .device-approval dd { margin-left: 0; margin-bottom: 0.5rem; overflow-wrap: anywhere; }
 .device-approval dt { font-weight: 600; }
+
+/* The dedicated device page shares the palette, without the app layout. */
+.device-page { min-height: 100vh; height: auto; overflow: auto; }
+.device-page-content { max-width: 42rem; margin: 2rem auto; padding: 1.5rem; background: var(--surface); border: 1px solid var(--border); border-radius: 0.5rem; }
+.device-page-content h1 { font-size: 1.4rem; }
+.device-page-content .device-approval > p { margin: 0.75rem 0; }
+.device-page-content input[type="text"] { padding: 0.5rem; border: 1px solid var(--border); border-radius: 0.375rem; background: var(--surface); color: var(--fg); }
+@media (max-width: 600px) { .device-page-content { margin: 0.75rem; padding: 1rem; } }
+.device-page-content .device-approval h2 { font-size: 1.15rem; }
