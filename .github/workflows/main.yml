@@ -1,7 +1,7 @@
 # Builds the project, publishes the browser-only demo to GitHub Pages, and
 # publishes the binaries as a rolling `latest` release.
 #
-# The demo needs no backend (see README § Demo mode), so the whole site is the
+# The demo needs no backend (see USER_MANUAL.md § Demo mode), so the whole site is the
 # static bundle `-demo-bundle` writes. It is published only from main, and only
 # after ./build.sh has passed — which includes the frontend tests, the Go tests,
 # and the linter — so a broken commit never reaches the published demo.
@@ -58,7 +58,7 @@ jobs:
 
       # Resolves where the site will be served from, so the demo can be built
       # for that path. Requires Pages to be enabled with "GitHub Actions" as its
-      # source — see README § Demo mode.
+      # source — see USER_MANUAL.md § Demo mode.
       - name: Configure Pages
         id: pages
         uses: actions/configure-pages@v6
