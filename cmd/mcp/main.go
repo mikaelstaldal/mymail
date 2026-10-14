@@ -271,7 +271,7 @@ func (c *client) statusError(response *http.Response) error {
 	case err != nil || len(raw) > maxBody:
 	case detail != "":
 		message += ": " + detail
-	case len(raw) <= 1024 && utf8.Valid(raw) && strings.TrimSpace(string(raw)) != "":
+	case len(raw) <= 1024 && utf8.Valid(raw) && strings.TrimSpace(string(raw)) != "" && !c.containsToken(raw):
 		// Not the API's error shape, perhaps a proxy's; short enough to show whole.
 		message += ": " + strings.TrimSpace(string(raw))
 	}
@@ -297,7 +297,9 @@ func errorField(raw []byte) string {
 
 // containsToken reports whether body carries the token, either as its bytes
 // or, in JSON, as a string that decodes to it: `\u0072…` is the same secret to
-// anything that parses the body, including this server's own decoding.
+// anything that parses the body. Every string token is checked, keys and
+// duplicate members included, since a decoded map keeps only the last of a
+// repeated key.
 func (c *client) containsToken(body []byte) bool {
 	if c.token == "" {
 		return false
@@ -305,27 +307,16 @@ func (c *client) containsToken(body []byte) bool {
 	if bytes.Contains(body, []byte(c.token)) {
 		return true
 	}
-	var value any
-	if json.Unmarshal(body, &value) != nil {
-		return false
-	}
-	var walk func(any) bool
-	walk = func(v any) bool {
-		switch v := v.(type) {
-		case string:
-			return strings.Contains(v, c.token)
-		case []any:
-			return slices.ContainsFunc(v, walk)
-		case map[string]any:
-			for key, field := range v {
-				if strings.Contains(key, c.token) || walk(field) {
-					return true
-				}
-			}
+	decoder := json.NewDecoder(bytes.NewReader(body))
+	for {
+		token, err := decoder.Token()
+		if err != nil {
+			return false
 		}
-		return false
+		if text, ok := token.(string); ok && strings.Contains(text, c.token) {
+			return true
+		}
 	}
-	return walk(value)
 }
 
 // redact removes the token from text that came from elsewhere — a server or
