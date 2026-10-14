@@ -683,6 +683,15 @@ The token's hash, expiry, and folder rule are checked atomically with this write
 and other writes return 403. An invalid or expired
 token returns 401. API tokens cannot manage other tokens or serve the web UI.
 
+The separate `mymail-mcp` binary is a statically linked Model Context Protocol server on
+stdin/stdout, which an MCP client starts as a subprocess. It takes `-url` and `-token-file`
+with the same defaults and transport rules as `mymail-cli`, and runs unauthenticated without
+a token. It exposes exactly the token-accessible operations: folders, a folder's messages, a
+message as JSON, plain text, headers, HTML body or raw RFC 5322, and attachments as
+resources; folder search as the `search_messages` tool; and mark-read as the
+`mark_message_read` tool. A draft's raw resource is an error. Responses over 1 MiB are
+refused. The shared contract is `../mysuite/spec/mcp-server.md`.
+
 The separate `mymail-cli` binary provides the token-accessible REST operations for scripts and agents:
 `folders list`; `messages list FOLDER_ID`, `search`, `get ID`, `text ID`, `raw ID`, `headers ID`, `body ID`,
 and `read ID`; and `attachments get ID`. Search requires an explicit folder ID. `messages read`

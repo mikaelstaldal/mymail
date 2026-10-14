@@ -45,5 +45,6 @@ run go build -trimpath -buildvcs=true -tags netgo -o "$OUTPUT_DIR/mymail" .
 run go build -trimpath -buildvcs=true -tags netgo -o "$OUTPUT_DIR/mymail-lda" ./cmd/lda/
 run go build -trimpath -buildvcs=true -tags netgo -o "$OUTPUT_DIR/mymail-cli" ./cmd/cli/
 run go build -trimpath -buildvcs=true -tags netgo -o "$OUTPUT_DIR/mymail-token" ./cmd/token/
+run env CGO_ENABLED=0 go build -trimpath -buildvcs=true -tags netgo -o "$OUTPUT_DIR/mymail-mcp" ./cmd/mcp/
 run go test ./...
 run golangci-lint run ./...

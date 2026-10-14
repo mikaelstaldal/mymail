@@ -250,6 +250,17 @@ The public `/openapi.yaml` and `/.well-known/api-catalog` endpoints and the
 `../mysuite/spec/api-discovery.md`. Read it before changing their HTTP behaviour.
 MyMail's in-process coverage lives in `discovery_test.go`.
 
+## The MCP server is governed from outside this repo
+
+`cmd/mcp` builds `mymail-mcp`, a stdio MCP server that exposes exactly what an API
+token can reach: reads as `mymail://` resources, folder search as the
+`search_messages` tool, and `mark_message_read`. Its contract is
+`../mysuite/spec/mcp-server.md`; read it before changing what the server exposes or
+how it reports errors. `cmd/mcp`'s drift test probes every operation in
+`openapi.yaml` through the bearer middleware, so widening the token's surface fails
+it until the MCP server exposes the new operation or the contract excludes it. An
+operation missing from `openapi.yaml` is invisible to it.
+
 ## Build & Development Commands
 
 ```bash

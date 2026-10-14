@@ -84,6 +84,11 @@ internal/
   repository/            # SQLite queries and schema (migrations via PRAGMA user_version)
   sanitize/              # HTML sanitization (bluemonday) + cid: resolution
   service/               # Business logic, orchestration
+cmd/
+  cli/                   # mymail-cli: script client over the API-token routes
+  mcp/                   # mymail-mcp: stdio MCP server over the API-token routes
+  token/                 # mymail-token: token login, creation and revocation
+  lda/                   # mymail-lda: thin LDA client for the server's socket
 web/ts/                  # TypeScript sources (compiled to web/static/)
   demo/                  # The demo backend (worker code — see "Demo mode")
   demo-sw.ts             # The demo service worker's entry point
@@ -143,6 +148,13 @@ User-created folders have `id >= 100`.
 ### REST API
 
 Base path: `/api/v1`. Full contract in `openapi.yaml`. Error format: `{"error": "message"}`. Max request body: 32 MiB. Bulk endpoints cap at 1000 message IDs.
+
+### MCP server
+
+`cmd/mcp` builds `mymail-mcp`, a stdio MCP server exposing exactly what an API token can
+reach. It is governed by `../mysuite/spec/mcp-server.md`, not by this repo alone: read the
+contract before changing what it exposes, and see `web/AGENTS.md` for what its drift test
+does and does not catch.
 
 ### Authentication & CSRF
 

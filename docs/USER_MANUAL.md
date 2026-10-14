@@ -162,6 +162,38 @@ Put global flags before the command, as in `mymail-cli`. Keep credential and tok
 readable only by their owner. Run `mymail-token help` and
 `mymail-cli help` for the full command syntax.
 
+## Use with an AI assistant (MCP)
+
+`./build.sh` also builds `mymail-mcp`, a [Model Context Protocol](https://modelcontextprotocol.io/)
+server that gives an MCP client such as Claude Code access to your mail with a
+folder-scoped token. The client starts it and talks to it over stdin/stdout. For
+example, in Claude Code:
+
+```bash
+claude mcp add mymail -- /path/to/mymail-mcp -url https://mail.example.com -token-file /path/to/token
+```
+
+It takes the same `-url` and `-token-file` flags and `MYMAIL_URL` and
+`MYMAIL_TOKEN_FILE` defaults as `mymail-cli`; without a token it sends no
+Authorization header. It offers these resources:
+
+| URI | Contents |
+|---|---|
+| `mymail://folders` | the folders the token can read |
+| `mymail://folders/{folder_id}/messages{?limit,offset,unread,flagged}` | a page of a folder's messages |
+| `mymail://messages/{id}` | one message as JSON |
+| `mymail://messages/{id}/text` | its plain-text body |
+| `mymail://messages/{id}/headers` | its header block |
+| `mymail://messages/{id}/body{?external}` | its sanitized HTML body |
+| `mymail://messages/{id}/raw` | the original message; drafts have none |
+| `mymail://attachments/{id}` | an attachment's bytes |
+
+Two tools: `search_messages` searches one folder, taking `folder_id` and `q` and
+optionally `date_from`, `date_to`, `from_addr`, `to_addr`, `sort`, `limit` and
+`offset`. `mark_message_read` marks a message as read, the only change the server
+can make. A resource or search response over 1 MiB is refused rather than
+truncated. Run `./mymail-mcp -help` for details.
+
 ## Demo mode
 
 Demo mode runs the full web UI with no backend at all. A service worker
