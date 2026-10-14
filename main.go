@@ -427,7 +427,9 @@ func runServer(dataDir, addr string, port int, publicURL, basicAuthFile, basicAu
 	}
 	httpHandler := selectAuthentication(mux, authMiddleware, tokenStore, commonMiddleware)
 	httpHandler = http.MaxBytesHandler(httpHandler, maxRequestBody)
+	httpHandler = apiDiscovery(httpHandler, demoMode)
 	httpHandler = hostPolicy.Middleware(httpHandler)
+	httpHandler = apiDescriptionLink(httpHandler, demoMode)
 
 	serverAddr := fmt.Sprintf("%s:%d", addr, port)
 	srv := &http.Server{

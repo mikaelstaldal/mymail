@@ -217,3 +217,12 @@ existing scope enforcement, listing and revocation are unchanged. Demo mode
 does not support these endpoints. Requester IP is the socket peer; behind a
 reverse proxy it is the proxy address, because untrusted forwarded headers are
 ignored.
+
+## API discovery
+
+`discovery.go` embeds the root `openapi.yaml` generator input directly. Its
+discovery handler runs before authentication, behind Host validation, and
+claims both discovery paths in demo mode to return 404 rather than the SPA.
+An outer middleware adds the service-description Link header to API responses
+including errors from Host validation and authentication, except in demo mode. The HTTP contract
+is `../mysuite/spec/api-discovery.md`; ogen is pinned to v1.24.0.

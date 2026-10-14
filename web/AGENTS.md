@@ -243,6 +243,13 @@ the badge under content overflow (`app-name-label.md` §4.5 — the same open it
 recorded rather than harmonised (§4.4); and how the label degrades under a long name differs
 between the three and is deliberately not mandated (§8.5). Do not fix any of them locally.
 
+## API discovery is governed from outside this repo
+
+The public `/openapi.yaml` and `/.well-known/api-catalog` endpoints and the
+`service-desc` Link header on API responses are governed by
+`../mysuite/spec/api-discovery.md`. Read it before changing their HTTP behaviour.
+MyMail's in-process coverage lives in `discovery_test.go`.
+
 ## Build & Development Commands
 
 ```bash

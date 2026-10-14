@@ -634,7 +634,7 @@ per-message opt-in for external images is provided via `has_external_images` in 
 
 ### Authentication
 
-Optional HTTP Basic Auth over all endpoints (API + static UI). Passwords stored as bcrypt hashes in an htpasswd file. If
+Optional HTTP Basic Auth over API and static UI endpoints, except public discovery and device-grant endpoints. Passwords stored as bcrypt hashes in an htpasswd file. If
 not configured, requests with an allowed Host are accepted without authentication (loopback-only deployments).
 
 The htpasswd file is read strictly at startup: every non-blank line must be a `username:bcrypt-hash` pair, usernames
@@ -720,7 +720,7 @@ CR, LF, NUL, and double-quote characters are stripped). Non-ASCII filenames use 
 
 ### URL Routing
 
-Hash-based routing. The server serves the same `index.html` for all non-API paths.
+Hash-based routing. The server serves the same `index.html` for unmatched paths.
 
 | Hash pattern              | View shown                                                        |
 |---------------------------|-------------------------------------------------------------------|
@@ -1425,3 +1425,14 @@ existing scope enforcement, listing and revocation are unchanged. Demo mode
 does not support these endpoints. Requester IP is the socket peer; behind a
 reverse proxy it is the proxy address, because untrusted forwarded headers are
 ignored.
+
+## API discovery
+
+Following `../mysuite/spec/api-discovery.md`, GET and HEAD `/openapi.yaml`
+serve the embedded OpenAPI 3.0.3 generator input as `application/yaml`. GET and
+HEAD `/.well-known/api-catalog` expose its RFC 9727 Linkset with API anchor
+`/api/v1/` and a `service-desc` link to `/openapi.yaml`. Catalog HEAD carries
+the `api-catalog` Link header. Every API response carries the `service-desc`
+Link header, including errors, except in demo mode. Discovery requires no credentials, even with
+Basic authentication or tokens configured. Both discovery resources return
+404 in demo mode. The OpenAPI server URL is relative to the origin.

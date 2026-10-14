@@ -5,13 +5,14 @@ go 1.26.9
 require (
 	github.com/emersion/go-maildir v0.6.0
 	github.com/emersion/go-mbox v1.0.4
-	github.com/go-faster/errors v0.7.1
+	github.com/go-faster/errors v0.8.0
 	github.com/go-faster/jx v1.2.0
+	github.com/go-faster/yaml v0.4.6
 	github.com/google/uuid v1.6.0
 	github.com/jaytaylor/html2text v0.0.0-20260303211410-1a4bdc82ecec
 	github.com/microcosm-cc/bluemonday v1.0.27
 	github.com/mikaelstaldal/go-server-common v1.13.2
-	github.com/ogen-go/ogen v1.22.0
+	github.com/ogen-go/ogen v1.24.0
 	github.com/stretchr/testify v1.11.1
 	golang.org/x/net v0.60.0
 	golang.org/x/term v0.47.0
@@ -29,11 +30,10 @@ require (
 	github.com/dustin/go-humanize v1.0.1 // indirect
 	github.com/fatih/color v1.19.0 // indirect
 	github.com/ghodss/yaml v1.0.0 // indirect
-	github.com/go-faster/yaml v0.4.6 // indirect
 	github.com/gorilla/css v1.0.1 // indirect
 	github.com/kr/pretty v0.3.1 // indirect
 	github.com/mattn/go-colorable v0.1.14 // indirect
-	github.com/mattn/go-isatty v0.0.22 // indirect
+	github.com/mattn/go-isatty v0.0.24 // indirect
 	github.com/mattn/go-runewidth v0.0.19 // indirect
 	github.com/ncruces/go-strftime v1.0.0 // indirect
 	github.com/olekukonko/cat v0.0.0-20250911104152-50322a0618f6 // indirect
