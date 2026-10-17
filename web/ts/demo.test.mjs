@@ -40,7 +40,7 @@ function evalScript(name) {
 
 // Evaluated in this realm rather than a fresh vm context, so the values that
 // come back are ordinary arrays and objects that deepEqual can compare.
-for (const name of ['model.js', 'text.js', 'reply.js']) evalScript(name);
+for (const name of ['phishing-data.js', 'model.js', 'text.js', 'reply.js', 'phishing.js']) evalScript(name);
 
 // The store stub. `state` is swapped per test; saveState only has to not throw,
 // and the attachment blobs live in a Map.
@@ -55,6 +55,11 @@ vm.runInThisContext(`
   function removeAttachmentData(ids) { for (const id of ids) globalThis.__demoBlobs.delete(id); return Promise.resolve(); }
 `, { filename: 'store-stub.js' });
 
+const { JSDOM } = await import('./third_party/test/jsdom.js');
+const dom = new JSDOM('', { url: 'http://localhost/' });
+globalThis.document = dom.window.document;
+const { phishingLinks } = await import('../static/util/phishinglinks.js');
+globalThis.parseDemoLinks = async body => phishingLinks(body);
 evalScript('api.js');
 
 // Pull the declarations out of the shared scope. A lexical `const` at the top
@@ -1114,4 +1119,159 @@ test('demo message authentication stays unknown without scanner evidence', async
   const res = await call(state, 'GET', '/messages/1');
   assert.equal(res.status, 200);
   assert.deepEqual(res.body.sender_authentication, { dmarc: 'unknown', dkim_aligned: false, spf: 'unknown' });
+});
+
+// Read-time warning parity, including the page's real document parser. The
+// service-worker/page MessageChannel transport is checked in a browser.
+test('demo exposes all seven warning kinds and stable document link details', async () => {
+  const state = newState([message({ id: 1, fromAddr: '"boss@company.org" <user@pаypal.com>',
+    senderAuthentication: { dmarc: 'fail', dkim_aligned: false, spf: 'fail' },
+    replyToAddr: 'x@evil.org', bodyHtml: '<a>skip</a><!-- <a>fake</a> --><a href="https://evil.org?a=1&amp;b=2">https://<b>paypal.com</b></a>' })]);
+  state.identities[0].address = 'own@paypal.com';
+  state.attachments.push({ id: 1, messageId: 1, filename: 'invoice.pdf.exe', contentType: 'application/octet-stream', size: 1 });
+  const { status, body } = await call(state, 'GET', '/messages/1');
+  assert.equal(status, 200);
+  assert.deepEqual(body.warnings.map(w => w.kind), ['auth_fail', 'display_name_address', 'lookalike_domain', 'reply_to_mismatch', 'first_time_sender', 'deceptive_link', 'risky_attachment']);
+  assert.deepEqual(body.warnings[0].failed_checks, ['dmarc', 'dkim_alignment', 'spf']);
+  assert.equal(body.warnings[2].domain, 'pаypal.com');
+  assert.equal(body.warnings[2].punycode, 'xn--pypal-4ve.com');
+  assert.equal(body.warnings[2].resembles, 'paypal.com');
+  assert.equal(body.warnings[5].link_index, 1);
+  assert.equal(body.warnings[5].text, 'https://paypal.com');
+  assert.equal(body.warnings[5].href, 'https://evil.org?a=1&b=2');
+});
+
+test('demo sent history is independent of contacts and survives sent-message deletion', async () => {
+  const state = newState([message({ id: 1, fromAddr: 'Straße@example.org' })]);
+  state.contacts.push({ id: 1, address: 'strasse@example.org', name: 'Known contact' });
+  assert.equal((await call(state, 'GET', '/messages/1')).body.warnings[0].kind, 'first_time_sender');
+  const sent = await call(state, 'POST', '/messages/send', { to_addr: 'other@example.org', bcc_addr: 'STRASSE@example.org', subject: 'Hello', body_text: 'Hi' });
+  assert.equal(sent.status, 201);
+  assert.deepEqual((await call(state, 'GET', '/messages/1')).body.warnings, []);
+  state.messages = state.messages.filter(m => m.id !== sent.body.id);
+  assert.deepEqual((await call(state, 'GET', '/messages/1')).body.warnings, []);
+});
+
+test('demo treats registrable-domain subdomains, ordinary link text and IDNs like Go', async () => {
+  const state = newState([message({ id: 1, fromAddr: 'a@mail.example.co.uk', replyToAddr: 'b@reply.example.co.uk',
+    bodyHtml: '<a href="https://login.example.co.uk">www.example.co.uk</a><a href="https://other.org">Read more</a>' })]);
+  state.sentTo = ['a@mail.example.co.uk'];
+  assert.deepEqual((await call(state, 'GET', '/messages/1')).body.warnings, []);
+  state.messages[0].fromAddr = 'a@bücher.de'; state.messages[0].replyToAddr = ''; state.messages[0].bodyHtml = '';
+  state.sentTo.push('a@bücher.de');
+  const warnings = (await call(state, 'GET', '/messages/1')).body.warnings;
+  assert.equal(warnings.length, 1);
+  assert.equal(warnings[0].kind, 'lookalike_domain');
+  assert.equal(warnings[0].domain, 'bücher.de');
+  assert.equal(warnings[0].resembles, undefined);
+});
+
+test('demo exempts outgoing and own authenticated mail and revokes evidence on checker changes', async () => {
+  for (const folderId of [2, 3, 5]) {
+    const state = newState([message({ id: 1, folderId })]);
+    assert.deepEqual((await call(state, 'GET', '/messages/1')).body.warnings, []);
+  }
+  const state = newState([message({ id: 1, fromAddr: 'demo@example.com', senderAuthentication: { dmarc: 'pass', dkim_aligned: true, spf: 'pass' } })]);
+  assert.deepEqual((await call(state, 'GET', '/messages/1')).body.warnings, []);
+  const changed = await call(state, 'PUT', '/spam-filter', { enabled: false, score_header: 'X-Spam-Score', score_threshold: 5, trusted_checker_host: 'new-checker' });
+  assert.equal(changed.status, 200);
+  assert.equal((await call(state, 'GET', '/messages/1')).body.warnings[0].kind, 'first_time_sender');
+});
+
+test('demo document link analysis caps anchors and recognizes IP/punycode hrefs', async () => {
+  const state = newState([message({ id: 1, bodyHtml: '<a href="https://[2001:db8::1]">click</a><a href="https://xn--bcher-kva.de">click</a>' })]);
+  const warnings = (await call(state, 'GET', '/messages/1')).body.warnings;
+  assert.equal(warnings.filter(w => w.kind === 'deceptive_link').length, 2);
+  assert.equal(warnings.find(w => w.punycode)?.domain, 'bücher.de');
+  const links = phishingLinks('<a href="https://evil.org">example.com</a>'.repeat(1001));
+  assert.equal(links.length, 1000);
+  assert.equal(links[999].Index, 999);
+});
+
+
+test('demo page parses worker RPC links in an inert document', async () => {
+  const previousNavigator = Object.getOwnPropertyDescriptor(globalThis, 'navigator');
+  const previousStorage = globalThis.sessionStorage;
+  let listener;
+  Object.defineProperty(globalThis, 'navigator', { configurable: true, value: { serviceWorker: {
+    controller: {}, register: async () => ({}),
+    addEventListener: (name, fn) => { if (name === 'message') listener = fn; },
+  } } });
+  globalThis.sessionStorage = dom.window.sessionStorage;
+  try {
+    const { startDemoBackend } = await import('../static/demo-client.js');
+    await startDemoBackend();
+    let response;
+    listener({ data: { type: 'mymail-demo:parse-links', body: '<a>skip</a><a href="https://evil.org">example.<b>com</b></a>' }, ports: [{ postMessage: data => { response = data; } }] });
+    assert.deepEqual(response, [{ Index: 0, Text: 'skip', Href: '' }, { Index: 1, Text: 'example.com', Href: 'https://evil.org' }]);
+  } finally {
+    if (previousNavigator) Object.defineProperty(globalThis, 'navigator', previousNavigator); else delete globalThis.navigator;
+    globalThis.sessionStorage = previousStorage;
+  }
+});
+
+test('demo worker requests link parsing over a real MessageChannel', async () => {
+  const source = readFileSync(path.resolve(__dirname, '../static/demo-sw.js'), 'utf8');
+  let hasClient = true;
+  const context = vm.createContext({
+    importScripts: () => {}, MessageChannel, setTimeout, clearTimeout,
+    self: { addEventListener: () => {}, clients: { matchAll: async () => hasClient ? [{
+      postMessage: (request, ports) => { assert.equal(request.type, 'mymail-demo:parse-links'); ports[0].postMessage(phishingLinks(request.body)); ports[0].close(); },
+    }] : [] } },
+  });
+  vm.runInContext(source, context);
+  const parse = vm.runInContext('parseDemoLinks', context);
+  const result = await parse('<a href="https://evil.org">example.com</a>');
+  assert.equal(result[0].Index, 0);
+  assert.equal(result[0].Text, 'example.com');
+  hasClient = false;
+  await assert.rejects(parse('<a>test</a>'), /no demo page/);
+});
+
+test('demo checks every Reply-To mailbox and only actual punycode labels', async () => {
+  const state = newState([message({ id: 1, fromAddr: 'a@example.com', replyToAddr: 'b@mail.example.com, thief@evil.org', bodyHtml: '<a href="https://prefix-xn--ordinary.com">click</a>' })]);
+  state.sentTo = ['a@example.com'];
+  assert.deepEqual((await call(state, 'GET', '/messages/1')).body.warnings, [{ kind: 'reply_to_mismatch', address: 'thief@evil.org' }]);
+});
+
+test('demo warns on double extensions and active document content types', () => {
+  const { demoAttachmentRisk } = vm.runInThisContext('({ demoAttachmentRisk })');
+  for (const name of ['invoice.exe.pdf', 'report.final.pdf', 'archive.tar.gz']) assert.equal(demoAttachmentRisk(name, 'application/octet-stream'), 'double_extension');
+  assert.equal(demoAttachmentRisk('download', 'text/html; charset=utf-8'), 'executable_content_type');
+  assert.equal(demoAttachmentRisk('macro.docm', 'application/octet-stream'), 'executable_extension');
+});
+
+test('demo matches Go for numeric IP URLs and non-URL filename/version text', async () => {
+  for (const href of ['http://3232235777/', 'http://0x7f.1/', 'http://127.1/', 'http://0177.0.0.1/']) {
+    const state = newState([message({ id: 1, bodyHtml: `<a href="${href}">click</a>` })]); state.sentTo = ['alice@example.com'];
+    const warnings = (await call(state, 'GET', '/messages/1')).body.warnings;
+    assert.equal(warnings.length, 1); assert.equal(warnings[0].kind, 'deceptive_link');
+  }
+  for (const text of ['report.pdf', 'v1.2', '3.14']) {
+    const state = newState([message({ id: 1, bodyHtml: `<a href="https://example.com">${text}</a>` })]); state.sentTo = ['alice@example.com'];
+    assert.deepEqual((await call(state, 'GET', '/messages/1')).body.warnings, []);
+  }
+  for (const fromAddr of ['"St.John Smith" <john@example.com>', '"Example.com Support" <noreply@mail.example.com>']) {
+    const state = newState([message({ id: 1, fromAddr })]); state.sentTo = [firstAddress(fromAddr).address];
+    assert.deepEqual((await call(state, 'GET', '/messages/1')).body.warnings, []);
+  }
+});
+
+test('demo checks registrable skeletons and Windows attachment suffixes', async () => {
+  const state = newState([message({ id: 1, fromAddr: 'user@paypa1.com' })]); state.sentTo = ['user@paypa1.com', 'bob@mail.paypal.com'];
+  // Exact correspondence suppresses a resemblance claim for this known domain.
+  assert.deepEqual((await call(state, 'GET', '/messages/1')).body.warnings, []);
+  state.sentTo = ['bob@mail.paypal.com'];
+  const warnings = (await call(state, 'GET', '/messages/1')).body.warnings;
+  assert.equal(warnings[0].resembles, 'paypal.com');
+  const { demoAttachmentRisk } = vm.runInThisContext('({ demoAttachmentRisk })');
+  assert.equal(demoAttachmentRisk('invoice.exe.', 'application/octet-stream'), 'executable_extension');
+});
+
+test('demo and Go recognize bare domains under wildcard-only ICANN suffixes', async () => {
+  for (const text of ['mybank.com.kh', 'bank.com.np', 'account.bank.ck']) {
+    const state = newState([message({ id: 1, bodyHtml: `<a href="https://evil.org">${text}</a>` })]); state.sentTo = ['alice@example.com'];
+    const warnings = (await call(state, 'GET', '/messages/1')).body.warnings;
+    assert.equal(warnings.length, 1, text); assert.equal(warnings[0].kind, 'deceptive_link', text);
+  }
 });

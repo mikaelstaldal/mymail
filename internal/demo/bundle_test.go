@@ -7,6 +7,10 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/mikaelstaldal/mymail/internal/api"
+	"github.com/mikaelstaldal/mymail/internal/model"
+	"github.com/mikaelstaldal/mymail/internal/phishing"
+	"github.com/mikaelstaldal/mymail/internal/senderauth"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -129,4 +133,28 @@ func TestBuildSeedJSONRoundTrips(t *testing.T) {
 		require.True(t, ok, "seed has a %q key", key)
 		assert.True(t, strings.HasPrefix(string(raw), "["), "%s is an array, not null", key)
 	}
+}
+
+func TestSeedHasEveryPhishingSignal(t *testing.T) {
+	seed, err := BuildSeed(context.Background())
+	require.NoError(t, err)
+	for _, m := range seed.Messages {
+		if m.Subject != "Phishing warning examples (safe demo)" {
+			continue
+		}
+		atts := []api.AttachmentMeta{}
+		for _, a := range seed.Attachments {
+			if a.MessageID == m.ID {
+				atts = append(atts, api.AttachmentMeta{Filename: a.Filename, ContentType: a.ContentType})
+			}
+		}
+		warnings := phishing.Compute(model.DBMessage{FolderID: int(m.FolderID), FromAddr: m.FromAddr, ReplyToAddr: m.ReplyToAddr, BodyHTML: m.BodyHTML, SenderAuthentication: senderauth.Encode(m.SenderAuthentication)}, atts, phishing.Context{OwnAddresses: []string{"demo@example.com"}, KnownDomains: []string{"example.com"}})
+		kinds := []api.MessageWarningKind{}
+		for _, w := range warnings {
+			kinds = append(kinds, w.Kind)
+		}
+		assert.Equal(t, []api.MessageWarningKind{"auth_fail", "display_name_address", "lookalike_domain", "reply_to_mismatch", "first_time_sender", "deceptive_link", "risky_attachment"}, kinds)
+		return
+	}
+	t.Fatal("missing phishing demo sample")
 }

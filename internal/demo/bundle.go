@@ -9,7 +9,9 @@ import (
 	"io"
 	"sync/atomic"
 
+	"github.com/mikaelstaldal/mymail/internal/api"
 	"github.com/mikaelstaldal/mymail/internal/repository"
+	"github.com/mikaelstaldal/mymail/internal/senderauth"
 )
 
 // SeedFileName is the file the browser demo fetches its initial content from.
@@ -73,30 +75,32 @@ type SeedFilter struct {
 }
 
 type SeedSpamFilter struct {
-	Enabled        bool    `json:"enabled"`
-	ScoreHeader    string  `json:"scoreHeader"`
-	ScoreThreshold float64 `json:"scoreThreshold"`
+	TrustedCheckerHost string  `json:"trustedCheckerHost"`
+	Enabled            bool    `json:"enabled"`
+	ScoreHeader        string  `json:"scoreHeader"`
+	ScoreThreshold     float64 `json:"scoreThreshold"`
 }
 
 // SeedMessage is one messages row. Nullable columns are pointers so the store
 // can tell "absent" from "empty string", which the folder and threading rules
 // both depend on.
 type SeedMessage struct {
-	ID          int64   `json:"id"`
-	FolderID    int64   `json:"folderId"`
-	IdentityID  *int64  `json:"identityId"`
-	MessageID   *string `json:"messageId"`
-	InReplyTo   *string `json:"inReplyTo"`
-	References  *string `json:"references"`
-	FromAddr    string  `json:"fromAddr"`
-	ToAddr      string  `json:"toAddr"`
-	CcAddr      string  `json:"ccAddr"`
-	BccAddr     string  `json:"bccAddr"`
-	ReplyToAddr string  `json:"replyToAddr"`
-	Subject     string  `json:"subject"`
-	Date        string  `json:"date"`
-	BodyText    string  `json:"bodyText"`
-	BodyHTML    string  `json:"bodyHtml"`
+	SenderAuthentication api.SenderAuthentication `json:"senderAuthentication"`
+	ID                   int64                    `json:"id"`
+	FolderID             int64                    `json:"folderId"`
+	IdentityID           *int64                   `json:"identityId"`
+	MessageID            *string                  `json:"messageId"`
+	InReplyTo            *string                  `json:"inReplyTo"`
+	References           *string                  `json:"references"`
+	FromAddr             string                   `json:"fromAddr"`
+	ToAddr               string                   `json:"toAddr"`
+	CcAddr               string                   `json:"ccAddr"`
+	BccAddr              string                   `json:"bccAddr"`
+	ReplyToAddr          string                   `json:"replyToAddr"`
+	Subject              string                   `json:"subject"`
+	Date                 string                   `json:"date"`
+	BodyText             string                   `json:"bodyText"`
+	BodyHTML             string                   `json:"bodyHtml"`
 	// Raw is the RFC 5322 source, base64-encoded, or null for a draft.
 	Raw               *string `json:"raw"`
 	Read              bool    `json:"read"`
@@ -297,8 +301,8 @@ func exportSpamFilter(ctx context.Context, db *sql.DB) (SeedSpamFilter, error) {
 		enabled int
 	)
 	err := db.QueryRowContext(ctx,
-		`SELECT enabled, score_header, score_threshold FROM spam_filter_settings WHERE id = 1`,
-	).Scan(&enabled, &s.ScoreHeader, &s.ScoreThreshold)
+		`SELECT enabled, score_header, score_threshold, trusted_checker_host FROM spam_filter_settings WHERE id = 1`,
+	).Scan(&enabled, &s.ScoreHeader, &s.ScoreThreshold, &s.TrustedCheckerHost)
 	if err != nil {
 		return SeedSpamFilter{}, err
 	}
@@ -313,7 +317,7 @@ func exportMessages(ctx context.Context, db *sql.DB) ([]SeedMessage, error) {
 		       date, body_text, body_html, raw, read, flagged,
 		       has_attachments, has_external_images,
 		       send_at, snoozed_until, snooze_folder, send_error, send_failure_count,
-		       created_at, updated_at
+		       created_at, updated_at, sender_authentication
 		FROM messages ORDER BY id`)
 	if err != nil {
 		return nil, err
@@ -323,6 +327,7 @@ func exportMessages(ctx context.Context, db *sql.DB) ([]SeedMessage, error) {
 	out := make([]SeedMessage, 0)
 	for rows.Next() {
 		var (
+			auth         string
 			m            SeedMessage
 			identityID   sql.NullInt64
 			messageID    sql.NullString
@@ -344,10 +349,11 @@ func exportMessages(ctx context.Context, db *sql.DB) ([]SeedMessage, error) {
 			&m.Date, &m.BodyText, &m.BodyHTML, &raw, &read, &flagged,
 			&hasAttach, &hasExtImages,
 			&sendAt, &snoozedUntil, &snoozeFolder, &sendError, &m.SendFailureCount,
-			&m.CreatedAt, &m.UpdatedAt,
+			&m.CreatedAt, &m.UpdatedAt, &auth,
 		); err != nil {
 			return nil, err
 		}
+		m.SenderAuthentication = senderauth.Decode(auth)
 		m.IdentityID = nullInt64(identityID)
 		m.MessageID = nullString(messageID)
 		m.InReplyTo = nullString(inReplyTo)

@@ -129,6 +129,7 @@ interface DemoSpamFilter {
 }
 
 interface DemoMessage {
+  senderAuthentication?: DemoAuthentication;
   id: number;
   folderId: number;
   identityId: number | null;
@@ -188,6 +189,7 @@ interface PendingReply {
  * draft never rewrites the files hanging off it.
  */
 interface DemoState {
+  sentTo?: string[];
   nextMessageId: number;
   nextAttachmentId: number;
   nextFolderId: number;

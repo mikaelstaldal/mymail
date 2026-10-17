@@ -1,6 +1,6 @@
 -- Application-owned DDL from a freshly migrated database; see AGENTS.md.
 -- This omits seed rows and is not a replacement for mymail -init.
-PRAGMA user_version = 9;
+PRAGMA user_version = 10;
 
 CREATE INDEX idx_attachments_message_id ON attachments(message_id);
 
@@ -25,6 +25,8 @@ CREATE INDEX idx_messages_send_at      ON messages(send_at) WHERE send_at IS NOT
 CREATE INDEX idx_messages_snoozed_until ON messages(snoozed_until) WHERE snoozed_until IS NOT NULL;
 
 CREATE INDEX idx_msgref_ref ON message_references(ref_msg_id);
+
+CREATE INDEX idx_sent_recipients_skeleton ON sent_recipients(skeleton);
 
 CREATE TABLE "api_token_folders" (
 		token_id INTEGER NOT NULL REFERENCES "api_tokens"(id) ON DELETE CASCADE,
@@ -150,6 +152,10 @@ CREATE VIRTUAL TABLE messages_fts USING fts5(
 		content_rowid='id'
 	);
 
+CREATE TABLE sent_recipients (address TEXT PRIMARY KEY,
+ domain TEXT GENERATED ALWAYS AS (mail_domain(address)) STORED,
+ skeleton TEXT GENERATED ALWAYS AS (domain_skeleton(mail_domain(address))) STORED) WITHOUT ROWID;
+
 CREATE TABLE spam_filter_settings (
 		id              INTEGER PRIMARY KEY CHECK (id = 1),
 		enabled         INTEGER NOT NULL DEFAULT 1,
@@ -200,6 +206,12 @@ CREATE TRIGGER messages_fts_update
 		INSERT INTO messages_fts(rowid, from_addr, to_addr, cc_addr, subject, body_text)
 		VALUES (new.id, new.from_addr, new.to_addr, new.cc_addr, new.subject, new.body_text);
 	END;
+
+CREATE TRIGGER messages_sent_insert AFTER INSERT ON messages WHEN NEW.folder_id = 2 BEGIN
+ INSERT OR IGNORE INTO sent_recipients(address) SELECT value FROM json_each(mail_recipients(NEW.to_addr, NEW.cc_addr, NEW.bcc_addr)); END;
+
+CREATE TRIGGER messages_sent_update AFTER UPDATE OF folder_id ON messages WHEN NEW.folder_id = 2 AND OLD.folder_id = 5 BEGIN
+ INSERT OR IGNORE INTO sent_recipients(address) SELECT value FROM json_each(mail_recipients(NEW.to_addr, NEW.cc_addr, NEW.bcc_addr)); END;
 
 CREATE TRIGGER messages_updated_at
 		AFTER UPDATE ON messages

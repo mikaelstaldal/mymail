@@ -10,7 +10,9 @@ import (
 	"unicode/utf8"
 
 	"github.com/mikaelstaldal/mymail/internal/api"
+	"github.com/mikaelstaldal/mymail/internal/phishing"
 	"github.com/mikaelstaldal/mymail/internal/repository"
+	"github.com/mikaelstaldal/mymail/internal/senderauth"
 )
 
 func (h *Handler) FoldersFolderIDMessagesGet(ctx context.Context, params api.FoldersFolderIDMessagesGetParams) (api.FoldersFolderIDMessagesGetRes, error) {
@@ -118,6 +120,12 @@ func (h *Handler) MessagesSearchGet(ctx context.Context, params api.MessagesSear
 }
 
 func (h *Handler) MessagesIDGet(ctx context.Context, params api.MessagesIDGetParams) (api.MessagesIDGetRes, error) {
+	ctx, release, err := h.messages.DetailReadSnapshot(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer release()
+
 	id := int64(params.ID)
 
 	msg, err := h.messages.GetMessageDetail(ctx, id)
@@ -133,7 +141,34 @@ func (h *Handler) MessagesIDGet(ctx context.Context, params api.MessagesIDGetPar
 		return nil, err
 	}
 
-	return msg.ToOASMessage(attachments), nil
+	if phishing.Exempt(msg, phishing.Context{}) {
+		return msg.ToOASMessage(attachments), nil
+	}
+	// Only DMARC-pass mail needs an early own-identity check. Other messages
+	// can collect all candidate hosts before the single indexed history lookup.
+	if senderauth.Decode(msg.SenderAuthentication).Dmarc == "pass" {
+		preliminary, err := h.messages.WarningContext(ctx, msg.FromAddr)
+		if err != nil {
+			return nil, err
+		}
+		if phishing.Exempt(msg, preliminary) {
+			return msg.ToOASMessage(attachments), nil
+		}
+	}
+	links := phishing.Links(msg.BodyHTML)
+	hosts := make([]string, 0, len(links))
+	for _, link := range links {
+		if host := phishing.LinkHost(link.Href); host != "" {
+			hosts = append(hosts, host)
+		}
+	}
+	warningContext, err := h.messages.WarningContext(ctx, msg.FromAddr, hosts...)
+	if err != nil {
+		return nil, err
+	}
+	detail := msg.ToOASMessage(attachments)
+	detail.Warnings = phishing.ComputeWithLinks(msg, attachments, warningContext, links)
+	return detail, nil
 }
 
 func (h *Handler) MessagesIDRawGet(ctx context.Context, params api.MessagesIDRawGetParams) (api.MessagesIDRawGetRes, error) {

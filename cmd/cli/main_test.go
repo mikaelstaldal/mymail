@@ -25,7 +25,7 @@ func TestCommands(t *testing.T) {
 		{[]string{"folders", "list"}, "GET", "/api/v1/folders", `{"items":[]}`},
 		{[]string{"messages", "list", "7", "-limit", "2", "-offset", "3", "-unread", "-flagged"}, "GET", "/api/v1/folders/7/messages?flagged=true&limit=2&offset=3&unread=true", `{"items":[]}`},
 		{[]string{"messages", "search", "-folder", "7", "-q", "hello world", "-sort", "date_desc"}, "GET", "/api/v1/messages/search?folder_id=7&limit=50&offset=0&q=hello+world&sort=date_desc", `{"items":[]}`},
-		{[]string{"messages", "get", "9"}, "GET", "/api/v1/messages/9", `{"id":9}`},
+		{[]string{"messages", "get", "9"}, "GET", "/api/v1/messages/9", `{"id":9,"warnings":[{"kind":"first_time_sender"}]}`},
 		{[]string{"messages", "raw", "9"}, "GET", "/api/v1/messages/9/raw", "raw\x00bytes"},
 		{[]string{"messages", "headers", "9"}, "GET", "/api/v1/messages/9/headers", "Subject: test\r\n"},
 		{[]string{"messages", "body", "9", "-external"}, "GET", "/api/v1/messages/9/body?external=1", "<html></html>"},

@@ -17,6 +17,8 @@ importScripts(
   'demo/text.js',
   'demo/reply.js',
   'demo/store.js',
+  'demo/phishing-data.js',
+  'demo/phishing.js',
   'demo/api.js',
 );
 
@@ -99,4 +101,18 @@ function apiPath(requestURL: string): string | null {
   const rest = url.pathname.slice(scope.pathname.length);
   if (rest !== API_PREFIX && !rest.startsWith(API_PREFIX + '/')) return null;
   return rest.slice(API_PREFIX.length);
+}
+
+/** A worker has no HTML parser. Ask a controlled page to parse an inert
+ * document, never regex HTML. A closed tab yields an error, never a clean bill. */
+async function parseDemoLinks(body: string): Promise<DemoWarningLink[]> {
+  if (body === '') return [];
+  const clients = await sw.clients.matchAll({ type: 'window' });
+  if (!clients.length) throw new Error('no demo page available to parse message links');
+  return new Promise((resolve, reject) => {
+    const channel = new MessageChannel();
+    const timer = setTimeout(() => { channel.port1.close(); reject(new Error('demo link parser timed out')); }, 5000);
+    channel.port1.onmessage = event => { clearTimeout(timer); channel.port1.close(); resolve(event.data); };
+    clients[0].postMessage({ type: 'mymail-demo:parse-links', body }, [channel.port2]);
+  });
 }

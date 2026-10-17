@@ -241,3 +241,27 @@ of whether automatic Junk routing is enabled. It does not add a verified badge.
 Changing or clearing the host immediately makes prior evidence read as unknown
 without rewriting the mailbox; the operator
 can explicitly recompute it with `-backfill-auth` after checking historical mail provenance.
+
+### Phishing signals for API clients
+
+Message detail JSON includes `warnings` for suspicious sender authentication,
+embedded addresses in display names, lookalike domains, different Reply-To
+registrable domains, first-time senders, deceptive links and risky attachments.
+`mymail-cli messages get ID` and the corresponding `mymail-mcp` message resource
+include this list. Each warning supplies the relevant address, domain, link or
+filename. There is no warning banner in this change.
+
+First-time means you have never sent to that address, including To, Cc and Bcc.
+Receiving mail or adding a contact does not make a sender familiar. History is
+backfilled from Sent on upgrade and survives deleting sent messages afterwards.
+Warnings refresh when you read mail, so a later send can remove the first-time
+signal. Drafts, Sent, Scheduled, and own-identity mail with trusted DMARC pass are
+exempt. A warning is a reason to check the message; no warnings is no guarantee
+of safety. Legitimate internationalized domains can also produce an advisory.
+Only the first 1000 anchors are checked. The browser demo includes a deliberately
+suspicious message and a harmless placeholder attachment for trying the API.
+
+A folder-scoped API token also receives warnings derived from global identities
+and sent history, even if Sent is outside its grant. It can infer whether you have
+emailed a sender in its allowed folders and see a domain named by `resembles`.
+Consider this derived metadata when granting a token access to a folder.

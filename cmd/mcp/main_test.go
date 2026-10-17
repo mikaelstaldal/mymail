@@ -356,6 +356,7 @@ func TestResourcesReturnWhatTheAPIReturns(t *testing.T) {
 		{"mymail://folders/1/messages", "application/json", "Quarterly budget"},
 		{"mymail://folders/1/messages?flagged=false&limit=10&offset=0", "application/json", "Quarterly budget"},
 		{"mymail://messages/" + id(f.message), "application/json", `"body_text":"The budget review is on Friday."`},
+		{"mymail://messages/" + id(f.message), "application/json", `"warnings":[{"kind":"first_time_sender"}]`},
 		{"mymail://messages/" + id(f.message) + "/text", "text/plain", "The budget review is on Friday."},
 		{"mymail://messages/" + id(f.message) + "/headers", "text/plain", "Subject: Quarterly budget"},
 		{"mymail://messages/" + id(f.message) + "/body?external=1", "text/html", "The budget review is on Friday."},
@@ -855,4 +856,17 @@ func TestTokenHiddenInJSON(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "HTTP 502")
 	assert.NotContains(t, err.Error(), "eview-test-secret", "the body is not shown")
+}
+
+func TestScopedWarningsIntentionallyUseGlobalCorrespondence(t *testing.T) {
+	f := newFixture(t, true)
+	// The token grants Inbox alone; Sent/private messages remain inaccessible.
+	_, err := repository.NewMessageRepository(f.db).InsertMessage(context.Background(), model.DBMessage{FolderID: 2, ToAddr: "alice@example.com"})
+	require.NoError(t, err)
+	session := connect(t, "-url", f.url, "-token-file", f.tokenFile(t))
+	contents, err := read(t, session, "mymail://messages/"+id(f.message))
+	require.NoError(t, err)
+	assert.Contains(t, contents.Text, `"warnings":[]`, "global sent-to history is intentional derived metadata")
+	_, err = read(t, session, "mymail://messages/"+id(f.other))
+	require.Error(t, err, "does not expose underlying ungranted mail")
 }

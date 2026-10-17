@@ -1435,8 +1435,9 @@ bug.
   or downloaded as `.eml`.
 - **Spam detection never runs.** `spam_filter_settings` is stored and editable,
   but it reads headers that a generated reply does not have. Sender authentication
-  always returns unknown (DKIM alignment false), regardless of the stored checker
-  host, because demo messages have no real scanner evidence.
+  returns unknown (DKIM alignment false), except for the deliberately synthetic
+  phishing sample seeded with a failure to exercise the warnings API. Changing the
+  trusted checker revokes that synthetic evidence too.
 - **The message body reaches the iframe as `srcdoc`.** A sandboxed iframe has an
   opaque origin, and a browser does not consult a service worker for a
   navigation out of one, so `<iframe src="api/v1/…/body">` would escape to a
@@ -1527,3 +1528,61 @@ the `api-catalog` Link header. Every API response carries the `service-desc`
 Link header, including errors, except in demo mode. Discovery requires no credentials, even with
 Basic authentication or tokens configured. Both discovery resources return
 404 in demo mode. The OpenAPI server URL is relative to the origin.
+
+## Phishing warnings in the message API
+
+- **REQ-PHISH-01:** Message detail includes a required `warnings` array, computed on
+  each read. The server is the source for web, Android, CLI and MCP. These are
+  advisory signals: an empty list is not proof that a message is safe. No banner,
+  link rewriting, automatic Junk move, or prominent verified badge is added here.
+- **REQ-PHISH-02:** Kinds are `auth_fail` (trusted stored DMARC failure, with failed
+  DMARC/SPF checks and absent DKIM alignment), `display_name_address` (different
+  embedded address/domain), `lookalike_domain` (IDN/punycode, a mixed-script label,
+  or a different own/sent-to domain with an equal Unicode TR39-style skeleton),
+  `reply_to_mismatch` (different registrable domains), `first_time_sender`
+  (never sent to that normalized address), `deceptive_link` (URL/domain text and
+  href registrable domains differ, or href host is an IP or punycode), and
+  `risky_attachment` (executable/script extension or content type, with a separate
+  double-extension reason for filenames such as `.pdf.exe` or `.exe.pdf`).
+  The OpenAPI schema documents the detail fields for each kind.
+- **REQ-PHISH-03:** Drafts, Sent and Scheduled return no warnings. A message from an
+  own identity with trusted DMARC pass also returns none. Other own-identity mail
+  has no exemption. Unknown authentication never becomes pass. Unparseable sender
+  headers do not suppress independent body/attachment/authentication warnings.
+- **REQ-PHISH-04:** Correspondence means a successful send to To, Cc or Bcc, with
+  the same Unicode casefolding as contacts. Schema v10 backfills existing Sent
+  messages and retains a separate durable set of addresses. Receipt-created
+  contacts, contact edits/deletion, failed/deferred sends and moving received mail
+  into Sent do not count. Deleting Sent mail does not erase the set. The backfill
+  cannot reconstruct mail deleted before this migration.
+- **REQ-PHISH-05:** Domain comparison uses IDNA normalization and x/net/publicsuffix
+  eTLD+1, so same-registrable-domain subdomains do not imply redirection. Skeletons
+  use pinned Unicode 16 confusables, NFD → mapping → NFD, comparing full and registrable domains. Exact known domains are
+  not labelled as resembling another correspondent. IDN/punycode still produces
+  an advisory warning for a legitimate known correspondent; it does not assert
+  impersonation. Common/Inherited characters are ignored for per-label script
+  mixing. Japanese labels combining Han with Hiragana or Katakana can therefore
+  produce this advisory too. No network lookup is performed while reading a message.
+- **REQ-PHISH-06:** Parse HTML as a document. Analyse at most the first 1000 anchor
+  elements; their zero-based indices count all anchors, including those without
+  href. Text includes descendant text nodes, excluding script/style. Work walks
+  the parsed tree once, with no repeated descendant scans; it is linear in body
+  size. Correspondent lookups use an indexed skeleton set, not a scan per link.
+  Links after the cap are not assessed. A link with ordinary prose text alone
+  does not imply deception. Bare domain text requires a recognized ICANN TLD
+  (including domains under private suffixes); filenames/versions such as
+  `report.pdf`, `v1.2` and `3.14` are not treated as URLs. Explicit HTTP(S) URLs
+  and conventional IP literals do not require a public suffix. Attachment checks are advisory and do not change
+  download behaviour.
+- **REQ-PHISH-07:** Demo mode returns the same warning shape, keeps durable sent-to
+  history in IndexedDB, and contains an intentionally suspicious sample with all
+  seven kinds. It uses the same pinned confusables and public suffix rules as Go.
+  The worker asks a controlled page to parse an inert HTML document. Synthetic
+  authentication failure is labelled sample data; other demo mail stays unknown.
+
+Folder-scoped API tokens intentionally receive these same signals, even without
+Sent access. They can infer prior correspondence with an allowed message's sender
+from `first_time_sender` presence/absence and can learn an own/correspondent domain
+from `resembles`. The folder grant includes this derived security metadata; it
+does not grant access to the underlying Sent messages. This keeps warning meaning
+consistent for API/MCP and full-access clients.

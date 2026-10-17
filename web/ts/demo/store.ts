@@ -202,6 +202,7 @@ async function seedStore(): Promise<DemoState> {
       ...state.folders.filter((f) => f.id >= FIRST_USER_FOLDER).map((f) => f.id + 1),
     );
   }
+  demoSentTo(state);
   await writeRecord(KV_STORE, state, STATE_KEY);
   return state;
 }

@@ -185,7 +185,7 @@ function parseAddress(s: string): ParsedAddress {
  * for everything an address can contain.
  */
 function foldAddress(address: string): string {
-  return address.toLowerCase();
+  return Array.from(address, c => phishingCaseFold[c] ?? c).join('');
 }
 
 /**

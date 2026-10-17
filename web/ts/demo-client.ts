@@ -1,3 +1,4 @@
+import { phishingLinks } from './util/phishinglinks.js';
 // The page half of demo mode. Loaded — dynamically, so a normal build never
 // downloads it — only when the server marks the deployment as a demo (see
 // util/config.ts).
@@ -47,6 +48,12 @@ export async function startDemoBackend(): Promise<void> {
   if (!('serviceWorker' in navigator)) {
     throw new Error('This demo needs service worker support, which this browser does not offer.');
   }
+
+  navigator.serviceWorker.addEventListener('message', (event: MessageEvent) => {
+    if (event.data?.type === 'mymail-demo:parse-links' && event.ports[0]) {
+      event.ports[0].postMessage(phishingLinks(String(event.data.body)));
+    }
+  });
 
   // Resolve against <base href> so the worker is registered from the
   // deployment root and its scope covers the whole app.

@@ -113,7 +113,7 @@ function toDetailDTO(msg: DemoMessage, attachments: DemoAttachment[]): unknown {
     date: msg.date,
     body_text: msg.bodyText,
     body_html: msg.bodyHtml,
-    sender_authentication: { dmarc: 'unknown', dkim_aligned: false, spf: 'unknown' },
+    sender_authentication: msg.senderAuthentication ?? { dmarc: 'unknown', dkim_aligned: false, spf: 'unknown' },
     has_external_images: msg.hasExternalImages,
     // Unlike the summary, the detail projection does not suppress this in
     // Trash — model.ToOASMessage does not either; the UI applies the folder
@@ -447,6 +447,7 @@ function deliverSentMessage(state: DemoState, msg: DemoMessage, date: Date): voi
 
   msg.messageId = newMessageId(msg.fromAddr);
   msg.raw = buildRawMessageFor(msg, identity?.name ?? '', attachments, date);
+  recordDemoSent(state, msg);
   msg.folderId = FOLDER_SENT;
   msg.read = true;
   msg.sendAt = null;
@@ -866,9 +867,10 @@ async function deleteFolderMessages(state: DemoState, folderId: number): Promise
 
 // ── Messages ─────────────────────────────────────────────────────────────────
 
-function getMessage(state: DemoState, id: number): Response {
+async function getMessage(state: DemoState, id: number): Promise<Response> {
   const msg = findMessage(state, id);
-  return jsonResponse(200, toDetailDTO(msg, attachmentsOf(state, id)));
+  const attachments = attachmentsOf(state, id);
+  return jsonResponse(200, { ...(toDetailDTO(msg, attachments) as object), warnings: await demoWarnings(state, msg, attachments) });
 }
 
 async function patchMessage(state: DemoState, id: number, body: Record<string, unknown>): Promise<Response> {
@@ -1862,6 +1864,9 @@ async function updateSpamFilter(state: DemoState, body: Record<string, unknown>)
 
   const trustedCheckerHost = optString(body, 'trusted_checker_host') ?? '';
   if (trustedCheckerHost.length > 253 || !/^[A-Za-z0-9._-]*$/.test(trustedCheckerHost)) throw validationError('trusted_checker_host must be at most 253 ASCII hostname characters');
+  if ((state.spamFilter.trustedCheckerHost ?? '') !== trustedCheckerHost) {
+    for (const m of state.messages) m.senderAuthentication = unknownDemoAuth();
+  }
   state.spamFilter = { trustedCheckerHost, enabled: optBool(body, 'enabled') ?? false, scoreHeader, scoreThreshold };
   await saveState(state);
   return jsonResponse(200, toSpamFilterDTO(state.spamFilter));
@@ -1968,6 +1973,7 @@ async function handleApiRequest(path: string, request: Request): Promise<Respons
     const segments = path.split('/').filter((s) => s !== '').map(decodeURIComponent);
 
     return await withStore(async (state) => {
+      if (state.sentTo === undefined) { demoSentTo(state); await saveState(state); }
       if (runScheduler(state, Date.now())) await saveState(state);
       return route(state, segments, method, url, request);
     });

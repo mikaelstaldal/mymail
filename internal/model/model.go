@@ -117,6 +117,7 @@ func (m *DBMessage) ToOASMessage(attachments []oas.AttachmentMeta) *oas.MessageD
 		CreatedAt:         m.CreatedAt,
 		UpdatedAt:         m.UpdatedAt,
 		Attachments:       attachments,
+		Warnings:          []oas.MessageWarning{},
 
 		SenderAuthentication: senderauth.Decode(m.SenderAuthentication),
 	}

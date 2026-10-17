@@ -16,7 +16,9 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/mikaelstaldal/mymail/internal/api"
 	"github.com/mikaelstaldal/mymail/internal/repository"
+	"github.com/mikaelstaldal/mymail/internal/senderauth"
 )
 
 // Run populates db with the demo dataset. The database must already carry the
@@ -44,6 +46,11 @@ func Run(ctx context.Context, db *sql.DB, out io.Writer) error {
 			"Demo User", "demo@example.com",
 		); err != nil {
 			return fmt.Errorf("insert identity: %w", err)
+		}
+		// Only the empty database created for the browser demo gets this synthetic
+		// checker. Seeding an existing user's mailbox never changes their trust.
+		if _, err := db.ExecContext(ctx, `UPDATE spam_filter_settings SET trusted_checker_host = 'demo-checker.invalid' WHERE id = 1`); err != nil {
+			return err
 		}
 	}
 
@@ -76,7 +83,7 @@ func Run(ctx context.Context, db *sql.DB, out io.Writer) error {
 				send_failure_count, created_at, updated_at
 			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0, 0, ?, ?)`,
 			m.folderID, m.msgID, inReplyToVal, refsVal,
-			m.from, m.to, m.cc, "", "", m.subject,
+			m.from, m.to, m.cc, "", m.replyTo, m.subject,
 			m.date.Format(time.RFC3339), m.bodyText, m.bodyHTML, rawVal,
 			boolInt(m.read), boolInt(m.flagged),
 			nowStr, nowStr,
@@ -84,6 +91,12 @@ func Run(ctx context.Context, db *sql.DB, out io.Writer) error {
 		if err != nil {
 			return fmt.Errorf("insert %q: %w", m.subject, err)
 		}
+		if m.authFail {
+			if _, err := tx.ExecContext(ctx, `UPDATE messages SET sender_authentication = ?, auth_generation = (SELECT auth_generation FROM spam_filter_settings WHERE id = 1) WHERE message_id = ?`, senderauth.Encode(api.SenderAuthentication{Dmarc: "fail", DkimAligned: false, Spf: "fail"}), m.msgID); err != nil {
+				return err
+			}
+		}
+
 		if n, _ := res.RowsAffected(); n > 0 {
 			if id, err := res.LastInsertId(); err == nil {
 				insertedIDs[m.msgID] = id

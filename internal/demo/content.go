@@ -19,6 +19,8 @@ import (
 
 // demoMsg is one seed message, in the shape the messages table wants.
 type demoMsg struct {
+	replyTo    string
+	authFail   bool
 	folderID   int64
 	msgID      string
 	inReplyTo  string // message-id without angle brackets; empty = none
@@ -206,6 +208,13 @@ func buildContent(now time.Time, runID string) content {
 
 	quoteData := []byte("Supplier Co. — Service Quote\n============================\n\nService A:  $500 / month\nService B:  $300 / month\nSupport:    $200 / month\n\nTotal:    $1,000 / month\n\nValid until: " + now.AddDate(0, 1, 0).Format("2006-01-02") + "\nContact: bob@supplier.com\n")
 
+	msgs = append(msgs, demoMsg{
+		folderID: 1, msgID: mid("phishing-example"), from: `"security@example.com" <notice@xn--exmple-4nf.com>`,
+		to: "demo@example.com", replyTo: "help@unrelated.example", authFail: true,
+		subject: "Phishing warning examples (safe demo)", date: now.Add(-time.Hour),
+		bodyText: "This is deliberately suspicious sample mail for trying the phishing warnings API. Do not run the attachment.",
+		bodyHTML: `<p>Deliberately suspicious sample mail.</p><a href="https://unrelated.example/">https://example.com</a>`,
+	})
 	return content{
 		msgs: msgs,
 		attachments: []demoAttachment{{
@@ -213,7 +222,7 @@ func buildContent(now time.Time, runID string) content {
 			filename:    "quote-" + now.Format("2006-01") + ".txt",
 			contentType: "text/plain",
 			data:        quoteData,
-		}},
+		}, {msgID: mid("phishing-example"), filename: "invoice.pdf.exe", contentType: "application/octet-stream", data: []byte("Safe demo placeholder. This is not a program.\n")}},
 		contacts: []demoContact{
 			{"alice@example.com", "Alice Smith"},
 			{"bob@supplier.com", "Bob Johnson"},
@@ -286,6 +295,9 @@ func rawMessage(m demoMsg) []byte {
 	sb.WriteString("To: " + m.to + "\r\n")
 	if m.cc != "" {
 		sb.WriteString("Cc: " + m.cc + "\r\n")
+	}
+	if m.replyTo != "" {
+		sb.WriteString("Reply-To: " + m.replyTo + "\r\n")
 	}
 	sb.WriteString("Subject: " + m.subject + "\r\n")
 	if m.inReplyTo != "" {

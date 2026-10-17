@@ -25,6 +25,7 @@ var migrations = [][]string{
 		`ALTER TABLE messages ADD COLUMN sender_authentication TEXT NOT NULL DEFAULT '{"dmarc":"unknown","dkim_aligned":false,"spf":"unknown"}'`},
 	{`ALTER TABLE spam_filter_settings ADD COLUMN auth_generation INTEGER NOT NULL DEFAULT 0`,
 		`ALTER TABLE messages ADD COLUMN auth_generation INTEGER NOT NULL DEFAULT 0`},
+	schemaV10,
 }
 
 // OpenDB opens the SQLite database at path, enables foreign keys, sets the

@@ -250,3 +250,37 @@ Delivery reads the host and generation in its insertion transaction; backfill
 reads them under its existing write lock. Detail/full-message projections return
 unknown when generations differ or the host is empty. This preserves immediate
 revocation while keeping settings saves independent of mailbox/raw-blob size.
+
+## Read-time phishing analysis
+
+`handler.MessagesIDGet` loads the stored authentication verdict and attachment
+metadata, parses body anchors once with `internal/phishing`, then asks the
+repository for current own identities and relevant correspondence. Those reads
+participate in the bearer's existing authorization snapshot; full-access detail
+requests open an equivalent read snapshot for metadata and warnings. `ComputeWithLinks`
+produces the API warning list without changing stored mail, routing or downloads.
+CLI and MCP forward that message JSON unchanged; no new operation is added.
+
+Migration v10 introduces `sent_recipients`, independent of contacts, with generated
+IDNA registrable-domain and Unicode-skeleton columns and a skeleton index. Deterministic SQLite
+functions parse each To/Cc/Bcc list and casefold addr-specs. Insert-into-Sent and
+Scheduled-to-Sent triggers maintain history in the sending transaction; ordinary
+folder moves cannot fabricate it. A migration backfills existing Sent mail.
+Indexed skeleton candidates keep each detail read independent of total sent
+history size, and duplicate link hosts are collapsed before querying.
+
+The detector vendors Unicode 16 confusables with its license and provenance.
+`generate_demo_data.go` reproduces the browser tables, pinned to x/net's PSL
+revision and Go's Unicode casefolding/scripts. Changing domain normalization or
+skeleton mappings requires a migration to rebuild the stored generated values;
+regenerating browser tables alone would leave the persisted index stale. Demo warning evaluation lives in
+the worker; HTML parsing is an RPC to the page's inert template parser because
+workers have no DOM. Link indices use the same first-1000-anchor convention. If Go's document
+parser rejects excessive nesting (its 512-element stack bound), a streaming HTML
+tokenizer still extracts links; deep markup cannot suppress all body warnings.
+
+The v10 triggers and generated columns require the application's registered
+SQLite functions. Direct writes or SQL-dump restoration through an external
+SQLite CLI need those functions; copying/restoring a database-file backup does
+not. Scope grants include the derived global-history warning metadata described
+in the OpenAPI authentication section and REQUIREMENTS.md.
