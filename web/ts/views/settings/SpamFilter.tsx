@@ -93,7 +93,7 @@ export function SpamFilter() {
         <div class="settings-field">
           <label for="trusted-checker-host">Trusted Checker Host</label>
           <input id="trusted-checker-host" aria-describedby="trusted-checker-help" type="text" maxLength={253}
-            pattern="[A-Za-z0-9._-]*"
+            pattern={'[A-Za-z0-9._\\-]*'}
             value={settings.trusted_checker_host ?? ''}
             onInput={e => setSettings({ ...settings, trusted_checker_host: (e.target as HTMLInputElement).value })} />
           <p id="trusted-checker-help">Leave empty unless the SpamAssassin delivery path scans every message and defers on failure. See the operations guide before enabling trust.</p>
