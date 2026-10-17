@@ -40,6 +40,14 @@ import (
 
 func main() {
 	version := flag.Bool("version", false, "print version information and exit")
+	var backfillFolders []string
+	flag.Func("backfill-auth-folder", "Limit -backfill-auth to this exact folder name or slug (name:/slug: disambiguate; repeatable; default all folders)", func(value string) error {
+		if value == "" {
+			return fmt.Errorf("backfill-auth-folder must not be empty")
+		}
+		backfillFolders = append(backfillFolders, value)
+		return nil
+	})
 	backfillAuth := flag.Bool("backfill-auth", false, "Recompute sender authentication from stored raw messages using current checker host and exit")
 	initMode := flag.Bool("init", false, "Initialize database and exit")
 	ldaMode := flag.Bool("lda", false, "LDA mode: read RFC 5322 from stdin and store in DB")
@@ -58,6 +66,9 @@ func main() {
 	identityAddress := flag.String("identity-address", "", "Initial identity email address (used with -init)")
 	identityName := flag.String("identity-name", "", "Initial identity display name (used with -init)")
 	flag.Parse()
+	if len(backfillFolders) > 0 && !*backfillAuth {
+		log.Fatal("-backfill-auth-folder requires -backfill-auth")
+	}
 
 	// The two browser-demo modes never open a database and never send mail, so
 	// the flags that only make sense with one are refused rather than silently
@@ -76,7 +87,7 @@ func main() {
 	case *version:
 		printVersion()
 	case *backfillAuth:
-		runAuthBackfill(*dataDir)
+		runAuthBackfill(*dataDir, backfillFolders...)
 	case *initMode:
 		runInit(*dataDir, *identityAddress, *identityName)
 	case *ldaMode:
@@ -525,7 +536,7 @@ func indexFallbackHandler(indexHTML []byte) http.HandlerFunc {
 	}
 }
 
-func runAuthBackfill(dataDir string) {
+func runAuthBackfill(dataDir string, folders ...string) {
 	dbPath := filepath.Join(dataDir, "mymail.sqlite")
 	if err := repository.CheckDBExists(dbPath); err != nil {
 		log.Fatal(err)
@@ -535,7 +546,7 @@ func runAuthBackfill(dataDir string) {
 		log.Fatal(err)
 	}
 	defer db.Close() //nolint:errcheck
-	if err := repository.BackfillSenderAuthentication(context.Background(), db); err != nil {
+	if err := repository.BackfillSenderAuthentication(context.Background(), db, folders...); err != nil {
 		log.Fatal(err)
 	}
 }

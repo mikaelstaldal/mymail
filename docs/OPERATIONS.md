@@ -404,6 +404,52 @@ The existing Junk filter remains independent of this setting.
    pair: no unchecked message should be delivered. Also test rejection/defer at
    your actual maximum size.
 
+#### Postfix pipe: supply the envelope sender before scanning
+
+For an after-queue Postfix pipe feeding `spamc`, add `flags=R` to the
+`spamassassin` service in `/etc/postfix/master.cf`. It prepends a `Return-Path:`
+header containing the SMTP envelope sender **before** `spamc` reads the message:
+
+```text
+spamassassin unix -     n       n       -       -       pipe
+  flags=R user=debian-spamd
+  argv=/usr/bin/spamc -s 30000000 -x -X -e /usr/sbin/sendmail -oi -f ${sender} ${recipient}
+```
+
+This example uses a 30,000,000-byte scan limit; check `postconf message_size_limit`
+and raise `-s` if necessary to cover all accepted mail. The service account and
+paths must match your installation. The `-f ${sender}` after `sendmail` preserves
+that sender during reinjection; it does not provide it to the earlier scan.
+See the [Postfix pipe flags](https://www.postfix.org/pipe.8.html).
+
+In `/etc/spamassassin/local.cf`, explicitly select the header:
+
+```text
+envelope_sender_header Return-Path
+```
+
+Run `spamassassin --lint`, reload/restart spamd, and reload Postfix. Verify that
+sender-supplied Return-Path headers are removed before scanning: this header must
+come from the trusted MTA. Inspect scanner debug logs to confirm the envelope
+sender and original sending IP were recognized; trusted/internal relay settings
+still matter for SPF. See the
+[envelope sender configuration reference](https://spamassassin.apache.org/full/4.0.x/doc/Mail_SpamAssassin_Conf.html).
+
+The operator confirmed that this change produced the following hits on a newly
+received Gmail message with SpamAssassin 4.0.1:
+
+```text
+X-Spam-Status: No, score=-0.2 required=5.0 tests=DKIM_SIGNED,DKIM_VALID,
+ DKIM_VALID_AU,DKIM_VALID_EF,DMARC_PASS,FREEMAIL_FROM,
+ RCVD_IN_DNSWL_NONE,SPF_HELO_NONE,SPF_PASS autolearn=ham
+ autolearn_force=no version=4.0.1
+```
+
+`SPF_PASS` is now present alongside `DKIM_VALID_AU` and `DMARC_PASS`.
+`SPF_HELO_NONE` can coexist with envelope-sender `SPF_PASS`; it is a separate
+HELO-domain result. This confirms the positive result for that message, not every
+failure or bypass path; also perform the scanner-outage and size-limit tests above.
+
 Header position relative to `Received:` is not an authenticity check: scanner
 insertion and MTA reinjection vary, and matching forged blocks can occupy the same
 position. MyMail rejects duplicate checker/status headers, but cannot recognize a
@@ -418,6 +464,26 @@ To recompute stored evidence, stop the server and deliveries, then run:
 ```bash
 mymail -data /path/to/data -backfill-auth
 ```
+
+To process selected folders and skip a large archive, repeat
+`-backfill-auth-folder` with each exact folder name or slug:
+
+```bash
+mymail -data /path/to/data -backfill-auth \
+  -backfill-auth-folder inbox -backfill-auth-folder sent
+
+# Quote display names containing spaces:
+mymail -data /path/to/data -backfill-auth -backfill-auth-folder 'Current projects'
+```
+
+Without selectors, all folders are processed. Selectors are case-sensitive;
+unknown names/slugs or a name matching another folder's slug fail before any
+message is changed. Use `name:inbox` or `slug:inbox` to resolve a name/slug
+collision explicitly. A name beginning with either prefix can be selected by
+prepending `name:` again (e.g. `name:slug:example`). Repeated aliases for the same folder process it only once.
+Unselected messages keep their stored verdicts and timestamps, and their raw
+message blobs are not read. The entire selected run is still one transaction.
+`-backfill-auth-folder` requires `-backfill-auth`.
 
 Changing or clearing the checker host immediately resets all stored results to
 unknown. The schema migration also leaves old results unknown. Backfill is explicit and

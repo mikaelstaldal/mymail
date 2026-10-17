@@ -236,5 +236,8 @@ is `../mysuite/spec/api-discovery.md`; ogen is pinned to v1.24.0.
 checker-host trust boundary documented in REQUIREMENTS.md. LDA delivery persists its JSON result in `messages.sender_authentication`; detail reads
 use that column without loading raw message blobs. Schema version 8 also adds
 `spam_filter_settings.trusted_checker_host`. The explicit `-backfill-auth` mode
-recomputes existing results from raw using current settings, atomically. Imports default to unknown until explicit backfill. Existing
+recomputes existing results from raw using current settings, atomically. Optional
+repeatable `-backfill-auth-folder` selectors resolve exact folder names/slugs
+before any updates; selected-folder scans use the folder index and do not load
+raw blobs from excluded folders. Imports default to unknown until explicit backfill. Existing
 spam-folder routing is separate and retains its prior behavior.

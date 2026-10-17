@@ -418,7 +418,15 @@ path and setting the checker host, stop delivery/server activity and run
 `mymail -data /path/to/data -backfill-auth` to recompute all verdicts from stored
 raw messages in one transaction (one raw message in memory at a time). This is
 explicit, repeatable and does not run at startup. Null or unparsable raw gives
-unknown. Backfill covers all folders: moving a received message into Sent or
+unknown. Backfill covers all folders by default. Repeat `-backfill-auth-folder`
+with exact, case-sensitive folder names or slugs to process only those folders
+(e.g. `-backfill-auth-folder inbox -backfill-auth-folder sent`). Unknown or
+ambiguous selectors fail before any message is updated; `name:` and `slug:`
+prefixes select explicitly by name or slug to resolve collisions. Empty selectors
+(including empty prefixed values) are rejected. Duplicates are processed
+once. Unselected messages retain their verdicts and timestamps, and their raw
+blobs are not loaded. Folder selectors require `-backfill-auth`.
+Moving a received message into Sent or
 Scheduled does not change its raw provenance; folder membership is not a trust
 signal. Imported raw in those folders is subject to the same explicit opt-in. Changing or clearing the host atomically resets all stored verdicts to unknown;
 changing other spam settings with the same host preserves evidence. Run backfill
