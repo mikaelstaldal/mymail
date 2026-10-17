@@ -237,17 +237,24 @@ func scanDBMessage(scan func(...any) error) (model.DBMessage, error) {
 	return m, nil
 }
 
+// The scalar settings lookup is constant per statement. A host change revokes
+// old evidence without updating messages (which contain large raw BLOBs).
+const effectiveSenderAuthentication = `CASE WHEN auth_generation =
+ (SELECT auth_generation FROM spam_filter_settings WHERE id = 1)
+ AND (SELECT trusted_checker_host FROM spam_filter_settings WHERE id = 1) <> ''
+ THEN sender_authentication ELSE '{"dmarc":"unknown","dkim_aligned":false,"spf":"unknown"}' END AS sender_authentication`
+
 const dbMessageColumns = `id, folder_id, identity_id, message_id, in_reply_to, "references",
 	from_addr, to_addr, cc_addr, bcc_addr, reply_to_addr, subject,
 	date, body_text, body_html, raw, read, flagged, has_attachments, has_external_images,
-	send_at, snoozed_until, snooze_folder, send_error, send_failure_count, created_at, updated_at, sender_authentication`
+	send_at, snoozed_until, snooze_folder, send_error, send_failure_count, created_at, updated_at, ` + effectiveSenderAuthentication
 
 // dbMessageColumnsNoRaw selects all message columns except the raw BLOB.
 // Used for API detail responses where raw is never needed.
 const dbMessageColumnsNoRaw = `id, folder_id, identity_id, message_id, in_reply_to, "references",
 	from_addr, to_addr, cc_addr, bcc_addr, reply_to_addr, subject,
 	date, body_text, body_html, read, flagged, has_attachments, has_external_images,
-	send_at, snoozed_until, snooze_folder, send_error, send_failure_count, created_at, updated_at, sender_authentication`
+	send_at, snoozed_until, snooze_folder, send_error, send_failure_count, created_at, updated_at, ` + effectiveSenderAuthentication
 
 // scanDBMessageNoRaw scans a row selected with dbMessageColumnsNoRaw into model.DBMessage.
 // m.Raw is left nil; callers must not access it.
@@ -506,14 +513,14 @@ func (r *MessageRepository) InsertMessage(ctx context.Context, msg model.DBMessa
 			date, body_text, body_html, raw, read, flagged,
 			has_attachments, has_external_images,
 			send_at, snoozed_until, snooze_folder, send_error, send_failure_count,
-			created_at, updated_at, sender_authentication
+			created_at, updated_at, sender_authentication, auth_generation
 		) VALUES (
 			?, ?, ?, ?, ?,
 			?, ?, ?, ?, ?, ?,
 			?, ?, ?, ?, ?, ?,
 			?, ?,
 			?, ?, ?, ?, ?,
-			?, ?, ?
+			?, ?, ?, (SELECT auth_generation FROM spam_filter_settings WHERE id = 1)
 		)`,
 		msg.FolderID, identityIDVal, messageIDVal, inReplyToVal, refsVal,
 		msg.FromAddr, msg.ToAddr, msg.CcAddr, msg.BccAddr, msg.ReplyToAddr, msg.Subject,

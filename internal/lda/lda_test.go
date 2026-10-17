@@ -1,6 +1,7 @@
 package lda
 
 import (
+	"context"
 	"database/sql"
 	"errors"
 	"net/mail"
@@ -629,11 +630,18 @@ func TestWithRetry_NonBusyErrorNoRetry(t *testing.T) {
 
 func TestDeliveryStoresSenderAuthentication(t *testing.T) {
 	db := openLDATestDB(t)
-	_, err := db.Exec(`UPDATE spam_filter_settings SET enabled = 0, trusted_checker_host = 'checker'`)
+	settings, err := repository.NewSpamFilterRepository(db).GetSpamFilterSettings(context.Background())
+	require.NoError(t, err)
+	settings.Enabled = false
+	settings.TrustedCheckerHost = oas.NewOptString("checker")
+	_, err = repository.NewSpamFilterRepository(db).UpdateSpamFilterSettings(context.Background(), settings)
 	require.NoError(t, err)
 	raw := []byte("From: a@example.org\r\nTo: b@example.org\r\nMessage-ID: <auth@example.org>\r\nX-Spam-Checker-Version: SpamAssassin 4.0.1 (2024-03-25) on checker\r\nX-Spam-Status: No, tests=DMARC_PASS,\r\n\tDKIM_VALID_AU,SPF_PASS autolearn=ham\r\n\r\nbody")
 	require.Equal(t, 0, runCore(db, raw))
 	var verdict string
 	require.NoError(t, db.QueryRow(`SELECT sender_authentication FROM messages WHERE message_id = 'auth@example.org'`).Scan(&verdict))
+	var generation int64
+	require.NoError(t, db.QueryRow(`SELECT auth_generation FROM messages WHERE message_id = 'auth@example.org'`).Scan(&generation))
+	assert.Equal(t, int64(1), generation)
 	assert.JSONEq(t, `{"dmarc":"pass","dkim_aligned":true,"spf":"pass"}`, verdict)
 }

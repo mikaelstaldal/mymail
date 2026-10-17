@@ -158,6 +158,14 @@ func runCore(db *sql.DB, rawBytes []byte) int {
 		}
 		defer tx.Rollback() //nolint:errcheck
 
+		// Read the authentication host and generation in the same transaction
+		// as insertion, so a concurrent settings change cannot bless stale results.
+		var authHost string
+		var authGeneration int64
+		if err := tx.QueryRowContext(ctx, `SELECT trusted_checker_host, auth_generation FROM spam_filter_settings WHERE id = 1`).Scan(&authHost, &authGeneration); err != nil {
+			return err
+		}
+
 		now := time.Now().UTC().Format(time.RFC3339)
 		dateStr := date.Format(time.RFC3339)
 
@@ -176,13 +184,13 @@ func runCore(db *sql.DB, rawBytes []byte) int {
 				from_addr, to_addr, cc_addr, bcc_addr, reply_to_addr, subject,
 				date, body_text, body_html, raw, read, flagged,
 				has_attachments, has_external_images,
-				send_failure_count, created_at, updated_at, sender_authentication
-			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, 0, ?, ?, ?)`,
+				send_failure_count, created_at, updated_at, sender_authentication, auth_generation
+			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, 0, ?, ?, ?, ?)`,
 			folderID, *pm.MessageID, inReplyToVal, refsVal,
 			pm.FromAddr, pm.ToAddr, pm.CcAddr, pm.BccAddr, pm.ReplyToAddr, pm.Subject,
 			dateStr, pm.BodyText, pm.BodyHTML, rawBytes, boolInt(markRead),
 			boolInt(len(pm.Attachments) > 0), boolInt(pm.HasExternalImages),
-			now, now, senderauth.Encode(senderauth.Parse(rawBytes, spamSettings.TrustedCheckerHost.Value)),
+			now, now, senderauth.Encode(senderauth.Parse(rawBytes, authHost)), authGeneration,
 		)
 		if err != nil {
 			return err

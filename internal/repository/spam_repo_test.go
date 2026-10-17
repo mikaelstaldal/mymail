@@ -9,6 +9,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	oas "github.com/mikaelstaldal/mymail/internal/api"
+	"github.com/mikaelstaldal/mymail/internal/senderauth"
 )
 
 func TestGetSpamFilterSettings_Defaults(t *testing.T) {
@@ -130,7 +131,7 @@ func TestTrustedCheckerHost(t *testing.T) {
 	assert.Equal(t, "", got.TrustedCheckerHost.Value)
 }
 
-func TestChangingCheckerRevokesStoredEvidence(t *testing.T) {
+func TestChangingCheckerRevokesStoredEvidenceWithoutWritingMail(t *testing.T) {
 	ctx := context.Background()
 	db := openTestDB(t)
 	r := NewSpamFilterRepository(db)
@@ -139,21 +140,47 @@ func TestChangingCheckerRevokesStoredEvidence(t *testing.T) {
 	s.TrustedCheckerHost = oas.NewOptString("checker")
 	s, err = r.UpdateSpamFilterSettings(ctx, s)
 	require.NoError(t, err)
-	_, err = db.Exec(`INSERT INTO messages(id,folder_id,date,sender_authentication,created_at,updated_at) VALUES(42,1,'2024-01-01T00:00:00Z','{"dmarc":"pass","dkim_aligned":true,"spf":"pass"}','2024-01-01T00:00:00Z','2024-01-01T00:00:00Z')`)
+	messages := NewMessageRepository(db)
+	msg := makeMsg(1, "authenticated message")
+	msg.Raw = []byte("From: a@example.org\r\nX-Spam-Checker-Version: SpamAssassin 4.0.1 (2024-03-25) on checker\r\nX-Spam-Status: No, tests=DMARC_PASS,DKIM_VALID_AU,SPF_PASS\r\n\r\nbody")
+	msg.SenderAuthentication = senderauth.Encode(oas.SenderAuthentication{Dmarc: "pass", Spf: "pass", DkimAligned: true})
+	id, err := messages.InsertMessage(ctx, msg)
+	require.NoError(t, err)
+	var initialTimestamp string
+	require.NoError(t, db.QueryRow(`SELECT updated_at FROM messages WHERE id = ?`, id).Scan(&initialTimestamp))
+	// The old implementation fails here: saving rewrote every message, including
+	// huge raw blobs in archives. No settings save may write a message row.
+	_, err = db.Exec(`CREATE TRIGGER forbid_settings_mail_write BEFORE UPDATE ON messages BEGIN SELECT RAISE(ABORT, 'settings must not rewrite mail'); END`)
 	require.NoError(t, err)
 	s.Enabled = !s.Enabled
 	_, err = r.UpdateSpamFilterSettings(ctx, s)
 	require.NoError(t, err)
-	var verdict string
-	require.NoError(t, db.QueryRow(`SELECT sender_authentication FROM messages WHERE id=42`).Scan(&verdict))
-	assert.Contains(t, verdict, `"dmarc":"pass"`)
-	for _, host := range []string{"different", ""} {
-		_, err = db.Exec(`UPDATE messages SET sender_authentication = '{"dmarc":"pass","dkim_aligned":true,"spf":"pass"}' WHERE id=42`)
-		require.NoError(t, err)
+	got, err := messages.GetMessageDetail(ctx, id)
+	require.NoError(t, err)
+	assert.Equal(t, "pass", string(got.ToOASMessage(nil).SenderAuthentication.Dmarc))
+	for _, host := range []string{"different", "", "checker"} {
 		s.TrustedCheckerHost = oas.NewOptString(host)
 		_, err = r.UpdateSpamFilterSettings(ctx, s)
 		require.NoError(t, err)
-		require.NoError(t, db.QueryRow(`SELECT sender_authentication FROM messages WHERE id=42`).Scan(&verdict))
-		assert.JSONEq(t, `{"dmarc":"unknown","dkim_aligned":false,"spf":"unknown"}`, verdict)
+		got, err = messages.GetMessageDetail(ctx, id)
+		require.NoError(t, err)
+		assert.Equal(t, senderauth.Unknown(), got.ToOASMessage(nil).SenderAuthentication)
+		full, err := messages.GetMessage(ctx, id)
+		require.NoError(t, err)
+		assert.Equal(t, senderauth.Encode(senderauth.Unknown()), full.SenderAuthentication)
+		var stored, timestamp string
+		var raw []byte
+		require.NoError(t, db.QueryRow(`SELECT sender_authentication, updated_at, raw FROM messages WHERE id=?`, id).Scan(&stored, &timestamp, &raw))
+		assert.Equal(t, msg.SenderAuthentication, stored)
+		assert.Equal(t, initialTimestamp, timestamp)
+		assert.Equal(t, msg.Raw, raw)
 	}
+	// Re-selecting a previous hostname does not resurrect revoked evidence.
+	// Only explicit backfill updates it to the new generation.
+	_, err = db.Exec(`DROP TRIGGER forbid_settings_mail_write`)
+	require.NoError(t, err)
+	require.NoError(t, BackfillSenderAuthentication(ctx, db, "inbox"))
+	got, err = messages.GetMessageDetail(ctx, id)
+	require.NoError(t, err)
+	assert.Equal(t, "pass", string(got.ToOASMessage(nil).SenderAuthentication.Dmarc))
 }

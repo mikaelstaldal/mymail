@@ -71,7 +71,7 @@ func TestOpenDBAndInitSchema(t *testing.T) {
 	// Schema version must match the latest migration.
 	var v int
 	db.QueryRow("PRAGMA user_version").Scan(&v)
-	assert.Equal(t, 8, v, "user_version")
+	assert.Equal(t, 9, v, "user_version")
 
 	// All tables must exist.
 	tables := []string{
@@ -121,7 +121,7 @@ func TestOpenDBAndInitSchema(t *testing.T) {
 	err = InitSchema(db)
 	assert.NoError(t, err, "second InitSchema")
 	db.QueryRow("PRAGMA user_version").Scan(&v)
-	assert.Equal(t, 8, v, "user_version after second run")
+	assert.Equal(t, 9, v, "user_version after second run")
 
 	// Basic FK cascade: insert a message row then delete it; attachment should cascade.
 	_, err = db.Exec(`INSERT INTO folders(id,name,slug,position) VALUES(1,'Inbox','inbox',0)`)
@@ -233,4 +233,26 @@ func TestAuthenticationMigrationPreservesOldMail(t *testing.T) {
 	assert.JSONEq(t, `{"dmarc":"unknown","dkim_aligned":false,"spf":"unknown"}`, verdict)
 	require.NoError(t, db.QueryRow(`SELECT trusted_checker_host FROM spam_filter_settings`).Scan(&host))
 	assert.Empty(t, host)
+}
+
+func TestAuthenticationGenerationMigrationPreservesEvidenceWithoutRewritingMail(t *testing.T) {
+	db, err := sqlite.Open(filepath.Join(t.TempDir(), "generation-upgrade.sqlite"), 0, nil)
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, db.Close()) })
+	require.NoError(t, sqlite.MigrateStrict(context.Background(), db, migrations[:8]))
+	require.NoError(t, SeedBuiltinFolders(db))
+	_, err = db.Exec(`UPDATE spam_filter_settings SET trusted_checker_host='checker';
+ INSERT INTO messages(id,folder_id,date,raw,sender_authentication,created_at,updated_at)
+ VALUES(42,1,'2024-01-01T00:00:00Z',X'1234','{"dmarc":"pass","dkim_aligned":true,"spf":"pass"}','2024-01-01T00:00:00Z','2024-01-01T00:00:00Z');
+ CREATE TRIGGER forbid_migration_mail_write BEFORE UPDATE ON messages BEGIN SELECT RAISE(ABORT,'migration must not rewrite mail'); END`)
+	require.NoError(t, err)
+	require.NoError(t, InitSchema(db))
+	msg, err := NewMessageRepository(db).GetMessageDetail(context.Background(), 42)
+	require.NoError(t, err)
+	assert.Equal(t, "pass", string(msg.ToOASMessage(nil).SenderAuthentication.Dmarc))
+	var generation int64
+	require.NoError(t, db.QueryRow(`SELECT auth_generation FROM messages WHERE id=42`).Scan(&generation))
+	assert.Zero(t, generation)
+	require.NoError(t, db.QueryRow(`SELECT auth_generation FROM spam_filter_settings WHERE id=1`).Scan(&generation))
+	assert.Zero(t, generation)
 }

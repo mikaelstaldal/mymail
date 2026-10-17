@@ -241,3 +241,12 @@ repeatable `-backfill-auth-folder` selectors resolve exact folder names/slugs
 before any updates; selected-folder scans use the folder index and do not load
 raw blobs from excluded folders. Imports default to unknown until explicit backfill. Existing
 spam-folder routing is separate and retains its prior behavior.
+
+
+Checker-host changes increment `spam_filter_settings.auth_generation` instead of
+updating message rows. Schema version 9 adds this counter and
+`messages.auth_generation`, both defaulting to zero for existing evidence.
+Delivery reads the host and generation in its insertion transaction; backfill
+reads them under its existing write lock. Detail/full-message projections return
+unknown when generations differ or the host is empty. This preserves immediate
+revocation while keeping settings saves independent of mailbox/raw-blob size.

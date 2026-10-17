@@ -238,5 +238,6 @@ your operator has secured the SpamAssassin scanning path as described in the
 [operations guide](OPERATIONS.md#sender-authentication-with-spamassassin).
 This setting records authentication evidence for delivered messages independently
 of whether automatic Junk routing is enabled. It does not add a verified badge.
-Changing or clearing the host resets stored evidence to unknown; the operator
+Changing or clearing the host immediately makes prior evidence read as unknown
+without rewriting the mailbox; the operator
 can explicitly recompute it with `-backfill-auth` after checking historical mail provenance.

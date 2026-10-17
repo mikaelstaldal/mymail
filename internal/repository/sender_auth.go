@@ -30,7 +30,8 @@ func BackfillSenderAuthentication(ctx context.Context, db *sql.DB, folders ...st
 	}
 	defer conn.ExecContext(context.Background(), "ROLLBACK") //nolint:errcheck
 	var host string
-	if err := conn.QueryRowContext(ctx, `SELECT trusted_checker_host FROM spam_filter_settings WHERE id = 1`).Scan(&host); err != nil {
+	var generation int64
+	if err := conn.QueryRowContext(ctx, `SELECT trusted_checker_host, auth_generation FROM spam_filter_settings WHERE id = 1`).Scan(&host, &generation); err != nil {
 		return err
 	}
 	// Resolve the complete selection before processing any message. A name can
@@ -91,7 +92,7 @@ func BackfillSenderAuthentication(ctx context.Context, db *sql.DB, folders ...st
 			if err != nil {
 				return err
 			}
-			if _, err := conn.ExecContext(ctx, `UPDATE messages SET sender_authentication = ? WHERE id = ?`, senderauth.Encode(senderauth.Parse(raw, host)), id); err != nil {
+			if _, err := conn.ExecContext(ctx, `UPDATE messages SET sender_authentication = ?, auth_generation = ? WHERE id = ?`, senderauth.Encode(senderauth.Parse(raw, host)), generation, id); err != nil {
 				return err
 			}
 			last = id

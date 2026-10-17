@@ -485,8 +485,11 @@ Unselected messages keep their stored verdicts and timestamps, and their raw
 message blobs are not read. The entire selected run is still one transaction.
 `-backfill-auth-folder` requires `-backfill-auth`.
 
-Changing or clearing the checker host immediately resets all stored results to
-unknown. The schema migration also leaves old results unknown. Backfill is explicit and
+Changing or clearing the checker host immediately makes all prior results read as
+unknown by advancing a configuration generation. Saving settings does not scan or
+rewrite messages, raw blobs, or message timestamps, regardless of archive size.
+Returning to an earlier hostname does not restore old evidence; run explicit
+backfill on the folders you want to re-evaluate. The schema migration also leaves old results unknown. Backfill is explicit and
 repeatable; it uses the current host, including an empty host to reset all results
 to unknown. It processes one raw message at a time in a single transaction. It
 acquires the write lock before reading and can hold it for a large mailbox; run it during maintenance.

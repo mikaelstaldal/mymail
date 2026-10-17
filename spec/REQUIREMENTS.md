@@ -428,8 +428,14 @@ once. Unselected messages retain their verdicts and timestamps, and their raw
 blobs are not loaded. Folder selectors require `-backfill-auth`.
 Moving a received message into Sent or
 Scheduled does not change its raw provenance; folder membership is not a trust
-signal. Imported raw in those folders is subject to the same explicit opt-in. Changing or clearing the host atomically resets all stored verdicts to unknown;
-changing other spam settings with the same host preserves evidence. Run backfill
+signal. Imported raw in those folders is subject to the same explicit opt-in. Changing or clearing the host atomically advances an authentication generation,
+making prior verdicts read as unknown without scanning or rewriting messages or
+changing their timestamps;
+changing other spam settings with the same host preserves evidence. Delivery and
+backfill stamp evidence with the current generation. Returning to an earlier
+host does not revive revoked evidence. Schema version 9 adds default-zero
+generation columns without rewriting raw mail, preserving pre-upgrade results
+until the next host change. Run backfill
 explicitly to re-evaluate old mail under a newly configured host. Do not
 backfill potentially forged historical headers as trusted evidence. Demo messages
 have no real scanner evidence and always expose unknown; demo settings store the
