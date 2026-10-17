@@ -101,6 +101,17 @@ fi
 "$BINARY" -init -data "$DATA_DIR" \
     -identity-address "e2e@example.com" -identity-name "E2E Test" > /dev/null
 
+# A received message exercises the body link rewrite with real stored mail.
+"$BINARY" -lda -data "$DATA_DIR" <<'MAIL' >/dev/null
+From: sender@example.org
+To: e2e@example.com
+Subject: Deceptive navigation sample
+Message-ID: <deceptive-link-e2e@example.org>
+Content-Type: text/html; charset=utf-8
+
+<a>Index zero</a><a href="https://destination.example.org/path?x=1&amp;y=2">https://example.com</a>
+MAIL
+
 # -public-url must match the baseURL origin in e2e/playwright.config.ts, or CSRF
 # rejects mutating requests with 403.
 #

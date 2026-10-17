@@ -1243,8 +1243,10 @@ function getMessageHeaders(state: DemoState, id: number): Response {
  * headers do not survive that trip. The header is still set, so the two
  * responses differ only by the meta the server has no need of.
  */
-function getMessageBody(state: DemoState, id: number, url: URL): Response {
+async function getMessageBody(state: DemoState, id: number, url: URL): Promise<Response> {
   const msg = findMessage(state, id);
+  const warnings = await demoWarnings(state, msg, []);
+  const servedHTML = await rewriteDemoLinks(msg.bodyHtml, id, warnings.filter(w => w.kind === 'deceptive_link').map(w => Number(w.link_index)), new URL('../../../../', url).href);
   const imgSrc = url.searchParams.get('external') === '1' ? 'https: data:' : 'data:';
   // frame-ancestors is deliberately left out of the meta copy: browsers ignore
   // it there, and the iframe is same-document anyway.
@@ -1253,7 +1255,7 @@ function getMessageBody(state: DemoState, id: number, url: URL): Response {
     '<!DOCTYPE html>\n<html>\n<head><meta charset="utf-8">' +
     `<meta http-equiv="Content-Security-Policy" content="${csp}">` +
     '<base target="_blank"></head>\n' +
-    `<body>${msg.bodyHtml}</body>\n</html>`;
+    `<body>${servedHTML}</body>\n</html>`;
   return new Response(body, {
     status: 200,
     headers: {

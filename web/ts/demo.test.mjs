@@ -58,7 +58,8 @@ vm.runInThisContext(`
 const { JSDOM } = await import('./third_party/test/jsdom.js');
 const dom = new JSDOM('', { url: 'http://localhost/' });
 globalThis.document = dom.window.document;
-const { phishingLinks } = await import('../static/util/phishinglinks.js');
+const { phishingLinks, rewritePhishingLinks } = await import('../static/util/phishinglinks.js');
+globalThis.rewriteDemoLinks = async (...args) => rewritePhishingLinks(...args);
 globalThis.parseDemoLinks = async body => phishingLinks(body);
 evalScript('api.js');
 
@@ -1215,7 +1216,7 @@ test('demo worker requests link parsing over a real MessageChannel', async () =>
   let hasClient = true;
   const context = vm.createContext({
     importScripts: () => {}, MessageChannel, setTimeout, clearTimeout,
-    self: { addEventListener: () => {}, clients: { matchAll: async () => hasClient ? [{
+    self: { addEventListener: () => {}, clients: { matchAll: async () => hasClient ? [{ postMessage: (_request, ports) => { ports[0].close(); } }, {
       postMessage: (request, ports) => { assert.equal(request.type, 'mymail-demo:parse-links'); ports[0].postMessage(phishingLinks(request.body)); ports[0].close(); },
     }] : [] } },
   });
@@ -1274,4 +1275,19 @@ test('demo and Go recognize bare domains under wildcard-only ICANN suffixes', as
     const warnings = (await call(state, 'GET', '/messages/1')).body.warnings;
     assert.equal(warnings.length, 1, text); assert.equal(warnings[0].kind, 'deceptive_link', text);
   }
+});
+
+test('demo served bodies wrap only deceptive links without changing stored HTML', async () => {
+  const original = '<a>skip</a><a href="https://example.com">example.com</a><a href="https://evil.org/path" target="_blank" rel="noopener noreferrer">example.com</a>';
+  const state = newState();
+  globalThis.__demoState = state;
+  // Use the existing message factory so all detail/scheduler fields are valid.
+  const msg = message({ id: 42, folderId: 1, bodyHtml: original });
+  state.messages.push(msg);
+  const response = await handleApiRequest('/messages/42/body', new Request('https://demo.example/api/v1/messages/42/body'));
+  assert.equal(response.status, 200);
+  const html = await response.text();
+  assert.match(html, /#\/link\/42\/2/);
+  assert.match(html, /href="https:\/\/example.com"/);
+  assert.equal(msg.bodyHtml, original);
 });

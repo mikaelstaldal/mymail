@@ -265,3 +265,16 @@ A folder-scoped API token also receives warnings derived from global identities
 and sent history, even if Sent is outside its grant. It can infer whether you have
 emailed a sender in its allowed folders and see a domain named by `resembles`.
 Consider this derived metadata when granting a token access to a folder.
+
+### Deceptive-link confirmation
+
+A suspicious link opens a MyMail confirmation page before leaving your mailbox.
+This happens when the link text names a different domain from its destination,
+or the destination uses an IP address or an internationalised domain. Other
+links open normally.
+
+Check the visible text against the full destination and the bold destination host.
+For internationalised domains, MyMail also shows the ASCII (punycode) host when
+it differs from the decoded host. Choose **Go back** to return to the message,
+or **Continue to destination** to open the link. MyMail never continues
+automatically, and continuing sends no referrer. This works in the browser demo too.

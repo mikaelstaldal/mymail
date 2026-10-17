@@ -2,6 +2,7 @@ export type Route =
   | { type: 'inbox' }
   | { type: 'folder'; slug: string }
   | { type: 'message'; id: number }
+  | { type: 'link'; id: number; index: number }
   | { type: 'compose'; replyId?: number; replyAllId?: number; forwardId?: number; draftId?: number }
   | { type: 'search'; query: string }
   | { type: 'settings'; tab?: string };
@@ -22,6 +23,8 @@ function parseRoute(hash: string): Route {
     const id = Number(parts[1]);
     return { type: 'message', id };
   }
+
+  if (seg === 'link') return { type: 'link', id: Number(parts[1]), index: Number(parts[2]) };
 
   if (seg === 'compose') {
     const replyId = params.get('reply') ? Number(params.get('reply')) : undefined;

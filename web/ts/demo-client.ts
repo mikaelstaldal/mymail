@@ -1,4 +1,4 @@
-import { phishingLinks } from './util/phishinglinks.js';
+import { phishingLinks, rewritePhishingLinks } from './util/phishinglinks.js';
 // The page half of demo mode. Loaded — dynamically, so a normal build never
 // downloads it — only when the server marks the deployment as a demo (see
 // util/config.ts).
@@ -50,6 +50,9 @@ export async function startDemoBackend(): Promise<void> {
   }
 
   navigator.serviceWorker.addEventListener('message', (event: MessageEvent) => {
+    if (event.data?.type === 'mymail-demo:rewrite-links' && event.ports[0]) {
+      event.ports[0].postMessage(rewritePhishingLinks(String(event.data.body), event.data.id, event.data.indices, event.data.base));
+    }
     if (event.data?.type === 'mymail-demo:parse-links' && event.ports[0]) {
       event.ports[0].postMessage(phishingLinks(String(event.data.body)));
     }

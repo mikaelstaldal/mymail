@@ -2059,3 +2059,10 @@ html, body {
 .device-page-content input[type="text"] { padding: 0.5rem; border: 1px solid var(--border); border-radius: 0.375rem; background: var(--surface); color: var(--fg); }
 @media (max-width: 600px) { .device-page-content { margin: 0.75rem; padding: 1rem; } }
 .device-page-content .device-approval h2 { font-size: 1.15rem; }
+
+/* Long attacker-controlled link text must fit the confirmation pane. */
+.link-confirmation {
+  padding: 1rem;
+  max-width: 52rem;
+  overflow-wrap: anywhere;
+}

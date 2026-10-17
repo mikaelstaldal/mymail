@@ -1738,6 +1738,12 @@ paths:
         it suitable for loading in a sandboxed `<iframe src="…">`. Without `?external=1` only
         `data:` URIs (resolved inline attachments) are permitted; with `?external=1` HTTPS
         images are also allowed.
+        Links carrying a `deceptive_link` warning are rewritten at serve time to
+        the authenticated MyMail confirmation route. Relative hrefs resolve against
+        this endpoint's URL, including any deployment path prefix. This applies to
+        all consumers, including CLI and MCP body reads. For original destinations,
+        use `body_html` and `warnings` from GET /messages/{id}, or the raw message;
+        stored content and reply/forward content are unchanged.
       parameters:
         - name: id
           in: path

@@ -284,3 +284,20 @@ SQLite functions. Direct writes or SQL-dump restoration through an external
 SQLite CLI need those functions; copying/restoring a database-file backup does
 not. Scope grants include the derived global-history warning metadata described
 in the OpenAPI authentication section and REQUIREMENTS.md.
+
+### Deceptive-link confirmation
+
+`MessagesIDBodyGet` computes link warnings and passes them to
+`phishing.RewriteLinks` on the response copy. Its iterative document walk uses
+`Links`' anchor indexing, with the same tokenizer fallback for excessive nesting.
+The replacement href resolves from the body endpoint to `#/link/:id/:index`,
+preserving a deployment path prefix. Stored bodies and raw mail are never edited.
+
+`LinkConfirmation` resolves its index against `api.messages.get(id).warnings`;
+the existing endpoint supplies authentication and folder-grant checks. It renders
+escaped text and an explicit HTTP(S) continuation link with `noreferrer` and
+`referrerPolicy="no-referrer"`. No URL query parameter controls the destination.
+
+The demo worker computes the same warnings and asks a controlled page to rewrite
+links in an inert template. It returns that document through the existing body
+fetch/srcdoc path. The confirmation route uses the ordinary demo message API.

@@ -3,6 +3,7 @@ package handler_test
 import (
 	"context"
 	"fmt"
+	"io"
 	"net/http"
 	"testing"
 
@@ -54,4 +55,33 @@ func TestMessageWarningExemptionsThroughAPI(t *testing.T) {
 		decodeJSON(t, res, &detail)
 		assert.Empty(t, detail.Warnings)
 	}
+}
+
+// Serving a body must never persist its navigation wrappers, including when
+// replying/forwarding via the original detail endpoint.
+func TestDeceptiveBodyRewrite(t *testing.T) {
+	db := openTestDB(t)
+	srv := newServer(t, db)
+	original := `<a>no href</a><a href="https://example.com" target="_blank" rel="noopener noreferrer">example.com</a><a href="https://evil.org/a?x=1&amp;y=2" target="_blank" rel="noopener noreferrer">example.com</a>`
+	_, err := db.Exec(`INSERT INTO messages(id,folder_id,from_addr,body_html,raw,date,created_at,updated_at) VALUES(42,1,'person@example.org',?,'original raw','2026-01-01T00:00:00Z','2026-01-01T00:00:00Z','2026-01-01T00:00:00Z')`, original)
+	require.NoError(t, err)
+	res := do(srv, http.MethodGet, "/messages/42/body", "")
+	require.Equal(t, 200, res.StatusCode)
+	served, err := io.ReadAll(res.Body)
+	require.NoError(t, err)
+	text := string(served)
+	assert.Contains(t, text, `href="https://example.com"`)
+	assert.Contains(t, text, `href="../../../../#/link/42/2" rel="noopener noreferrer" target="_blank"`)
+	assert.NotContains(t, text, `href="https://evil.org`)
+	var stored, raw string
+	require.NoError(t, db.QueryRow(`SELECT body_html, raw FROM messages WHERE id=42`).Scan(&stored, &raw))
+	assert.Equal(t, original, stored)
+	assert.Equal(t, "original raw", raw)
+	_, err = db.Exec(`UPDATE messages SET folder_id=2 WHERE id=42`)
+	require.NoError(t, err)
+	res = do(srv, http.MethodGet, "/messages/42/body", "")
+	served, err = io.ReadAll(res.Body)
+	require.NoError(t, err)
+	assert.Contains(t, string(served), `href="https://evil.org/a?x=1&amp;y=2"`)
+	assert.NotContains(t, string(served), "#/link/")
 }

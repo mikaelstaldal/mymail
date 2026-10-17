@@ -107,12 +107,27 @@ function apiPath(requestURL: string): string | null {
  * document, never regex HTML. A closed tab yields an error, never a clean bill. */
 async function parseDemoLinks(body: string): Promise<DemoWarningLink[]> {
   if (body === '') return [];
+  return demoPageRequest<DemoWarningLink[]>({ type: 'mymail-demo:parse-links', body });
+}
+
+async function rewriteDemoLinks(body: string, id: number, indices: number[], base: string): Promise<string> {
+  if (!indices.length) return body;
+  return demoPageRequest<string>({ type: 'mymail-demo:rewrite-links', body, id, indices, base });
+}
+
+// A newly opened or suspended window may not answer. Any controlled page can
+// perform this inert operation; don't make another tab depend on the first one.
+async function demoPageRequest<T>(message: object): Promise<T> {
   const clients = await sw.clients.matchAll({ type: 'window' });
   if (!clients.length) throw new Error('no demo page available to parse message links');
   return new Promise((resolve, reject) => {
-    const channel = new MessageChannel();
-    const timer = setTimeout(() => { channel.port1.close(); reject(new Error('demo link parser timed out')); }, 5000);
-    channel.port1.onmessage = event => { clearTimeout(timer); channel.port1.close(); resolve(event.data); };
-    clients[0].postMessage({ type: 'mymail-demo:parse-links', body }, [channel.port2]);
+    const channels: MessageChannel[] = [];
+    const finish = () => { clearTimeout(timer); for (const channel of channels) channel.port1.close(); };
+    const timer = setTimeout(() => { finish(); reject(new Error('demo link parser timed out')); }, 5000);
+    for (const client of clients) {
+      const channel = new MessageChannel(); channels.push(channel);
+      channel.port1.onmessage = event => { finish(); resolve(event.data as T); };
+      client.postMessage(message, [channel.port2]);
+    }
   });
 }

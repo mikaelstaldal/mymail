@@ -1586,3 +1586,14 @@ from `first_time_sender` presence/absence and can learn an own/correspondent dom
 from `resembles`. The folder grant includes this derived security metadata; it
 does not grant access to the underlying Sent messages. This keeps warning meaning
 consistent for API/MCP and full-access clients.
+
+### Deceptive-link confirmation
+
+Only links carrying a `deceptive_link` warning open a MyMail confirmation page.
+The page shows the visible text, full destination, decoded host and ASCII host
+when different, and explains the warning. Go back returns to the message;
+Continue opens the destination without a referrer. There is no automatic redirect.
+The route addresses a stored message and link index, never a destination parameter;
+it resolves through the authenticated message-detail API and its folder grants.
+Body links are rewritten only when served; stored HTML, raw mail, replies and
+forwards retain their original links. The browser demo follows the same rules.

@@ -19,3 +19,15 @@ export function phishingLinks(body: string): Array<{ Index: number; Text: string
   }
   return links;
 }
+
+export function rewritePhishingLinks(body: string, id: number, indices: number[], base: string): string {
+  const template = document.createElement('template');
+  template.innerHTML = body;
+  const flagged = new Set(indices);
+  let index = 0;
+  for (const a of template.content.querySelectorAll('a')) {
+    if (flagged.has(index)) a.setAttribute('href', `${base}#/link/${id}/${index}`);
+    index++;
+  }
+  return template.innerHTML;
+}

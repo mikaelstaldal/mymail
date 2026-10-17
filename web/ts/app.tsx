@@ -5,6 +5,7 @@ import { Toolbar } from './layout/Toolbar.js';
 import { Toast } from './components/Toast.js';
 import { ConfirmDialog } from './components/ConfirmDialog.js';
 import { FolderView } from './views/FolderView.js';
+import { LinkConfirmation } from './views/LinkConfirmation.js';
 import { MessageDetail } from './views/MessageDetail.js';
 import { ComposeForm } from './views/ComposeForm.js';
 import { SearchView } from './views/SearchView.js';
@@ -36,6 +37,7 @@ function routeLabel(route: Route, folders: Folder[]): string {
     case 'inbox': return 'Inbox';
     case 'folder': return folders.find(f => f.slug === route.slug)?.name ?? route.slug;
     case 'message': return 'Message';
+    case 'link': return 'Check link';
     case 'compose': return 'Compose';
     case 'search': return `Search: ${route.query}`;
     case 'settings': return route.tab ? `Settings — ${route.tab}` : 'Settings';
@@ -133,6 +135,7 @@ function App() {
       }
       return <FolderView folder={currentFolder} folders={folders} />;
     }
+    if (route.type === 'link') return <LinkConfirmation key={`${route.id}/${route.index}`} id={route.id} index={route.index} />;
     if (route.type === 'message') {
       return <MessageDetail id={route.id} folders={folders} />;
     }

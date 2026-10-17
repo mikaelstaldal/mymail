@@ -295,7 +295,7 @@ test.describe('Sidebar footer contract', () => {
   // results, and those are the layouts that could push the footer around.
   //
   // Complete *as of the current route table* (web/ts/router.ts: inbox, folder,
-  // message, compose, search, settings). §8.3 is explicit that adding a route is
+  // message, link, compose, search, settings). §8.3 is explicit that adding a route is
   // the event that invalidates this coverage — a new route is covered by nothing
   // and every existing one keeps passing. Add a case here when you add a route.
   const ROUTES = [
@@ -304,6 +304,7 @@ test.describe('Sidebar footer contract', () => {
     ['compose', '#/compose', '.compose-form'],
     ['search', '#/search?q=fixture', '.search-view'],
     ['settings', '#/settings', '.settings-page'],
+    ['link confirmation', '#/link/1/1', '.link-confirmation'],
   ] as const;
 
   for (const [name, hash, selector] of ROUTES) {
@@ -319,7 +320,7 @@ test.describe('Sidebar footer contract', () => {
     });
   }
 
-  // The sixth route, separated because it needs a fixture: reading a message is
+  // The message route, separated because it needs a fixture: reading a message is
   // the one MyMail layout with a scrollport in the main pane, and the protocol
   // requires the overflow case to be measured rather than assumed.
   test('controls hold (8, 8) while reading a message whose body scrolls', async ({ page }) => {
