@@ -71,7 +71,7 @@ func TestOpenDBAndInitSchema(t *testing.T) {
 	// Schema version must match the latest migration.
 	var v int
 	db.QueryRow("PRAGMA user_version").Scan(&v)
-	assert.Equal(t, 7, v, "user_version")
+	assert.Equal(t, 8, v, "user_version")
 
 	// All tables must exist.
 	tables := []string{
@@ -121,7 +121,7 @@ func TestOpenDBAndInitSchema(t *testing.T) {
 	err = InitSchema(db)
 	assert.NoError(t, err, "second InitSchema")
 	db.QueryRow("PRAGMA user_version").Scan(&v)
-	assert.Equal(t, 7, v, "user_version after second run")
+	assert.Equal(t, 8, v, "user_version after second run")
 
 	// Basic FK cascade: insert a message row then delete it; attachment should cascade.
 	_, err = db.Exec(`INSERT INTO folders(id,name,slug,position) VALUES(1,'Inbox','inbox',0)`)
@@ -215,4 +215,22 @@ func TestOpenDBRefusesNewerSchema(t *testing.T) {
 	require.Error(t, err, "OpenDB on a newer schema")
 	assert.ErrorIs(t, err, sqlite.ErrSchemaTooNew)
 	assert.Contains(t, err.Error(), "upgrade the binary")
+}
+
+func TestAuthenticationMigrationPreservesOldMail(t *testing.T) {
+	db, err := sqlite.Open(filepath.Join(t.TempDir(), "upgrade.sqlite"), 0, nil)
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, db.Close()) })
+	require.NoError(t, sqlite.MigrateStrict(context.Background(), db, migrations[:7]))
+	require.NoError(t, SeedBuiltinFolders(db))
+	_, err = db.Exec(`INSERT INTO messages(id,folder_id,date,raw,created_at,updated_at) VALUES(42,1,'2024-01-01T00:00:00Z',X'1234','2024-01-01T00:00:00Z','2024-01-01T00:00:00Z')`)
+	require.NoError(t, err)
+	require.NoError(t, InitSchema(db))
+	var verdict, host string
+	var raw []byte
+	require.NoError(t, db.QueryRow(`SELECT raw,sender_authentication FROM messages WHERE id=42`).Scan(&raw, &verdict))
+	assert.Equal(t, []byte{0x12, 0x34}, raw)
+	assert.JSONEq(t, `{"dmarc":"unknown","dkim_aligned":false,"spf":"unknown"}`, verdict)
+	require.NoError(t, db.QueryRow(`SELECT trusted_checker_host FROM spam_filter_settings`).Scan(&host))
+	assert.Empty(t, host)
 }

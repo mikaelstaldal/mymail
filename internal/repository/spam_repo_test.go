@@ -107,3 +107,53 @@ func TestUpdateSpamFilterSettings_ZeroThresholdIsValid(t *testing.T) {
 	})
 	assert.NoError(t, err, "threshold=0 should be valid")
 }
+
+func TestTrustedCheckerHost(t *testing.T) {
+	ctx := context.Background()
+	r := NewSpamFilterRepository(openTestDB(t))
+	s, err := r.GetSpamFilterSettings(ctx)
+	require.NoError(t, err)
+	assert.Equal(t, "", s.TrustedCheckerHost.Value)
+	s.TrustedCheckerHost = oas.NewOptString("checker.example.org")
+	got, err := r.UpdateSpamFilterSettings(ctx, s)
+	require.NoError(t, err)
+	assert.Equal(t, "checker.example.org", got.TrustedCheckerHost.Value)
+	for _, host := range []string{"invalid host", "checker\r\nInjected: yes", strings.Repeat("a", 254)} {
+		s.TrustedCheckerHost = oas.NewOptString(host)
+		_, err = r.UpdateSpamFilterSettings(ctx, s)
+		require.ErrorIs(t, err, ErrInvalidCheckerHost)
+	}
+	// An older client's complete replacement omits the new field and disables it.
+	s.TrustedCheckerHost = oas.OptString{}
+	got, err = r.UpdateSpamFilterSettings(ctx, s)
+	require.NoError(t, err)
+	assert.Equal(t, "", got.TrustedCheckerHost.Value)
+}
+
+func TestChangingCheckerRevokesStoredEvidence(t *testing.T) {
+	ctx := context.Background()
+	db := openTestDB(t)
+	r := NewSpamFilterRepository(db)
+	s, err := r.GetSpamFilterSettings(ctx)
+	require.NoError(t, err)
+	s.TrustedCheckerHost = oas.NewOptString("checker")
+	s, err = r.UpdateSpamFilterSettings(ctx, s)
+	require.NoError(t, err)
+	_, err = db.Exec(`INSERT INTO messages(id,folder_id,date,sender_authentication,created_at,updated_at) VALUES(42,1,'2024-01-01T00:00:00Z','{"dmarc":"pass","dkim_aligned":true,"spf":"pass"}','2024-01-01T00:00:00Z','2024-01-01T00:00:00Z')`)
+	require.NoError(t, err)
+	s.Enabled = !s.Enabled
+	_, err = r.UpdateSpamFilterSettings(ctx, s)
+	require.NoError(t, err)
+	var verdict string
+	require.NoError(t, db.QueryRow(`SELECT sender_authentication FROM messages WHERE id=42`).Scan(&verdict))
+	assert.Contains(t, verdict, `"dmarc":"pass"`)
+	for _, host := range []string{"different", ""} {
+		_, err = db.Exec(`UPDATE messages SET sender_authentication = '{"dmarc":"pass","dkim_aligned":true,"spf":"pass"}' WHERE id=42`)
+		require.NoError(t, err)
+		s.TrustedCheckerHost = oas.NewOptString(host)
+		_, err = r.UpdateSpamFilterSettings(ctx, s)
+		require.NoError(t, err)
+		require.NoError(t, db.QueryRow(`SELECT sender_authentication FROM messages WHERE id=42`).Scan(&verdict))
+		assert.JSONEq(t, `{"dmarc":"unknown","dkim_aligned":false,"spf":"unknown"}`, verdict)
+	}
+}

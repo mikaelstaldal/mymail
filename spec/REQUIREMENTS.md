@@ -361,6 +361,72 @@ When invoked as `mymail -lda`:
 6. Stores the message and attachments.
 7. Upserts the sender into the contacts table.
 
+### Sender authentication
+
+Message detail includes `sender_authentication`: `dmarc` (`unknown`, `pass`,
+`fail`, `missing`), `dkim_aligned` (boolean), and `spf` (`unknown`, `pass`,
+`fail`, `softfail`). This is stored at LDA delivery independently of the
+spam filter's enabled flag. Imports always start unknown, even with a configured
+host; explicitly backfill only after verifying the historical mail's provenance. It does not move messages or display a verified badge.
+Drafts, MyMail-composed outgoing messages and messages without usable evidence default to unknown
+(and false for DKIM alignment, meaning no trusted evidence, not proven failure).
+
+Settings → Spam Filter exposes `trusted_checker_host` (default empty). The API
+accepts an omitted field as empty for compatibility with older clients. Empty
+means no authentication evidence is trusted. A nonempty value is matched exactly,
+case-sensitively to the hostname after `on` in a SpamAssassin
+`X-Spam-Checker-Version` header. Exactly one checker header and one
+`X-Spam-Status` header are required; duplicates are ambiguous and give unknown.
+Folded headers are unfolded. Only complete rule names from the single `tests=`
+list count; absent, empty, malformed or repeated tests lists give unknown.
+
+`DMARC_PASS` means pass. `DMARC_REJECT`, `DMARC_QUAR` and `DMARC_NONE` mean
+failure under reject, quarantine and none domain policies respectively;
+`DMARC_NONE` is **not** a missing policy or a successful authentication.
+`DMARC_MISSING` means missing policy. Other rules give unknown. `DKIM_VALID_AU`
+requires an exact author-domain match; false does not rule out DMARC relaxed
+alignment through a related domain. SPF uses `SPF_PASS`,
+`SPF_FAIL`, `SPF_SOFTFAIL`, otherwise unknown (HELO-only SPF is not used).
+If contradictory rules appear, DMARC failure wins over missing then pass;
+SPF failure wins over softfail then pass.
+
+**Trust boundary:** no robust deployment-independent positional check exists.
+MyMail knows neither the trusted Received hop nor whether a scanner prepends or
+appends headers, nor how reinjection reorders them. A sender can forge an entire
+checker/status block on either side of sender-supplied Received fields; an MTA
+may then add a genuine Received field before it. Position cannot prove a scan
+occurred. MyMail therefore does not assign trust based on header position. The
+unique-header/hostname checks reject accidental duplicates and other checkers,
+but **do not detect a forged matching block on unchecked mail**, including
+spamc size bypass or spamd failure. Tests explicitly pin this limitation.
+
+Only enable the setting after securing **every** delivery and import path:
+ensure SpamAssassin removes incoming X-Spam-* headers, scans all accepted sizes,
+and scanning failure defers delivery rather than passing original bytes through.
+An untrusted direct LDA caller or imported raw mail can forge the same evidence;
+leave trust disabled for such paths or strip untrusted headers before ingestion.
+See `docs/OPERATIONS.md` for setup and verification. No cryptographic provenance
+is inferred from a hostname. A pass is never proof that the sender is safe.
+
+Existing spam detection deliberately retains its prior first-header flag/status
+and configurable-score behavior, without the checker-host requirement. Changing
+it would alter established Junk routing and compatibility with Rspamd and custom
+score headers. The authentication setting controls only this new verdict.
+
+Schema migration initializes old messages to unknown. After securing the mail
+path and setting the checker host, stop delivery/server activity and run
+`mymail -data /path/to/data -backfill-auth` to recompute all verdicts from stored
+raw messages in one transaction (one raw message in memory at a time). This is
+explicit, repeatable and does not run at startup. Null or unparsable raw gives
+unknown. Backfill covers all folders: moving a received message into Sent or
+Scheduled does not change its raw provenance; folder membership is not a trust
+signal. Imported raw in those folders is subject to the same explicit opt-in. Changing or clearing the host atomically resets all stored verdicts to unknown;
+changing other spam settings with the same host preserves evidence. Run backfill
+explicitly to re-evaluate old mail under a newly configured host. Do not
+backfill potentially forged historical headers as trusted evidence. Demo messages
+have no real scanner evidence and always expose unknown; demo settings store the
+checker hostname but do not perform authentication checks.
+
 ### Filter Application
 
 **Phase 1 — Spam detection:**
@@ -1127,7 +1193,7 @@ Hovering a folder in the sidebar shows a tooltip with its slug and numeric id, e
 8. **Identity management** — CRUD UI with drag-to-reorder. Default identity marked visually. Signature field is a
    plain-text textarea.
 
-9. **Spam filter settings** — Enable/disable toggle, score threshold field, score header name field.
+9. **Spam filter settings** — Enable/disable toggle, score threshold field, score header name field, trusted checker host field.
 
 10. **Contact management** — Paginated list with add/edit/delete.
 
@@ -1354,7 +1420,9 @@ bug.
   than as RFC 2047 encoded words. `raw` is only ever shown in the headers view
   or downloaded as `.eml`.
 - **Spam detection never runs.** `spam_filter_settings` is stored and editable,
-  but it reads headers that a generated reply does not have.
+  but it reads headers that a generated reply does not have. Sender authentication
+  always returns unknown (DKIM alignment false), regardless of the stored checker
+  host, because demo messages have no real scanner evidence.
 - **The message body reaches the iframe as `srcdoc`.** A sandboxed iframe has an
   opaque origin, and a browser does not consult a service worker for a
   navigation out of one, so `<iframe src="api/v1/…/body">` would escape to a

@@ -839,3 +839,18 @@ func TestResolveFolder_ScheduledSnoozedCaseInsensitive(t *testing.T) {
 		assert.Error(t, err, "resolveFolder(%q)", name)
 	}
 }
+
+func TestImportLeavesSenderAuthenticationUnknown(t *testing.T) {
+	db := openImportTestDB(t)
+	_, err := db.Exec(`UPDATE spam_filter_settings SET trusted_checker_host = 'checker'`)
+	require.NoError(t, err)
+	raw := []byte("From: a@example.org\r\nMessage-ID: <import-auth@example.org>\r\nX-Spam-Checker-Version: SpamAssassin 4.0.1 (2024-03-25) on checker\r\nX-Spam-Status: No, tests=DMARC_PASS\r\n\r\nbody")
+	pm, err := ParseMessage(raw)
+	require.NoError(t, err)
+	n, err := commitBatch(context.Background(), db, []batchEntry{{pm: pm, raw: raw, date: "2024-01-01T00:00:00Z"}}, 1, repository.NewContactRepository(db))
+	require.NoError(t, err)
+	assert.Equal(t, 1, n)
+	var verdict string
+	require.NoError(t, db.QueryRow(`SELECT sender_authentication FROM messages WHERE message_id = 'import-auth@example.org'`).Scan(&verdict))
+	assert.JSONEq(t, `{"dmarc":"unknown","dkim_aligned":false,"spf":"unknown"}`, verdict)
+}

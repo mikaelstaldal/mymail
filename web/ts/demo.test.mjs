@@ -1083,12 +1083,15 @@ test('a move filter may only target Inbox, Trash, Junk or a user folder', async 
 test('the spam filter settings round-trip and are validated', async () => {
   const state = newState();
   const res = await call(state, 'PUT', '/spam-filter', {
-    enabled: true, score_header: 'X-Spam-Score', score_threshold: 4.5,
+    enabled: true, score_header: 'X-Spam-Score', score_threshold: 4.5, trusted_checker_host: 'checker',
   });
   assert.equal(res.status, 200);
   assert.deepEqual(await (await call(state, 'GET', '/spam-filter')).body, {
-    enabled: true, score_header: 'X-Spam-Score', score_threshold: 4.5,
+    enabled: true, score_header: 'X-Spam-Score', score_threshold: 4.5, trusted_checker_host: 'checker',
   });
+  assert.equal((await call(state, 'PUT', '/spam-filter', {
+    enabled: true, score_header: 'X', score_threshold: 5, trusted_checker_host: 'invalid host',
+  })).status, 400);
   assert.equal((await call(state, 'PUT', '/spam-filter', {
     enabled: true, score_header: '', score_threshold: 1,
   })).status, 400);
@@ -1101,4 +1104,14 @@ test('an unknown route is a 404 in the API error shape', async () => {
   const res = await call(newState(), 'GET', '/nonexistent');
   assert.equal(res.status, 404);
   assert.equal(typeof res.body.error, 'string');
+});
+
+
+test('demo message authentication stays unknown without scanner evidence', async () => {
+  const state = newState();
+  state.messages = [message({ id: 1 })];
+  state.spamFilter.trustedCheckerHost = 'checker';
+  const res = await call(state, 'GET', '/messages/1');
+  assert.equal(res.status, 200);
+  assert.deepEqual(res.body.sender_authentication, { dmarc: 'unknown', dkim_aligned: false, spf: 'unknown' });
 });

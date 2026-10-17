@@ -113,6 +113,7 @@ function toDetailDTO(msg: DemoMessage, attachments: DemoAttachment[]): unknown {
     date: msg.date,
     body_text: msg.bodyText,
     body_html: msg.bodyHtml,
+    sender_authentication: { dmarc: 'unknown', dkim_aligned: false, spf: 'unknown' },
     has_external_images: msg.hasExternalImages,
     // Unlike the summary, the detail projection does not suppress this in
     // Trash — model.ToOASMessage does not either; the UI applies the folder
@@ -173,6 +174,7 @@ function toSpamFilterDTO(spam: DemoSpamFilter): unknown {
   return {
     enabled: spam.enabled,
     score_header: spam.scoreHeader,
+    trusted_checker_host: spam.trustedCheckerHost ?? '',
     score_threshold: spam.scoreThreshold,
   };
 }
@@ -1858,7 +1860,9 @@ async function updateSpamFilter(state: DemoState, body: Record<string, unknown>)
   const scoreThreshold = optNumber(body, 'score_threshold') ?? 0;
   if (scoreThreshold < 0) throw validationError('score_threshold must be >= 0');
 
-  state.spamFilter = { enabled: optBool(body, 'enabled') ?? false, scoreHeader, scoreThreshold };
+  const trustedCheckerHost = optString(body, 'trusted_checker_host') ?? '';
+  if (trustedCheckerHost.length > 253 || !/^[A-Za-z0-9._-]*$/.test(trustedCheckerHost)) throw validationError('trusted_checker_host must be at most 253 ASCII hostname characters');
+  state.spamFilter = { trustedCheckerHost, enabled: optBool(body, 'enabled') ?? false, scoreHeader, scoreThreshold };
   await saveState(state);
   return jsonResponse(200, toSpamFilterDTO(state.spamFilter));
 }

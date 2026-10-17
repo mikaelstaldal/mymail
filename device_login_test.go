@@ -123,7 +123,7 @@ func TestDeviceMigrationPreservesExistingTokens(t *testing.T) {
 	store := token.Store{DB: db}
 	original, secret, err := store.Create("Existing token", time.Now().Add(time.Hour), []int64{1})
 	require.NoError(t, err)
-	_, err = db.Exec(`DROP TRIGGER device_authorizations_resource_deleted; DROP TABLE device_authorizations; PRAGMA user_version=6`)
+	_, err = db.Exec(`ALTER TABLE spam_filter_settings DROP COLUMN trusted_checker_host; ALTER TABLE messages DROP COLUMN sender_authentication; DROP TRIGGER device_authorizations_resource_deleted; DROP TABLE device_authorizations; PRAGMA user_version=6`)
 	require.NoError(t, err)
 	require.NoError(t, db.Close())
 	db, err = repository.OpenDB(path, 5000)

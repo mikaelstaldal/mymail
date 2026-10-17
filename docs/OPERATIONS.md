@@ -348,3 +348,79 @@ MyMail binds to `127.0.0.1` by default and is never directly exposed to the inte
 | 25   | TCP      | SMTP (Postfix incoming mail)     |
 
 The mymail process itself (port 8080) must not be reachable from outside the server.
+
+
+### Sender authentication with SpamAssassin
+
+This feature is opt-in. Keep Settings → Spam Filter → **Trusted Checker Host**
+empty until every route into MyMail has a secured scanning path. A matching
+hostname is not proof a scan happened: forged headers survive unchecked delivery.
+The existing Junk filter remains independent of this setting.
+
+1. Load `Mail::SpamAssassin::Plugin::SPF`,
+   `Mail::SpamAssassin::Plugin::DKIM`, and
+   `Mail::SpamAssassin::Plugin::DMARC` in your SpamAssassin 4.x configuration.
+   DMARC needs both other plugins and its Perl dependencies, including
+   `Mail::DMARC::PurePerl`. Enable DNS/network checks and the corresponding
+   nonzero-score rules so their hits appear in the `tests=` list. Run
+   `spamassassin --lint` and check scanner debug output for unavailable modules.
+   The [4.x DMARC plugin documentation](https://spamassassin.apache.org/full/4.0.x/doc/Mail_SpamAssassin_Plugin_DMARC.html)
+   lists `DMARC_PASS`, `DMARC_REJECT`, `DMARC_QUAR`, `DMARC_NONE` and
+   `DMARC_MISSING`. `DMARC_NONE` is failed authentication under policy `none`,
+   not absence of a policy.
+2. Inspect the raw source of a freshly scanned message. Find
+   `X-Spam-Checker-Version: SpamAssassin 4.x (...) on your-checker-host` and
+   enter exactly the hostname after `on` in MyMail. Confirm one checker header
+   and one status header remain, and that injected preexisting `X-Spam-*`
+   headers were removed by your actual scanning configuration. Keep the trusted
+   host empty if these checks fail. Multiple scanner blocks produce unknown.
+3. Verify envelope-sender SPF, rather than assuming HELO SPF is enough. On a
+   controlled message with a known envelope sender, compare the MTA envelope,
+   the bytes passed into spamc and SpamAssassin debug output for SPF. Seeing only
+   `SPF_HELO_NONE` and no `SPF_PASS` on Gmail mail is a diagnostic clue, not proof
+   of a missing envelope sender. Check how your Postfix pipe passes `${sender}`
+   and whether a trusted MTA-written header is available **before** scanning.
+   Configure `envelope_sender_header` only for a header that your MTA replaces or
+   removes at ingress; never trust a sender-supplied envelope header. A final
+   `Return-Path` added after the scan cannot help the scan. Verify SPF and DMARC
+   with controlled pass/fail messages and scanner logs; do not infer SPF failure
+   from an absent rule alone. Consult the
+   [SpamAssassin configuration reference](https://spamassassin.apache.org/full/4.0.x/doc/Mail_SpamAssassin_Conf.html)
+   for envelope-sender and trusted-network settings.
+4. Close unchecked pass-through. The
+   [spamc 4.x manual](https://spamassassin.apache.org/full/4.0.x/doc/spamc.html)
+   specifies `-s` in bytes: messages above it are returned **unprocessed**; the
+   default is 500 KB and the maximum is 256 MB. Set it at least as high as the
+   largest message accepted by the MTA and MyMail (MyMail LDA caps at 64 MiB;
+   for that limit use `-s 67108864`). Check other scanner/MTA size limits too.
+   `-x` disables safe fallback on errors; use `-X` with it to turn unavailable
+   errors into temporary failures. For example the scanning step can use
+   `spamc -x -X -s 67108864`. **Do not pipe unchecked stdout straight into the
+   LDA:** capture scanner output privately, check its exit status, and deliver
+   that output only on success. Map scanning failures to MTA deferral (normally
+   exit 75 / EX_TEMPFAIL); preserve retries and avoid `-E`/`-c` exit semantics.
+   `-x` is not a substitute for fixing size bypass. Test with spamd stopped,
+   a message over the former 500 KB limit, and a forged matching checker/status
+   pair: no unchecked message should be delivered. Also test rejection/defer at
+   your actual maximum size.
+
+Header position relative to `Received:` is not an authenticity check: scanner
+insertion and MTA reinjection vary, and matching forged blocks can occupy the same
+position. MyMail rejects duplicate checker/status headers, but cannot recognize a
+single forged matching block. Secure direct LDA access too. Imports always start with unknown evidence, even
+with a configured host; verify import provenance before opting into backfill.
+Only after this verification should you enable the trusted host. Existing raw
+mail may predate these protections; leave it unknown unless you can establish
+its provenance.
+
+To recompute stored evidence, stop the server and deliveries, then run:
+
+```bash
+mymail -data /path/to/data -backfill-auth
+```
+
+Changing or clearing the checker host immediately resets all stored results to
+unknown. The schema migration also leaves old results unknown. Backfill is explicit and
+repeatable; it uses the current host, including an empty host to reset all results
+to unknown. It processes one raw message at a time in a single transaction. It
+acquires the write lock before reading and can hold it for a large mailbox; run it during maintenance.

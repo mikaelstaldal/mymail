@@ -21,6 +21,8 @@ var migrations = [][]string{
 	schemaV5,
 	schemaV6,
 	{deviceSchemaV7, deviceGrantScopeDeleteTrigger},
+	{`ALTER TABLE spam_filter_settings ADD COLUMN trusted_checker_host TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE messages ADD COLUMN sender_authentication TEXT NOT NULL DEFAULT '{"dmarc":"unknown","dkim_aligned":false,"spf":"unknown"}'`},
 }
 
 // OpenDB opens the SQLite database at path, enables foreign keys, sets the

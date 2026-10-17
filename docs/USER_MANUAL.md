@@ -229,3 +229,14 @@ quota rather than a disk.
 ## Operations Guide
 
 See [OPERATIONS.md](OPERATIONS.md) for production installation, Postfix integration, reverse proxy configuration, systemd service setup, and authentication.
+
+
+### Trusted sender-authentication checker
+
+Settings → Spam Filter includes **Trusted Checker Host**. Leave it empty unless
+your operator has secured the SpamAssassin scanning path as described in the
+[operations guide](OPERATIONS.md#sender-authentication-with-spamassassin).
+This setting records authentication evidence for delivered messages independently
+of whether automatic Junk routing is enabled. It does not add a verified badge.
+Changing or clearing the host resets stored evidence to unknown; the operator
+can explicitly recompute it with `-backfill-auth` after checking historical mail provenance.

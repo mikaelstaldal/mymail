@@ -114,6 +114,9 @@ func (h *Handler) SpamFilterGet(ctx context.Context) (*api.SpamFilterSettings, e
 
 func (h *Handler) SpamFilterPut(ctx context.Context, req *api.SpamFilterSettings) (api.SpamFilterPutRes, error) {
 	updated, err := h.spamFilter.UpdateSpamFilterSettings(ctx, *req)
+	if errors.Is(err, repository.ErrInvalidCheckerHost) {
+		return &api.Error{Error: err.Error()}, nil
+	}
 	if errors.Is(err, repository.ErrInvalidScoreHeader) {
 		return &api.Error{Error: err.Error()}, nil
 	}

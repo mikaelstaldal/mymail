@@ -13,6 +13,7 @@ import (
 
 	oas "github.com/mikaelstaldal/mymail/internal/api"
 	"github.com/mikaelstaldal/mymail/internal/model"
+	"github.com/mikaelstaldal/mymail/internal/senderauth"
 )
 
 // MessageRepository provides message CRUD operations backed by SQLite.
@@ -198,7 +199,7 @@ func scanDBMessage(scan func(...any) error) (model.DBMessage, error) {
 		&dateStr, &m.BodyText, &m.BodyHTML, &m.Raw,
 		&readInt, &flaggedInt, &hasAttInt, &hasExtImgInt,
 		&sendAtStr, &snoozedUntilStr, &m.SnoozeFolder, &m.SendError,
-		&m.SendFailureCount, &createdAtStr, &updatedAtStr,
+		&m.SendFailureCount, &createdAtStr, &updatedAtStr, &m.SenderAuthentication,
 	); err != nil {
 		return model.DBMessage{}, err
 	}
@@ -239,14 +240,14 @@ func scanDBMessage(scan func(...any) error) (model.DBMessage, error) {
 const dbMessageColumns = `id, folder_id, identity_id, message_id, in_reply_to, "references",
 	from_addr, to_addr, cc_addr, bcc_addr, reply_to_addr, subject,
 	date, body_text, body_html, raw, read, flagged, has_attachments, has_external_images,
-	send_at, snoozed_until, snooze_folder, send_error, send_failure_count, created_at, updated_at`
+	send_at, snoozed_until, snooze_folder, send_error, send_failure_count, created_at, updated_at, sender_authentication`
 
 // dbMessageColumnsNoRaw selects all message columns except the raw BLOB.
 // Used for API detail responses where raw is never needed.
 const dbMessageColumnsNoRaw = `id, folder_id, identity_id, message_id, in_reply_to, "references",
 	from_addr, to_addr, cc_addr, bcc_addr, reply_to_addr, subject,
 	date, body_text, body_html, read, flagged, has_attachments, has_external_images,
-	send_at, snoozed_until, snooze_folder, send_error, send_failure_count, created_at, updated_at`
+	send_at, snoozed_until, snooze_folder, send_error, send_failure_count, created_at, updated_at, sender_authentication`
 
 // scanDBMessageNoRaw scans a row selected with dbMessageColumnsNoRaw into model.DBMessage.
 // m.Raw is left nil; callers must not access it.
@@ -269,7 +270,7 @@ func scanDBMessageNoRaw(scan func(...any) error) (model.DBMessage, error) {
 		&dateStr, &m.BodyText, &m.BodyHTML,
 		&readInt, &flaggedInt, &hasAttInt, &hasExtImgInt,
 		&sendAtStr, &snoozedUntilStr, &m.SnoozeFolder, &m.SendError,
-		&m.SendFailureCount, &createdAtStr, &updatedAtStr,
+		&m.SendFailureCount, &createdAtStr, &updatedAtStr, &m.SenderAuthentication,
 	); err != nil {
 		return model.DBMessage{}, err
 	}
@@ -505,21 +506,21 @@ func (r *MessageRepository) InsertMessage(ctx context.Context, msg model.DBMessa
 			date, body_text, body_html, raw, read, flagged,
 			has_attachments, has_external_images,
 			send_at, snoozed_until, snooze_folder, send_error, send_failure_count,
-			created_at, updated_at
+			created_at, updated_at, sender_authentication
 		) VALUES (
 			?, ?, ?, ?, ?,
 			?, ?, ?, ?, ?, ?,
 			?, ?, ?, ?, ?, ?,
 			?, ?,
 			?, ?, ?, ?, ?,
-			?, ?
+			?, ?, ?
 		)`,
 		msg.FolderID, identityIDVal, messageIDVal, inReplyToVal, refsVal,
 		msg.FromAddr, msg.ToAddr, msg.CcAddr, msg.BccAddr, msg.ReplyToAddr, msg.Subject,
 		dateStr, msg.BodyText, msg.BodyHTML, msg.Raw, readInt, flaggedInt,
 		hasAttInt, hasExtImgInt,
 		sendAtVal, snoozedUntilVal, snoozeFolderVal, sendErrorVal, msg.SendFailureCount,
-		createdAt, updatedAt,
+		createdAt, updatedAt, senderauth.Encode(senderauth.Decode(msg.SenderAuthentication)),
 	)
 	if err != nil {
 		return 0, err

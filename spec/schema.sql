@@ -1,6 +1,6 @@
 -- Application-owned DDL from a freshly migrated database; see AGENTS.md.
 -- This omits seed rows and is not a replacement for mymail -init.
-PRAGMA user_version = 7;
+PRAGMA user_version = 8;
 
 CREATE INDEX idx_attachments_message_id ON attachments(message_id);
 
@@ -138,7 +138,7 @@ CREATE TABLE messages (
 		send_failure_count  INTEGER NOT NULL DEFAULT 0,
 		created_at          TEXT    NOT NULL,
 		updated_at          TEXT    NOT NULL
-	);
+	, sender_authentication TEXT NOT NULL DEFAULT '{"dmarc":"unknown","dkim_aligned":false,"spf":"unknown"}');
 
 CREATE VIRTUAL TABLE messages_fts USING fts5(
 		from_addr,
@@ -155,7 +155,7 @@ CREATE TABLE spam_filter_settings (
 		enabled         INTEGER NOT NULL DEFAULT 1,
 		score_header    TEXT    NOT NULL DEFAULT 'X-Spam-Score',
 		score_threshold REAL    NOT NULL DEFAULT 5.0
-	);
+	, trusted_checker_host TEXT NOT NULL DEFAULT '');
 
 CREATE TRIGGER attachments_delete_flag
 		AFTER DELETE ON attachments

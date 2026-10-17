@@ -19,5 +19,6 @@ var (
 	ErrInvalidAction         = errors.New("action must be one of: move, trash, mark_read, drop")
 	ErrInvalidFolderTarget   = errors.New("folder_id for move action must be 1 (Inbox), 4 (Trash), 7 (Junk), or a user folder (id >= 100)")
 	ErrInvalidScoreHeader    = errors.New("score_header must be between 1 and 200 characters")
+	ErrInvalidCheckerHost    = errors.New("trusted_checker_host must be at most 253 ASCII hostname characters")
 	ErrInvalidScoreThreshold = errors.New("score_threshold must be >= 0")
 )

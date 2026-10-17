@@ -228,3 +228,13 @@ claims both discovery paths in demo mode to return 404 rather than the SPA.
 An outer middleware adds the service-description Link header to API responses
 including errors from Host validation and authentication, except in demo mode. The HTTP contract
 is `../mysuite/spec/api-discovery.md`; ogen is pinned to v1.24.0.
+
+
+### Sender authentication storage
+
+`internal/senderauth` interprets SpamAssassin header evidence under the configured
+checker-host trust boundary documented in REQUIREMENTS.md. LDA delivery persists its JSON result in `messages.sender_authentication`; detail reads
+use that column without loading raw message blobs. Schema version 8 also adds
+`spam_filter_settings.trusted_checker_host`. The explicit `-backfill-auth` mode
+recomputes existing results from raw using current settings, atomically. Imports default to unknown until explicit backfill. Existing
+spam-folder routing is separate and retains its prior behavior.

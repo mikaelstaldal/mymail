@@ -32,6 +32,10 @@ export function SpamFilter() {
       setError('Score threshold must be a valid number ≥ 0.');
       return;
     }
+    if (!/^[A-Za-z0-9._-]{0,253}$/.test(settings.trusted_checker_host ?? '')) {
+      setError('Trusted checker host must be at most 253 ASCII hostname characters.');
+      return;
+    }
     setSaving(true);
     setError(null);
     setSuccess(false);
@@ -85,6 +89,14 @@ export function SpamFilter() {
               score_threshold: Number((e.target as HTMLInputElement).value),
             })}
           />
+        </div>
+        <div class="settings-field">
+          <label for="trusted-checker-host">Trusted Checker Host</label>
+          <input id="trusted-checker-host" aria-describedby="trusted-checker-help" type="text" maxLength={253}
+            pattern="[A-Za-z0-9._-]*"
+            value={settings.trusted_checker_host ?? ''}
+            onInput={e => setSettings({ ...settings, trusted_checker_host: (e.target as HTMLInputElement).value })} />
+          <p id="trusted-checker-help">Leave empty unless the SpamAssassin delivery path scans every message and defers on failure. See the operations guide before enabling trust.</p>
         </div>
         <div class="settings-form-actions">
           <button class="btn btn-primary" onClick={() => void save()} disabled={saving}>

@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/mikaelstaldal/mymail/internal/senderauth"
 	sqlite "modernc.org/sqlite"
 
 	oas "github.com/mikaelstaldal/mymail/internal/api"
@@ -175,13 +176,13 @@ func runCore(db *sql.DB, rawBytes []byte) int {
 				from_addr, to_addr, cc_addr, bcc_addr, reply_to_addr, subject,
 				date, body_text, body_html, raw, read, flagged,
 				has_attachments, has_external_images,
-				send_failure_count, created_at, updated_at
-			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, 0, ?, ?)`,
+				send_failure_count, created_at, updated_at, sender_authentication
+			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, 0, ?, ?, ?)`,
 			folderID, *pm.MessageID, inReplyToVal, refsVal,
 			pm.FromAddr, pm.ToAddr, pm.CcAddr, pm.BccAddr, pm.ReplyToAddr, pm.Subject,
 			dateStr, pm.BodyText, pm.BodyHTML, rawBytes, boolInt(markRead),
 			boolInt(len(pm.Attachments) > 0), boolInt(pm.HasExternalImages),
-			now, now,
+			now, now, senderauth.Encode(senderauth.Parse(rawBytes, spamSettings.TrustedCheckerHost.Value)),
 		)
 		if err != nil {
 			return err

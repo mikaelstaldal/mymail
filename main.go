@@ -40,6 +40,7 @@ import (
 
 func main() {
 	version := flag.Bool("version", false, "print version information and exit")
+	backfillAuth := flag.Bool("backfill-auth", false, "Recompute sender authentication from stored raw messages using current checker host and exit")
 	initMode := flag.Bool("init", false, "Initialize database and exit")
 	ldaMode := flag.Bool("lda", false, "LDA mode: read RFC 5322 from stdin and store in DB")
 	importMode := flag.Bool("import", false, "Import messages from mbox/Maildir and exit")
@@ -74,6 +75,8 @@ func main() {
 	switch {
 	case *version:
 		printVersion()
+	case *backfillAuth:
+		runAuthBackfill(*dataDir)
 	case *initMode:
 		runInit(*dataDir, *identityAddress, *identityName)
 	case *ldaMode:
@@ -519,5 +522,20 @@ func indexFallbackHandler(indexHTML []byte) http.HandlerFunc {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		w.Header().Set("Cache-Control", "no-cache")
 		_, _ = w.Write(indexHTML)
+	}
+}
+
+func runAuthBackfill(dataDir string) {
+	dbPath := filepath.Join(dataDir, "mymail.sqlite")
+	if err := repository.CheckDBExists(dbPath); err != nil {
+		log.Fatal(err)
+	}
+	db, err := repository.OpenDB(dbPath, 30000)
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer db.Close() //nolint:errcheck
+	if err := repository.BackfillSenderAuthentication(context.Background(), db); err != nil {
+		log.Fatal(err)
 	}
 }

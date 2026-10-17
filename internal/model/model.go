@@ -28,6 +28,7 @@ import (
 	"time"
 
 	oas "github.com/mikaelstaldal/mymail/internal/api"
+	"github.com/mikaelstaldal/mymail/internal/senderauth"
 )
 
 // DBMessage is the full row from the messages table. Nullable columns use sql.Null*.
@@ -60,6 +61,8 @@ type DBMessage struct {
 	SendFailureCount  int
 	CreatedAt         time.Time
 	UpdatedAt         time.Time
+
+	SenderAuthentication string
 }
 
 // ToOASMessageSummary converts a DB row to the API summary type.
@@ -114,6 +117,8 @@ func (m *DBMessage) ToOASMessage(attachments []oas.AttachmentMeta) *oas.MessageD
 		CreatedAt:         m.CreatedAt,
 		UpdatedAt:         m.UpdatedAt,
 		Attachments:       attachments,
+
+		SenderAuthentication: senderauth.Decode(m.SenderAuthentication),
 	}
 }
 

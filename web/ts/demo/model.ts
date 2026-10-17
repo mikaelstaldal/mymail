@@ -122,6 +122,7 @@ interface DemoFilter {
 }
 
 interface DemoSpamFilter {
+  trustedCheckerHost?: string;
   enabled: boolean;
   scoreHeader: string;
   scoreThreshold: number;
