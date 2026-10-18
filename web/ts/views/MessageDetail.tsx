@@ -7,6 +7,7 @@ import { getMycalUrl, isDemo } from '../util/config.js';
 import { formatDateFull, formatDateAdaptive, defaultSnoozeDateTime } from '../util/date.js';
 import { hasValidRecipient } from '../util/address.js';
 import { findIcsLinks } from '../util/icslinks.js';
+import { senderParts, warningText, attachmentReason, type MessageWarning } from '../util/phishing.js';
 import { Icon } from '../components/Icon.js';
 import type { components } from '../api/types.js';
 
@@ -55,9 +56,20 @@ function isIcs(a: AttachmentMeta): boolean {
 const attachmentKey = (id: number): string => `att:${id}`;
 const linkKey = (url: string): string => `link:${url}`;
 
-function senderName(addr: string): string {
-  const m = addr.match(/^([^<>]+?)\s*<[^>]+>$/);
-  return m ? m[1].trim() : addr;
+function Sender({ raw }: { raw: string }) {
+  const sender = senderParts(raw);
+  return <span class="sender-display">
+    {sender.name && <bdi class="sender-name">{sender.name}</bdi>}
+    <bdi class="sender-address">{sender.address}</bdi>
+    {sender.idn && <span class="sender-idn">IDN (<bdi>{sender.ascii}</bdi>)</span>}
+  </span>;
+}
+
+function WarningBanner({ warnings }: { warnings: MessageWarning[] }) {
+  if (!warnings.length) return null;
+  return <div class="phishing-warnings" role="note" aria-label="Message warnings">
+    <ul>{warnings.map((warning, i) => <li key={i} class={warning.kind === 'auth_fail' || warning.kind === 'lookalike_domain' ? 'phishing-warning-strong' : ''}>{warningText(warning)}</li>)}</ul>
+  </div>;
 }
 
 function autoResizeIframe(iframe: HTMLIFrameElement | null): void {
@@ -141,7 +153,7 @@ function ThreadEntry({ entry, isCurrent, expanded, expandedMsg, expandedLoading,
           onClick={() => !isCurrent && onToggle(entry.id)}
           disabled={isCurrent}
         >
-          <span class="thread-from">{senderName(entry.from_addr)}</span>
+          <span class="thread-from"><Sender raw={entry.from_addr} /></span>
           <span class="thread-subject">{entry.subject || '(no subject)'}</span>
           <span class="thread-date" title={formatDateFull(entry.date)}>{dateDisplay}</span>
           {!entry.read && <span class="thread-unread-dot" aria-label="Unread" />}
@@ -165,11 +177,12 @@ function ThreadEntry({ entry, isCurrent, expanded, expandedMsg, expandedLoading,
             <>
               <div class="thread-expanded-meta">
                 <span class="msg-detail-label">From</span>
-                <span class="msg-detail-value">{expandedMsg.from_addr}</span>
+                <span class="msg-detail-value"><Sender raw={expandedMsg.from_addr} /></span>
                 <span class="thread-expanded-sep" />
                 <span class="msg-detail-label">Date</span>
                 <span class="msg-detail-value">{formatDateFull(expandedMsg.date)}</span>
               </div>
+              <WarningBanner warnings={expandedMsg.warnings} />
               {expandedMsg.body_html ? (
                 <BodyIframe id={expandedMsg.id} externalImages={false} />
               ) : (
@@ -837,7 +850,7 @@ export function MessageDetail({ id, folders }: MessageDetailProps) {
         <div class="msg-detail-field">
           <span class="msg-detail-label">From</span>
           <span class="msg-detail-value">
-            {msg.from_addr}
+            <Sender raw={msg.from_addr} />
             {showSendFailed && (
               <span class="msg-badge-fail" title="Send failed">!</span>
             )}
@@ -870,15 +883,33 @@ export function MessageDetail({ id, folders }: MessageDetailProps) {
             <ul class="attachment-list">
               {msg.attachments.map(a => {
                 const status = icsImportStatus[attachmentKey(a.id)];
+                const risk = msg.warnings.find(w => w.kind === 'risky_attachment' && w.filename === a.filename);
                 return (
                   <li key={a.id}>
                     <a
-                      href={`api/v1/attachments/${a.id}`}
+                      href={risk ? undefined : `api/v1/attachments/${a.id}`}
+                      role={risk ? 'button' : undefined}
+                      tabIndex={risk ? 0 : undefined}
+                      onKeyDown={risk ? e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.currentTarget.click(); } } : undefined}
+                      onClick={risk ? e => {
+                        e.preventDefault();
+                        void confirmDialog({ title: 'Download risky attachment?', body: `“${a.filename}” ${attachmentReason(risk.reason)}. Download only if you trust its source.`, confirmLabel: 'Download', cancelLabel: 'Cancel' }).then(ok => {
+                          if (ok) {
+                            const link = document.createElement('a');
+                            link.href = `api/v1/attachments/${a.id}`;
+                            link.download = a.filename;
+                            document.body.append(link);
+                            link.click();
+                            link.remove();
+                          }
+                        });
+                      } : undefined}
                       download={a.filename}
                       class="attachment-link"
                     >
                       <Icon name="paperclip" size={14} />
                       {a.filename}
+                      {risk && <span class="attachment-risk">Warning: {attachmentReason(risk.reason)}</span>}
                       <span class="attachment-size">({formatBytes(a.size)})</span>
                     </a>
                     {isIcs(a) && getMycalUrl() && (
@@ -980,6 +1011,7 @@ export function MessageDetail({ id, folders }: MessageDetailProps) {
       )}
 
       <div class="msg-detail-body">
+        <WarningBanner warnings={msg.warnings} />
         {effectiveView === 'html' ? (
           <>
             {msg.has_external_images && !externalImages && (

@@ -1573,7 +1573,7 @@ Basic authentication or tokens configured. Both discovery resources return
   (including domains under private suffixes); filenames/versions such as
   `report.pdf`, `v1.2` and `3.14` are not treated as URLs. Explicit HTTP(S) URLs
   and conventional IP literals do not require a public suffix. Attachment checks are advisory and do not change
-  download behaviour.
+  the API download endpoint. The web UI asks for confirmation before risky downloads.
 - **REQ-PHISH-07:** Demo mode returns the same warning shape, keeps durable sent-to
   history in IndexedDB, and contains an intentionally suspicious sample with all
   seven kinds. It uses the same pinned confusables and public suffix rules as Go.
@@ -1597,3 +1597,17 @@ The route addresses a stored message and link index, never a destination paramet
 it resolves through the authenticated message-detail API and its folder grants.
 Body links are rewritten only when served; stored HTML, raw mail, replies and
 forwards retain their original links. The browser demo follows the same rules.
+
+### Phishing signals in the web UI
+
+- **REQ-PHISH-08:** Message detail shows a non-dismissible banner above either body view,
+  with one plain-language line and server-supplied details per warning. Authentication
+  failure and lookalike-domain lines have stronger visual emphasis than first-time sender.
+  Expanded thread bodies show their own warnings. No prominent verified badge is shown.
+- **REQ-PHISH-09:** Main and thread sender headers separate the name and always-visible
+  addr-spec. Punycode domains are decoded and marked IDN, retaining the ASCII address too.
+- **REQ-PHISH-10:** Reply and Reply All show a note by To naming the server-reported
+  mismatched Reply-To address. Risky attachments are labelled with their reason, and
+  downloading one requires explicit confirmation; cancelling makes no download request.
+  Ordinary attachments retain direct downloads. Browser demo uses the same UI and its
+  intentionally suspicious sample exercises every warning kind.

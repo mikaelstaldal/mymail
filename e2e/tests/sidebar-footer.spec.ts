@@ -324,6 +324,8 @@ test.describe('Sidebar footer contract', () => {
   // the one MyMail layout with a scrollport in the main pane, and the protocol
   // requires the overflow case to be measured rather than assumed.
   test('controls hold (8, 8) while reading a message whose body scrolls', async ({ page }) => {
+    // The shared phishing demo seed includes a draft; restore that baseline.
+    const baselineDrafts = await draftCount(page);
     const id = await createLongDraft(page);
     try {
       await page.goto(`/#/message/${id}`);
@@ -347,7 +349,7 @@ test.describe('Sidebar footer contract', () => {
     } finally {
       await deleteDraft(page, id);
       // Prove the reset, for the same reason the folder fixture does.
-      expect(await draftCount(page), 'the fixture draft was not removed').toBe(0);
+      expect(await draftCount(page), 'the fixture draft was not removed').toBe(baselineDrafts);
     }
   });
 

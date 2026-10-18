@@ -2066,3 +2066,23 @@ html, body {
   max-width: 52rem;
   overflow-wrap: anywhere;
 }
+
+/* Message-local phishing signals; never style sender authentication as approval. */
+.phishing-warnings, .compose-reply-warning {
+  padding: 10px 16px;
+  background: var(--warning-bg);
+  border: 1px solid var(--warning-border);
+  color: var(--text-primary);
+  flex-shrink: 0;
+  border-radius: 4px;
+  margin: 8px 0;
+  overflow-wrap: anywhere;
+}
+.phishing-warnings ul { margin: 0; padding-left: 20px; }
+.phishing-warnings li + li { margin-top: 6px; }
+.phishing-warning-strong { font-weight: 700; border-left: 4px solid currentColor; padding-left: 8px; }
+.sender-display { display: inline-flex; flex-wrap: wrap; gap: 0 8px; max-width: 100%; overflow-wrap: anywhere; }
+.sender-address, .sender-idn { font-weight: 400; }
+.thread-from { white-space: normal; overflow: visible; }
+.attachment-risk { font-weight: 700; }
+.attachment-link[role="button"] { cursor: pointer; }

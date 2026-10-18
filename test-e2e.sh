@@ -101,6 +101,9 @@ fi
 "$BINARY" -init -data "$DATA_DIR" \
     -identity-address "e2e@example.com" -identity-name "E2E Test" > /dev/null
 
+# The shared demo dataset supplies real phishing signals, attachments and threads.
+"$BINARY" -demo -data "$DATA_DIR" > /dev/null
+
 # A received message exercises the body link rewrite with real stored mail.
 "$BINARY" -lda -data "$DATA_DIR" <<'MAIL' >/dev/null
 From: sender@example.org

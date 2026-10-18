@@ -242,14 +242,25 @@ Changing or clearing the host immediately makes prior evidence read as unknown
 without rewriting the mailbox; the operator
 can explicitly recompute it with `-backfill-auth` after checking historical mail provenance.
 
-### Phishing signals for API clients
+### Phishing warnings
 
 Message detail JSON includes `warnings` for suspicious sender authentication,
 embedded addresses in display names, lookalike domains, different Reply-To
 registrable domains, first-time senders, deceptive links and risky attachments.
 `mymail-cli messages get ID` and the corresponding `mymail-mcp` message resource
 include this list. Each warning supplies the relevant address, domain, link or
-filename. There is no warning banner in this change.
+filename.
+
+The web UI shows these warnings above the message body, in both HTML and plain
+views. Authentication failures and lookalike domains receive stronger emphasis.
+Warnings cannot be dismissed. The From header and thread entries show the name
+and address separately; internationalized domains are decoded, marked IDN, and
+accompanied by their ASCII address. Reply and Reply All show a note beside To
+when the original message redirects replies to a different domain.
+
+Risky attachments are marked with the reason. Clicking one asks for confirmation
+before downloading; Cancel leaves it undownloaded. Check the source before
+choosing Download. Other attachments download as usual.
 
 First-time means you have never sent to that address, including To, Cc and Bcc.
 Receiving mail or adding a contact does not make a sender familiar. History is
@@ -259,7 +270,7 @@ signal. Drafts, Sent, Scheduled, and own-identity mail with trusted DMARC pass a
 exempt. A warning is a reason to check the message; no warnings is no guarantee
 of safety. Legitimate internationalized domains can also produce an advisory.
 Only the first 1000 anchors are checked. The browser demo includes a deliberately
-suspicious message and a harmless placeholder attachment for trying the API.
+suspicious message and a harmless placeholder attachment for trying every warning in the UI and API.
 
 A folder-scoped API token also receives warnings derived from global identities
 and sent history, even if Sent is outside its grant. It can infer whether you have

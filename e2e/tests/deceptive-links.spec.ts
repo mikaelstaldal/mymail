@@ -54,6 +54,13 @@ test('browser demo rewrites and confirms deceptive links through its worker', as
       throw new Error('No deceptive demo link');
     });
     await page.goto(`${origin}/#/message/${selected.id}`);
+    const banner = page.getByRole('note', { name: 'Message warnings' });
+    await expect(banner.locator('li')).toHaveCount(7);
+    await expect(banner).toContainText('DMARC');
+    await expect(banner).toContainText('help@unrelated.example');
+    await page.getByRole('button', { name: /invoice.pdf.exe/ }).click();
+    await expect(page.getByRole('alertdialog')).toContainText('double extension');
+    await page.getByRole('alertdialog').getByRole('button', { name: 'Cancel', exact: true }).click();
     const popupPromise = page.waitForEvent('popup');
     await page.frameLocator('iframe').first().locator(`a[href$="#/link/${selected.id}/${selected.index}"]`).click();
     const popup = await popupPromise;

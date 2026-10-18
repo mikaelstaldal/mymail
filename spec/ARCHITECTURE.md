@@ -301,3 +301,11 @@ escaped text and an explicit HTTP(S) continuation link with `noreferrer` and
 The demo worker computes the same warnings and asks a controlled page to rewrite
 links in an inert template. It returns that document through the existing body
 fetch/srcdoc path. The confirmation route uses the ordinary demo message API.
+
+The web message view formats the server warning list without recomputing signals.
+`util/phishing.ts` owns warning wording and display-only RFC 3492 decoding;
+`MessageDetail` renders warnings for the main message and expanded thread entries.
+Sender names and addresses are separate elements. Risky attachment controls have
+no direct download href and invoke the shared confirmation dialog before creating
+a download link. Compose reads `reply_to_mismatch` from the source detail response
+for Reply/Reply All and displays the destination beside To. Demo uses these same views.

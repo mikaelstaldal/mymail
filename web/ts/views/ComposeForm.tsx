@@ -737,6 +737,7 @@ export function ComposeForm({ replyId, replyAllId, forwardId, draftId }: Compose
   const [sendError, setSendError] = useState<string | null>(null);
 
   // Threading fields (set from pre-population)
+  const [replyWarning, setReplyWarning] = useState('');
   const inReplyToRef = useRef('');
   const refsRef = useRef<string[]>([]);
 
@@ -1075,6 +1076,9 @@ export function ComposeForm({ replyId, replyAllId, forwardId, draftId }: Compose
         // A stored sender is re-quoted on the way into a pill: it is about to
         // become part of an address list again, and it was not stored as one
         // that survives being re-parsed (see normalizeAddressEntry).
+        if (mode === 'reply' || mode === 'replyall') {
+          setReplyWarning(msg.warnings.find(w => w.kind === 'reply_to_mismatch')?.address ?? '');
+        }
         if (mode === 'reply') {
           const replyTo = msg.reply_to_addr.trim();
           setTo([normalizeAddressEntry(replyTo || msg.from_addr)]);
@@ -1388,6 +1392,8 @@ export function ComposeForm({ replyId, replyAllId, forwardId, draftId }: Compose
             </>
           }
         />
+
+        {replyWarning && <p class="compose-reply-warning" role="note">This message uses Reply-To: replies are addressed to <bdi>{replyWarning}</bdi>, on a different domain from the sender. Check the To field before sending.</p>}
 
         {/* Cc */}
         {showCc && (
