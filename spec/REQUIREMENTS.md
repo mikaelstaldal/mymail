@@ -267,7 +267,8 @@ Each contact has:
 - Email address (lower-cased using Unicode simple casefolding, unique)
 - Display name (may be empty)
 - Created and updated timestamps
-- Read-only `explicit` flag: added or edited by the user, shown quietly in Settings.
+- Read-only `explicit` flag: added or edited by the user, shown as a quiet icon with a tooltip immediately before
+  Edit in Settings. The icon slot is reserved on all rows, keeping contact row heights and actions aligned.
 
 Creating a contact or saving an edit (including no changes) sets `explicit`. Creating an existing auto-collected
 address promotes it, retaining its ID and existing name unless a non-empty name is supplied, and returns 201. An

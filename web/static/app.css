@@ -1715,6 +1715,15 @@ html, body {
   margin-top: 1px;
 }
 
+.contact-provenance {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 16px;
+  height: 16px;
+  color: var(--text-secondary);
+}
+
 .settings-badge {
   display: inline-flex;
   align-items: center;

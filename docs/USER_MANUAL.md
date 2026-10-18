@@ -266,16 +266,16 @@ choosing Download. Other attachments download as usual.
 
 First-time means you have never sent to that address, including To, Cc and Bcc. Receiving mail alone does not make
 a sender familiar. Adding a contact or saving an edit (even unchanged) suppresses this warning. Settings → Contacts
-labels these “Added or edited by you”; this does not verify the sender or suppress authentication failures or other
-warnings. Adding an auto-collected address promotes it; adding an already saved address reports a duplicate.
-Existing contacts start as auto-collected on upgrade. Delete a contact to remove this trust; collecting it again
-does not restore trust. Explicitly saved contact domains also help detect lookalike domains. History is backfilled
-from Sent on upgrade and survives deleting sent messages afterwards. Warnings refresh when you read mail, so a
-later send can remove the first-time signal. Drafts, Sent, Scheduled, and own-identity mail with trusted DMARC pass
-are exempt. A warning is a reason to check the message; no warnings is no guarantee of safety. Legitimate
-internationalized domains can also produce an advisory. Only the first 1000 anchors are checked. The browser demo
-includes a deliberately suspicious message and a harmless placeholder attachment for trying every warning in the UI
-and API.
+marks these with an icon to the left of Edit; its tooltip starts with “Added or edited by you”. This does not
+verify the sender or suppress authentication failures or other warnings. Adding an auto-collected address promotes
+it; adding an already saved address reports a duplicate. Existing contacts start as auto-collected on upgrade.
+Delete a contact to remove this trust; collecting it again does not restore trust. Explicitly saved contact domains
+also help detect lookalike domains. History is backfilled from Sent on upgrade and survives deleting sent messages
+afterwards. Warnings refresh when you read mail, so a later send can remove the first-time signal. Drafts, Sent,
+Scheduled, and own-identity mail with trusted DMARC pass are exempt. A warning is a reason to check the message; no
+warnings is no guarantee of safety. Legitimate internationalized domains can also produce an advisory. Only the
+first 1000 anchors are checked. The browser demo includes a deliberately suspicious message and a harmless
+placeholder attachment for trying every warning in the UI and API.
 
 To save a sender, click **Add sender to contacts** beside From in a received message. The Contacts editor opens so
 you can adjust the name before clicking Save. Existing contacts open for editing. Cancel leaves the contact
