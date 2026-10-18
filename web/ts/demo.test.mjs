@@ -1291,3 +1291,49 @@ test('demo served bodies wrap only deceptive links without changing stored HTML'
   assert.match(html, /href="https:\/\/example.com"/);
   assert.equal(msg.bodyHtml, original);
 });
+
+test('explicit contacts promote, preserve trust, and suppress only first-time warnings', async () => {
+  const state = newState([message({ id: 1, fromAddr: 'friend@example.org',
+    senderAuthentication: { dmarc: 'fail', dkim_aligned: false, spf: 'unknown' } })]);
+  state.contacts.push({ id: 1, address: 'friend@example.org', name: 'Collected' });
+  state.nextContactId = 2;
+  assert.deepEqual((await call(state, 'GET', '/messages/1')).body.warnings.map(w => w.kind), ['auth_fail', 'first_time_sender']);
+  const promoted = await call(state, 'POST', '/contacts', { address: 'FRIEND@example.org', name: '' });
+  assert.equal(promoted.status, 201);
+  assert.equal(promoted.body.id, 1);
+  assert.equal(promoted.body.name, 'Collected');
+  assert.equal(promoted.body.explicit, true);
+  assert.equal((await call(state, 'POST', '/contacts', { address: 'friend@example.org' })).status, 409);
+  assert.deepEqual((await call(state, 'GET', '/messages/1')).body.warnings.map(w => w.kind), ['auth_fail']);
+  await call(state, 'DELETE', '/contacts/1');
+  state.contacts.push({ id: 2, address: 'friend@example.org', name: '' });
+  const edited = await call(state, 'PUT', '/contacts/2', { address: 'friend@example.org', name: '' });
+  assert.equal(edited.body.explicit, true);
+  assert.deepEqual((await call(state, 'GET', '/messages/1')).body.warnings.map(w => w.kind), ['auth_fail']);
+  state.messages[0].fromAddr = 'attacker@exarnple.org';
+  assert.equal((await call(state, 'GET', '/messages/1')).body.warnings.find(w => w.kind === 'lookalike_domain').resembles, 'example.org');
+});
+
+test('demo automatic contact collection never changes provenance', () => {
+  const upsert = vm.runInThisContext('upsertContact');
+  const state = newState();
+  upsert(state, 'AUTO@example.org', '');
+  assert.equal(state.contacts[0].explicit ?? false, false);
+  state.contacts[0].explicit = true;
+  upsert(state, 'auto@example.org', 'Receipt name');
+  assert.equal(state.contacts[0].explicit, true);
+  assert.equal(state.contacts[0].name, 'Receipt name');
+  state.contacts = [];
+  upsert(state, 'auto@example.org', 'Recollected');
+  assert.equal(state.contacts[0].explicit ?? false, false);
+});
+
+test('demo contact promotion applies a nonempty supplied name', async () => {
+  const state = newState();
+  state.contacts.push({ id: 1, address: 'friend@example.org', name: 'Collected' });
+  const promoted = await call(state, 'POST', '/contacts', { address: 'FRIEND@example.org', name: 'Chosen' });
+  assert.equal(promoted.status, 201);
+  assert.equal(promoted.body.id, 1);
+  assert.equal(promoted.body.explicit, true);
+  assert.equal(promoted.body.name, 'Chosen');
+});

@@ -28,7 +28,7 @@ func scanContact(scan func(dest ...any) error) (oas.Contact, error) {
 		createdAtStr string
 		updatedAtStr string
 	)
-	if err := scan(&c.ID, &c.Address, &c.Name, &createdAtStr, &updatedAtStr); err != nil {
+	if err := scan(&c.ID, &c.Address, &c.Name, &c.Explicit, &createdAtStr, &updatedAtStr); err != nil {
 		return oas.Contact{}, err
 	}
 	cat, err := time.Parse(time.RFC3339, createdAtStr)
@@ -44,7 +44,7 @@ func scanContact(scan func(dest ...any) error) (oas.Contact, error) {
 	return c, nil
 }
 
-const contactSelectSQL = `SELECT id, address, name, created_at, updated_at FROM contacts`
+const contactSelectSQL = `SELECT id, address, name, explicit, created_at, updated_at FROM contacts`
 
 // unicode_lower rather than SQLite's built-in lower(), which folds ASCII only —
 // see sqlfunc.go. In the ordering that would file "Åsa" apart from "åsa"; in
@@ -117,9 +117,9 @@ func (r *ContactRepository) GetContact(ctx context.Context, id int64) (oas.Conta
 	return c, err
 }
 
-// CreateContact inserts a new contact.
+// CreateContact inserts an explicit contact or promotes an auto-collected one.
 // Address is validated as a bare addr-spec and casefolded before storage.
-// Returns ErrInvalidAddress for a bad address, ErrConflict on duplicate address.
+// Returns ErrInvalidAddress for a bad address, ErrConflict for an explicit duplicate.
 func (r *ContactRepository) CreateContact(ctx context.Context, contact oas.Contact) (oas.Contact, error) {
 	addr, err := parseAndFoldAddress(contact.Address)
 	if err != nil {
@@ -127,20 +127,20 @@ func (r *ContactRepository) CreateContact(ctx context.Context, contact oas.Conta
 	}
 	contact.Address = addr
 
-	res, err := r.db.ExecContext(ctx,
-		`INSERT INTO contacts (address, name, created_at, updated_at)
-		 VALUES (?, ?, strftime('%Y-%m-%dT%H:%M:%SZ','now'), strftime('%Y-%m-%dT%H:%M:%SZ','now'))`,
-		contact.Address, contact.Name,
-	)
-	if err != nil {
-		if isConstraintErr(err) {
-			return oas.Contact{}, ErrConflict
-		}
-		return oas.Contact{}, err
+	row := r.db.QueryRowContext(ctx,
+		`INSERT INTO contacts (address, name, explicit, created_at, updated_at)
+         VALUES (?, ?, 1, strftime('%Y-%m-%dT%H:%M:%SZ','now'), strftime('%Y-%m-%dT%H:%M:%SZ','now'))
+         ON CONFLICT(address) DO UPDATE SET explicit = 1,
+           name = CASE WHEN excluded.name != '' THEN excluded.name ELSE contacts.name END,
+           updated_at = excluded.updated_at
+         WHERE contacts.explicit = 0
+         RETURNING id, address, name, explicit, created_at, updated_at`,
+		contact.Address, contact.Name)
+	result, err := scanContact(row.Scan)
+	if errors.Is(err, sql.ErrNoRows) {
+		return oas.Contact{}, ErrConflict
 	}
-
-	newID, _ := res.LastInsertId()
-	return r.GetContact(ctx, newID)
+	return result, err
 }
 
 // UpdateContact fully replaces a contact (PUT semantics).
@@ -154,7 +154,7 @@ func (r *ContactRepository) UpdateContact(ctx context.Context, id int64, contact
 	contact.Address = addr
 
 	res, err := r.db.ExecContext(ctx,
-		`UPDATE contacts SET address = ?, name = ?, updated_at = strftime('%Y-%m-%dT%H:%M:%SZ','now') WHERE id = ?`,
+		`UPDATE contacts SET address = ?, name = ?, explicit = 1, updated_at = strftime('%Y-%m-%dT%H:%M:%SZ','now') WHERE id = ?`,
 		contact.Address, contact.Name, id,
 	)
 	if err != nil {

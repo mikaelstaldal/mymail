@@ -629,6 +629,10 @@ components:
     Contact:
       type: object
       properties:
+        explicit:
+          type: boolean
+          readOnly: true
+          description: Added or edited by the user; does not verify sender authenticity.
         id:
           type: integer
         address:
@@ -642,7 +646,7 @@ components:
         updated_at:
           type: string
           format: date-time
-      required: [id, address, name, created_at, updated_at]
+      required: [id, address, name, explicit, created_at, updated_at]
 
   responses:
     NotFound:
@@ -2642,6 +2646,9 @@ paths:
       description: |
         Create an identity. `address` must be a valid RFC 5322 addr-spec. The `address` is stored
         in Unicode-simple-casefolded form before the uniqueness check.
+        Sets the read-only explicit flag. An existing auto-collected contact is promoted,
+        preserving its ID and applying a non-empty supplied name, and returns 201.
+        An already-explicit duplicate returns 409.
         If `is_default` is true, all other identities are set to is_default=false.
         When `is_default` is absent or false and at least one identity already exists, the new
         identity is created as non-default and the existing default identity is unchanged.
@@ -2816,6 +2823,9 @@ paths:
       description: |
         Create a contact. `address` must be a valid RFC 5322 addr-spec. The `address` is stored
         in Unicode-simple-casefolded form before the uniqueness check.
+        Sets the read-only explicit flag. An existing auto-collected contact is promoted,
+        preserving its ID and applying a non-empty supplied name, and returns 201.
+        An already-explicit duplicate returns 409.
       requestBody:
         required: true
         content:
@@ -2850,7 +2860,8 @@ paths:
       description: |
         Replace a contact entirely. **PUT replacement semantics:** any field omitted from the
         request body is cleared — omitting `name` sets it to empty string. The `address` is
-        stored in Unicode-simple-casefolded form before the uniqueness check. Returns 409 if
+        stored in Unicode-simple-casefolded form before the uniqueness check.
+        Sets the read-only explicit flag even when no fields change. Returns 409 if
         the new address conflicts with a different existing contact.
       parameters:
         - name: id

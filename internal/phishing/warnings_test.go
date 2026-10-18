@@ -19,6 +19,10 @@ func TestWarnings(t *testing.T) {
 		atts   []api.AttachmentMeta
 		kinds  []api.MessageWarningKind
 	}{
+		{name: "explicit sender", ctx: Context{ExplicitContact: true}, kinds: []api.MessageWarningKind{}},
+		{name: "explicit spoofed sender", ctx: Context{ExplicitContact: true}, change: func(m *model.DBMessage) {
+			m.SenderAuthentication = `{"dmarc":"fail","dkim_aligned":false,"spf":"unknown"}`
+		}, kinds: []api.MessageWarningKind{"auth_fail"}},
 		{name: "new sender", kinds: []api.MessageWarningKind{"first_time_sender"}},
 		{name: "sent before", ctx: Context{SentTo: true}, kinds: []api.MessageWarningKind{}},
 		{name: "auth failure", change: func(m *model.DBMessage) {
@@ -179,4 +183,16 @@ func TestWildcardOnlyICANNTLDText(t *testing.T) {
 		require.Len(t, got, 1, text)
 		assert.Equal(t, api.MessageWarningKindDeceptiveLink, got[0].Kind, text)
 	}
+}
+
+func TestExplicitContactSuppressesOnlyFirstTimeWarning(t *testing.T) {
+	m := model.DBMessage{FolderID: 1, FromAddr: `"boss@company.org" <user@pаypal.com>`,
+		ReplyToAddr: "x@evil.org", SenderAuthentication: `{"dmarc":"fail","dkim_aligned":false,"spf":"fail"}`,
+		BodyHTML: `<a href="https://evil.org">https://paypal.com</a>`}
+	warnings := Compute(m, []api.AttachmentMeta{{Filename: "invoice.pdf.exe"}}, Context{ExplicitContact: true, KnownDomains: []string{"paypal.com"}})
+	kinds := []api.MessageWarningKind{}
+	for _, warning := range warnings {
+		kinds = append(kinds, warning.Kind)
+	}
+	assert.Equal(t, []api.MessageWarningKind{"auth_fail", "display_name_address", "lookalike_domain", "reply_to_mismatch", "deceptive_link", "risky_attachment"}, kinds)
 }

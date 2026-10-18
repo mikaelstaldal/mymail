@@ -126,7 +126,7 @@ async function demoWarnings(state: DemoState, msg: DemoMessage, atts: DemoAttach
   }
   const known = new Map<string,string>();
   const exact = new Set<string>();
-  for (const a of [...state.identities.map(i => i.address), ...demoSentTo(state)]) {
+  for (const a of [...state.identities.map(i => i.address), ...demoSentTo(state), ...state.contacts.filter(c => c.explicit).map(c => c.address)]) {
     const d = warningDomain(a.split('@')[1] ?? '');
     for (const candidate of [d, warningRegistrable(d)]) {
       const key = warningSkeleton(candidate); exact.add(candidate);
@@ -146,7 +146,7 @@ async function demoWarnings(state: DemoState, msg: DemoMessage, atts: DemoAttach
   for (const reply of replies) {
     if (warningRegistrable(reply.address.split('@')[1]) !== warningRegistrable(domain)) out.push({ kind: 'reply_to_mismatch', address: reply.address });
   }
-  if (from.address && !demoSentTo(state).includes(foldAddress(from.address))) out.push({ kind: 'first_time_sender' });
+  if (from.address && !demoSentTo(state).includes(foldAddress(from.address)) && !state.contacts.some(c => c.explicit && c.address === foldAddress(from.address))) out.push({ kind: 'first_time_sender' });
   for (const link of await parseDemoLinks(msg.bodyHtml)) {
     const host = warningHost(link.Href); if (!host) continue; lookalike(host);
     const textHost = warningTextHost(link.Text.trim());

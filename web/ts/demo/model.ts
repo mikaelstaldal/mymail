@@ -100,6 +100,7 @@ interface DemoIdentity {
 }
 
 interface DemoContact {
+  explicit?: boolean;
   id: number;
   address: string;
   name: string;

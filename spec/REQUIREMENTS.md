@@ -267,6 +267,9 @@ Each contact has:
 - Email address (lower-cased using Unicode simple casefolding, unique)
 - Display name (may be empty)
 - Created and updated timestamps
+- Read-only `explicit` flag: added or edited by the user, shown quietly in Settings.
+
+Creating a contact or saving an edit (including no changes) sets `explicit`. Creating an existing auto-collected address promotes it, retaining its ID and existing name unless a non-empty name is supplied, and returns 201. An already-explicit duplicate returns 409. Automatic receipt, send and import upserts never set or clear the flag. Existing contacts start false on upgrade (schema v11); deleting and recollecting a contact resets it.
 
 Contacts are upserted automatically:
 
@@ -279,8 +282,7 @@ Contacts are upserted automatically:
   casefolding normalization as incoming contacts; the display name from each address string is extracted and applied
   with the same rule: it is stored only when the contact's current name is empty.
 
-The distinction between manually set and automatically populated names is enforced server-side. Clients cannot observe
-or control this distinction via the API.
+Automatic upserts fill empty names only; provenance is independent of whether the name is empty.
 
 ### Filters
 
@@ -1538,13 +1540,15 @@ Basic authentication or tokens configured. Both discovery resources return
 - **REQ-PHISH-02:** Kinds are `auth_fail` (trusted stored DMARC failure, with failed
   DMARC/SPF checks and absent DKIM alignment), `display_name_address` (different
   embedded address/domain), `lookalike_domain` (IDN/punycode, a mixed-script label,
-  or a different own/sent-to domain with an equal Unicode TR39-style skeleton),
+  or a different own/sent-to/explicit-contact domain with an equal Unicode TR39-style skeleton),
   `reply_to_mismatch` (different registrable domains), `first_time_sender`
-  (never sent to that normalized address), `deceptive_link` (URL/domain text and
+  (never sent to that normalized address and no explicitly added or edited contact), `deceptive_link` (URL/domain text and
   href registrable domains differ, or href host is an IP or punycode), and
   `risky_attachment` (executable/script extension or content type, with a separate
   double-extension reason for filenames such as `.pdf.exe` or `.exe.pdf`).
   The OpenAPI schema documents the detail fields for each kind.
+  Explicit contacts suppress only `first_time_sender`; all other warnings, particularly
+  authentication failure, remain active. Their domains join the lookalike comparison set.
 - **REQ-PHISH-03:** Drafts, Sent and Scheduled return no warnings. A message from an
   own identity with trusted DMARC pass also returns none. Other own-identity mail
   has no exemption. Unknown authentication never becomes pass. Unparseable sender

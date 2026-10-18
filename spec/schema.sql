@@ -1,10 +1,12 @@
 -- Application-owned DDL from a freshly migrated database; see AGENTS.md.
 -- This omits seed rows and is not a replacement for mymail -init.
-PRAGMA user_version = 10;
+PRAGMA user_version = 11;
 
 CREATE INDEX idx_attachments_message_id ON attachments(message_id);
 
 CREATE INDEX idx_contacts_address ON contacts(address);
+
+CREATE INDEX idx_contacts_explicit ON contacts(address) WHERE explicit = 1;
 
 CREATE INDEX idx_messages_date         ON messages(date);
 
@@ -58,7 +60,7 @@ CREATE TABLE contacts (
 		name       TEXT    NOT NULL DEFAULT '',
 		created_at TEXT    NOT NULL,
 		updated_at TEXT    NOT NULL
-	);
+	, explicit INTEGER NOT NULL DEFAULT 0);
 
 CREATE TABLE device_authorizations (
  device_code_hash BLOB PRIMARY KEY NOT NULL,

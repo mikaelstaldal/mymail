@@ -84,11 +84,12 @@ func addressDomain(addr string) string { _, d, _ := strings.Cut(addr, "@"); retu
 func FoldAddress(addr string) string   { return cases.Fold().String(addr) }
 
 // Context separates the durable sent-to signal from receipt-created contacts.
-// KnownDomains contains own identity and sent-to domains, never contacts.
+// KnownDomains contains own identity, sent-to and explicitly saved contact domains.
 type Context struct {
-	OwnAddresses []string
-	SentTo       bool
-	KnownDomains []string
+	OwnAddresses    []string
+	SentTo          bool
+	ExplicitContact bool
+	KnownDomains    []string
 }
 
 func mixedScript(host string) bool {
@@ -225,7 +226,7 @@ func ComputeWithLinks(m model.DBMessage, atts []api.AttachmentMeta, c Context, l
 			}
 		}
 	}
-	if from.Address != "" && !c.SentTo {
+	if from.Address != "" && !c.SentTo && !c.ExplicitContact {
 		add(api.MessageWarningKindFirstTimeSender)
 	}
 	for _, link := range links {

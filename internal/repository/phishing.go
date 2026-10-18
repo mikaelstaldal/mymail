@@ -63,7 +63,7 @@ func mailRecipients(_ *sqlite.FunctionContext, args []driver.Value) (driver.Valu
 	return string(b), err
 }
 
-// WarningContext reads current identity and sent history, not receipt-created
+// WarningContext reads current identity, explicit contacts and sent history, not receipt-created
 // contacts. Build the skeleton index once per detail read in phishing.Compute.
 func (r *MessageRepository) WarningContext(ctx context.Context, from string, linkHosts ...string) (phishing.Context, error) {
 	c := phishing.Context{}
@@ -71,9 +71,15 @@ func (r *MessageRepository) WarningContext(ctx context.Context, from string, lin
 		if err := queryer(ctx, r.db).QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM sent_recipients WHERE address = ?)`, phishing.FoldAddress(a.Address)).Scan(&c.SentTo); err != nil {
 			return c, err
 		}
+		if err := queryer(ctx, r.db).QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM contacts WHERE address = ? AND explicit = 1)`, phishing.FoldAddress(a.Address)).Scan(&c.ExplicitContact); err != nil {
+			return c, err
+		}
 	}
 	// Match indexed skeletons rather than scanning the entire correspondence
-	// history for every message. The HTML analyser supplies at most MaxLinks hosts.
+	// history for every message. Explicit contacts use a small partial address index;
+	// their domain functions are evaluated now rather than frozen in an expression
+	// index that dependency upgrades could invalidate. The HTML analyser supplies
+	// at most MaxLinks hosts.
 	if a, err := mail.ParseAddress(from); err == nil {
 		_, d, _ := strings.Cut(a.Address, "@")
 		linkHosts = append(linkHosts, d)
@@ -96,7 +102,8 @@ func (r *MessageRepository) WarningContext(ctx context.Context, from string, lin
 		return c, err
 	}
 	rows, err := queryer(ctx, r.db).QueryContext(ctx, `SELECT address, 1 FROM identities UNION ALL
- SELECT DISTINCT domain, 0 FROM sent_recipients WHERE skeleton IN (SELECT value FROM json_each(?))`, string(encoded))
+ SELECT DISTINCT domain, 0 FROM sent_recipients WHERE skeleton IN (SELECT value FROM json_each(?))
+ UNION ALL SELECT DISTINCT mail_domain(address), 0 FROM contacts WHERE explicit = 1 AND domain_skeleton(mail_domain(address)) IN (SELECT value FROM json_each(?))`, string(encoded), string(encoded))
 	if err != nil {
 		return c, err
 	}

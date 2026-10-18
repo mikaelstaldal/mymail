@@ -263,7 +263,7 @@ before downloading; Cancel leaves it undownloaded. Check the source before
 choosing Download. Other attachments download as usual.
 
 First-time means you have never sent to that address, including To, Cc and Bcc.
-Receiving mail or adding a contact does not make a sender familiar. History is
+Receiving mail alone does not make a sender familiar. Adding a contact or saving an edit (even unchanged) suppresses this warning. Settings → Contacts labels these “Added or edited by you”; this does not verify the sender or suppress authentication failures or other warnings. Adding an auto-collected address promotes it; adding an already saved address reports a duplicate. Existing contacts start as auto-collected on upgrade. Delete a contact to remove this trust; collecting it again does not restore trust. Explicitly saved contact domains also help detect lookalike domains. History is
 backfilled from Sent on upgrade and survives deleting sent messages afterwards.
 Warnings refresh when you read mail, so a later send can remove the first-time
 signal. Drafts, Sent, Scheduled, and own-identity mail with trusted DMARC pass are

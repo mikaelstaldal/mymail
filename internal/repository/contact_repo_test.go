@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	oas "github.com/mikaelstaldal/mymail/internal/api"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -127,4 +128,60 @@ func TestListContactsWildcardsAreLiteral(t *testing.T) {
 			assert.Len(t, items, tc.want)
 		})
 	}
+}
+
+func TestExplicitContactLifecycle(t *testing.T) {
+	ctx := context.Background()
+	db := openTestDB(t)
+	r := NewContactRepository(db)
+	require.NoError(t, r.UpsertContact(ctx, "ALICE@example.com", "Collected"))
+	items, _, err := r.ListContacts(ctx, nil, 10, 0)
+	require.NoError(t, err)
+	require.Len(t, items, 1)
+	assert.False(t, items[0].Explicit)
+	original := items[0]
+	promoted, err := r.CreateContact(ctx, oas.Contact{Address: "ALICE@example.com"})
+	require.NoError(t, err)
+	assert.Equal(t, original.ID, promoted.ID)
+	assert.Equal(t, "Collected", promoted.Name)
+	assert.True(t, promoted.Explicit)
+	_, err = r.CreateContact(ctx, oas.Contact{Address: original.Address})
+	require.ErrorIs(t, err, ErrConflict)
+	require.NoError(t, r.UpsertContact(ctx, original.Address, "Later receipt"))
+	saved, err := r.GetContact(ctx, int64(original.ID))
+	require.NoError(t, err)
+	assert.True(t, saved.Explicit)
+	require.NoError(t, r.DeleteContact(ctx, int64(original.ID)))
+	require.NoError(t, r.UpsertContact(ctx, original.Address, ""))
+	items, _, err = r.ListContacts(ctx, nil, 10, 0)
+	require.NoError(t, err)
+	assert.False(t, items[0].Explicit)
+	edited, err := r.UpdateContact(ctx, int64(items[0].ID), items[0])
+	require.NoError(t, err)
+	assert.True(t, edited.Explicit, "no-op edit is explicit user action")
+	require.NoError(t, r.UpsertContact(ctx, original.Address, "Filled name"))
+	saved, err = r.GetContact(ctx, int64(edited.ID))
+	require.NoError(t, err)
+	assert.True(t, saved.Explicit)
+	assert.Equal(t, "Filled name", saved.Name)
+	fresh, err := r.CreateContact(ctx, oas.Contact{Address: "new@example.com"})
+	require.NoError(t, err)
+	assert.True(t, fresh.Explicit)
+	require.NoError(t, r.UpsertContact(ctx, "promote@example.com", "Old"))
+	named, err := r.CreateContact(ctx, oas.Contact{Address: "PROMOTE@example.com", Name: "New"})
+	require.NoError(t, err)
+	assert.Equal(t, "New", named.Name)
+}
+
+func TestContactMigrationDoesNotBackfillTrust(t *testing.T) {
+	db := openTestDB(t)
+	_, err := db.Exec(`DROP INDEX idx_contacts_explicit; ALTER TABLE contacts DROP COLUMN explicit;
+ INSERT INTO contacts(address,name,created_at,updated_at) VALUES('old@example.com','Old','2026-01-01T00:00:00Z','2026-01-01T00:00:00Z');
+ PRAGMA user_version = 10`)
+	require.NoError(t, err)
+	require.NoError(t, InitSchema(db))
+	items, _, err := NewContactRepository(db).ListContacts(context.Background(), nil, 10, 0)
+	require.NoError(t, err)
+	require.Len(t, items, 1)
+	assert.False(t, items[0].Explicit)
 }

@@ -269,6 +269,8 @@ folder moves cannot fabricate it. A migration backfills existing Sent mail.
 Indexed skeleton candidates keep each detail read independent of total sent
 history size, and duplicate link hosts are collapsed before querying.
 
+Contact provenance (schema v11) is a read-only `contacts.explicit` flag, set by explicit create/edit only. Atomic create-or-promote preserves the row ID; automatic upserts preserve provenance. Warning context reads it alongside sent history in the detail snapshot, with a partial address index to enumerate only explicit contacts for domain comparison. Their domain skeletons are computed at read time so dependency updates cannot invalidate an expression index. It suppresses only first-time-sender warnings.
+
 The detector vendors Unicode 16 confusables with its license and provenance.
 `generate_demo_data.go` reproduces the browser tables, pinned to x/net's PSL
 revision and Go's Unicode casefolding/scripts. Changing domain normalization or

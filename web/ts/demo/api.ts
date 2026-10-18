@@ -149,6 +149,7 @@ function toIdentityDTO(identity: DemoIdentity): unknown {
 function toContactDTO(contact: DemoContact): unknown {
   return {
     id: contact.id,
+    explicit: contact.explicit ?? false,
     address: contact.address,
     name: contact.name,
     created_at: contact.createdAt,
@@ -1920,9 +1921,18 @@ function contactFromRequest(body: Record<string, unknown>): { address: string; n
 
 async function createContact(state: DemoState, body: Record<string, unknown>): Promise<Response> {
   const { address, name } = contactFromRequest(body);
-  if (state.contacts.some((c) => c.address === address)) throw conflictError('address already exists');
+  const existing = state.contacts.find(c => c.address === address);
+  if (existing?.explicit) throw conflictError('address already exists');
+  if (existing) {
+    existing.explicit = true;
+    if (name) existing.name = name;
+    existing.updatedAt = nowTimestamp();
+    await saveState(state);
+    return jsonResponse(201, toContactDTO(existing));
+  }
   const now = nowTimestamp();
   const contact: DemoContact = {
+    explicit: true,
     id: state.nextContactId++,
     address,
     name,
@@ -1941,6 +1951,7 @@ async function updateContact(state: DemoState, id: number, body: Record<string, 
   if (state.contacts.some((c) => c.address === address && c.id !== id)) {
     throw conflictError('address already exists');
   }
+  contact.explicit = true;
   contact.address = address;
   contact.name = name;
   contact.updatedAt = nowTimestamp();

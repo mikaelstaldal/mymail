@@ -71,7 +71,9 @@ func TestRunCore_SuccessfulDelivery(t *testing.T) {
 
 	// Contact should be upserted.
 	var addr string
-	err := db.QueryRow(`SELECT address FROM contacts WHERE address = 'alice@example.com'`).Scan(&addr)
+	var explicit bool
+	err := db.QueryRow(`SELECT address, explicit FROM contacts WHERE address = 'alice@example.com'`).Scan(&addr, &explicit)
+	assert.False(t, explicit)
 	assert.NoError(t, err, "sender not in contacts")
 }
 

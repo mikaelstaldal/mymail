@@ -229,6 +229,7 @@ export function Contacts() {
                 {c.name || <em style="color:var(--text-muted);font-style:italic">No name</em>}
               </div>
               <div class="settings-item-meta">{c.address}</div>
+              {c.explicit && <small class="settings-item-meta" title="Added or edited by you; sender authenticity is not verified">Added or edited by you</small>}
             </div>
             <button class="btn btn-ghost btn-sm" onClick={() => startEdit(c)}>Edit</button>
             <button class="btn btn-danger btn-sm" onClick={() => void deleteContact(c.id)}>Delete</button>

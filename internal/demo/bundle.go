@@ -55,6 +55,7 @@ type SeedIdentity struct {
 }
 
 type SeedContact struct {
+	Explicit  bool   `json:"explicit"`
 	ID        int64  `json:"id"`
 	Address   string `json:"address"`
 	Name      string `json:"name"`
@@ -251,7 +252,7 @@ func exportIdentities(ctx context.Context, db *sql.DB) ([]SeedIdentity, error) {
 
 func exportContacts(ctx context.Context, db *sql.DB) ([]SeedContact, error) {
 	rows, err := db.QueryContext(ctx,
-		`SELECT id, address, name, created_at, updated_at FROM contacts ORDER BY id`)
+		`SELECT id, address, name, explicit, created_at, updated_at FROM contacts ORDER BY id`)
 	if err != nil {
 		return nil, err
 	}
@@ -260,7 +261,7 @@ func exportContacts(ctx context.Context, db *sql.DB) ([]SeedContact, error) {
 	out := make([]SeedContact, 0)
 	for rows.Next() {
 		var c SeedContact
-		if err := rows.Scan(&c.ID, &c.Address, &c.Name, &c.CreatedAt, &c.UpdatedAt); err != nil {
+		if err := rows.Scan(&c.ID, &c.Address, &c.Name, &c.Explicit, &c.CreatedAt, &c.UpdatedAt); err != nil {
 			return nil, err
 		}
 		out = append(out, c)

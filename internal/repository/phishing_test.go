@@ -2,6 +2,9 @@ package repository
 
 import (
 	"context"
+	"github.com/mikaelstaldal/mymail/internal/api"
+	"github.com/mikaelstaldal/mymail/internal/model"
+	"github.com/mikaelstaldal/mymail/internal/phishing"
 	"path/filepath"
 	"testing"
 
@@ -134,4 +137,36 @@ func TestDetailWarningSnapshot(t *testing.T) {
 	var one int
 	require.NoError(t, queryer(borrowed, db).QueryRowContext(ctx, "SELECT 1").Scan(&one))
 	assert.Equal(t, 1, one, "bearer-owned transaction remains open")
+}
+
+func TestExplicitContactsWarningContext(t *testing.T) {
+	ctx := context.Background()
+	db := openTestDB(t)
+	contacts := NewContactRepository(db)
+	messages := NewMessageRepository(db)
+	require.NoError(t, contacts.UpsertContact(ctx, "alice@example.com", "Alice"))
+	c, err := messages.WarningContext(ctx, "ALICE@example.com", "exarnple.com")
+	require.NoError(t, err)
+	assert.False(t, c.ExplicitContact)
+	assert.NotContains(t, c.KnownDomains, "example.com")
+	saved, err := contacts.CreateContact(ctx, api.Contact{Address: "alice@example.com"})
+	require.NoError(t, err)
+	c, err = messages.WarningContext(ctx, "Alice <ALICE@example.com>", "exarnple.com")
+	require.NoError(t, err)
+	assert.True(t, c.ExplicitContact)
+	assert.False(t, c.SentTo)
+	assert.Contains(t, c.KnownDomains, "example.com")
+	m := model.DBMessage{FolderID: 1, FromAddr: "alice@example.com", SenderAuthentication: `{"dmarc":"fail","dkim_aligned":false,"spf":"unknown"}`}
+	warnings := phishing.Compute(m, nil, c)
+	require.Len(t, warnings, 1)
+	assert.Equal(t, api.MessageWarningKindAuthFail, warnings[0].Kind)
+	c, err = messages.WarningContext(ctx, "attacker@exarnple.com")
+	require.NoError(t, err)
+	warnings = phishing.Compute(model.DBMessage{FolderID: 1, FromAddr: "attacker@exarnple.com"}, nil, c)
+	require.Len(t, warnings, 2)
+	assert.Equal(t, "example.com", warnings[0].Resembles.Value)
+	require.NoError(t, contacts.DeleteContact(ctx, int64(saved.ID)))
+	c, err = messages.WarningContext(ctx, "alice@example.com")
+	require.NoError(t, err)
+	assert.False(t, c.ExplicitContact)
 }

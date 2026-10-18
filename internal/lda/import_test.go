@@ -407,7 +407,7 @@ func TestImportMaildir_ContactUpsert(t *testing.T) {
 
 	var name string
 	err = db.QueryRowContext(context.Background(),
-		`SELECT name FROM contacts WHERE address = 'carol@example.com'`,
+		`SELECT name FROM contacts WHERE address = 'carol@example.com' AND explicit = 0`,
 	).Scan(&name)
 	require.NoError(t, err)
 	assert.Equal(t, "Carol", name)
@@ -553,7 +553,7 @@ func TestImportMbox_ContactUpsert(t *testing.T) {
 
 	var name string
 	err = db.QueryRowContext(context.Background(),
-		`SELECT name FROM contacts WHERE address = 'dave@example.com'`,
+		`SELECT name FROM contacts WHERE address = 'dave@example.com' AND explicit = 0`,
 	).Scan(&name)
 	require.NoError(t, err)
 	assert.Equal(t, "Dave", name)
@@ -808,7 +808,7 @@ func TestImportMbx_ContactUpsert(t *testing.T) {
 
 	var name string
 	err = db.QueryRowContext(context.Background(),
-		`SELECT name FROM contacts WHERE address = 'eve@example.com'`,
+		`SELECT name FROM contacts WHERE address = 'eve@example.com' AND explicit = 0`,
 	).Scan(&name)
 	require.NoError(t, err)
 	assert.Equal(t, "Eve", name)
