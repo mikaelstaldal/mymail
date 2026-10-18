@@ -1337,3 +1337,22 @@ test('demo contact promotion applies a nonempty supplied name', async () => {
   assert.equal(promoted.body.explicit, true);
   assert.equal(promoted.body.name, 'Chosen');
 });
+
+test('demo replies delivered to Junk do not collect or update sender contacts', () => {
+  const deliver = vm.runInThisContext('deliverDueReplies');
+  for (const existing of [undefined, false, true]) {
+    const state = newState([message({ id: 1, folderId: 2, fromAddr: 'demo@example.com',
+      toAddr: 'Sender <sender@example.com>', subject: 'Hello' })]);
+    state.filters.push({ id: 1, name: 'Junk replies', matchFrom: 'sender@example.com', matchTo: '', matchSubject: '', position: 0, action: 'move', folderId: 7, stop: true });
+    state.pendingReplies.push({ sourceMessageId: 1, dueAt: 0 });
+    if (existing !== undefined) state.contacts.push({ id: 1, address: 'sender@example.com', name: '', explicit: existing });
+    assert.equal(deliver(state, Date.now()), true);
+    assert.equal(state.messages.at(-1).folderId, 7);
+    if (existing === undefined) assert.deepEqual(state.contacts, []);
+    else {
+      assert.equal(state.contacts.length, 1);
+      assert.equal(state.contacts[0].name, '');
+      assert.equal(state.contacts[0].explicit, existing);
+    }
+  }
+});

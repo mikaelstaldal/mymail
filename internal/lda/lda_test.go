@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"net/mail"
 	"os"
 	"testing"
@@ -646,4 +647,61 @@ func TestDeliveryStoresSenderAuthentication(t *testing.T) {
 	require.NoError(t, db.QueryRow(`SELECT auth_generation FROM messages WHERE message_id = 'auth@example.org'`).Scan(&generation))
 	assert.Equal(t, int64(1), generation)
 	assert.JSONEq(t, `{"dmarc":"pass","dkim_aligned":true,"spf":"pass"}`, verdict)
+}
+
+func TestJunkDeliveryDoesNotCollectContacts(t *testing.T) {
+	for _, tc := range []struct {
+		name         string
+		spam         bool
+		filterFolder int
+		wantFolder   int
+		collect      bool
+	}{
+		{"spam", true, 0, 7, false},
+		{"filter to junk", false, 7, 7, false},
+		{"spam moved to inbox by filter", true, 1, 1, true},
+		{"normal inbox", false, 0, 1, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			db := openLDATestDB(t)
+			if tc.filterFolder != 0 {
+				createFilter(t, db, oas.Filter{Name: "Destination", MatchFrom: "sender@example.com", Action: oas.FilterActionMove, FolderID: oas.NewOptNilInt(tc.filterFolder)})
+			}
+			headers := ""
+			if tc.spam {
+				headers = "X-Spam-Flag: YES\r\n"
+			}
+			raw := []byte("From: Sender <sender@example.com>\r\nMessage-ID: <junk-contact@example.com>\r\n" + headers + "\r\nBody")
+			require.Equal(t, 0, runCore(db, raw))
+			folder, _ := queryMessage(t, db, "junk-contact@example.com")
+			assert.Equal(t, tc.wantFolder, folder)
+			var count int
+			require.NoError(t, db.QueryRow(`SELECT count(*) FROM contacts`).Scan(&count))
+			if tc.collect {
+				assert.Equal(t, 1, count)
+			} else {
+				assert.Zero(t, count)
+			}
+		})
+	}
+}
+
+func TestJunkDeliveryDoesNotUpdateExistingContact(t *testing.T) {
+	for _, explicit := range []bool{false, true} {
+		t.Run(fmt.Sprintf("explicit=%t", explicit), func(t *testing.T) {
+			db := openLDATestDB(t)
+			contacts := repository.NewContactRepository(db)
+			require.NoError(t, contacts.UpsertContact(t.Context(), "sender@example.com", ""))
+			if explicit {
+				_, err := contacts.CreateContact(t.Context(), oas.Contact{Address: "sender@example.com"})
+				require.NoError(t, err)
+			}
+			require.Equal(t, 0, runCore(db, []byte("From: Junk Name <sender@example.com>\r\nX-Spam-Flag: YES\r\n\r\nBody")))
+			items, _, err := contacts.ListContacts(t.Context(), nil, 10, 0)
+			require.NoError(t, err)
+			require.Len(t, items, 1)
+			assert.Empty(t, items[0].Name)
+			assert.Equal(t, explicit, items[0].Explicit)
+		})
+	}
 }

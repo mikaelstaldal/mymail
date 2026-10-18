@@ -259,7 +259,7 @@ func commitBatch(ctx context.Context, db *sql.DB, batch []batchEntry, folderID i
 	}
 
 	for _, row := range insertedRows {
-		if row.fromAddr != "" {
+		if folderID != 7 && row.fromAddr != "" {
 			addr, name := parseFromAddr(row.fromAddr)
 			if addr != "" {
 				if err := contactRepo.UpsertContact(ctx, addr, name); err != nil {

@@ -320,3 +320,7 @@ Sender names and addresses are separate elements. Risky attachment controls have
 no direct download href and invoke the shared confirmation dialog before creating
 a download link. Compose reads `reply_to_mismatch` from the source detail response
 for Reply/Reply All and displays the destination beside To. Demo uses these same views.
+
+Inbound contact collection checks the final delivery folder after spam classification and user filters.
+Junk (folder 7) skips contact upserts entirely; the shared import batch writer applies the same rule to Junk imports.
+Demo auto-reply delivery mirrors this exclusion. Existing contacts are preserved.

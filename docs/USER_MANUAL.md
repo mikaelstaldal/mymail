@@ -20,7 +20,9 @@ In addition to the built-in web interface, there is also
 - **Search** — full-text search powered by SQLite FTS5, refinable by folder, date range, and From/To address.
 - **Filters** — rule-based delivery routing (move, trash, mark-read, drop) evaluated at delivery time.
 - **Spam detection** — reads spam verdict headers set by the MTA pipeline (SpamAssassin, Rspamd, etc.).
-- **Contacts** — auto-populated from incoming and outgoing mail.
+- **Contacts** — auto-populated from incoming mail outside Junk and from outgoing mail.
+  Mail delivered or imported into Junk does not add senders or update existing contacts.
+  Moving mail to Junk does not remove contacts already collected.
 - **Multiple identities** — manage multiple From addresses with per-identity signatures.
 - **Import** — batch import from mbox and Maildir sources.
 - **No CGO** — pure-Go SQLite (`modernc.org/sqlite`); no C toolchain required at runtime.

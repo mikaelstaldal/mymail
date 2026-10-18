@@ -324,7 +324,7 @@ function runScheduler(state: DemoState, now: number): boolean {
 /**
  * Delivers the fake replies that have come due (see reply.ts). Each arrives the
  * way an inbound message does — through the filter chain, into Inbox unless a
- * filter says otherwise, and with its sender upserted as a contact.
+ * filter says otherwise, and with its sender upserted as a contact unless it lands in Junk.
  */
 function deliverDueReplies(state: DemoState, now: number): boolean {
   const due = state.pendingReplies.filter((p) => p.dueAt <= now);
@@ -395,7 +395,7 @@ function deliverDueReplies(state: DemoState, now: number): boolean {
     });
 
     const sender = firstAddress(reply.fromAddr);
-    if (sender !== null) upsertContact(state, sender.address, sender.name);
+    if (outcome.folderId !== 7 && sender !== null) upsertContact(state, sender.address, sender.name);
   }
   return true;
 }

@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	oas "github.com/mikaelstaldal/mymail/internal/api"
 	"github.com/mikaelstaldal/mymail/internal/repository"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -853,4 +854,41 @@ func TestImportLeavesSenderAuthenticationUnknown(t *testing.T) {
 	var verdict string
 	require.NoError(t, db.QueryRow(`SELECT sender_authentication FROM messages WHERE message_id = 'import-auth@example.org'`).Scan(&verdict))
 	assert.JSONEq(t, `{"dmarc":"unknown","dkim_aligned":false,"spf":"unknown"}`, verdict)
+}
+
+func TestJunkImportDoesNotCollectOrUpdateContacts(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		existing bool
+		explicit bool
+	}{
+		{"new sender", false, false}, {"auto contact", true, false}, {"explicit contact", true, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			db := openImportTestDB(t)
+			contacts := repository.NewContactRepository(db)
+			if tc.existing {
+				require.NoError(t, contacts.UpsertContact(t.Context(), "sender@example.com", ""))
+			}
+			if tc.explicit {
+				_, err := contacts.CreateContact(t.Context(), oas.Contact{Address: "sender@example.com"})
+				require.NoError(t, err)
+			}
+			raw := []byte("From: Junk Name <sender@example.com>\r\nMessage-ID: <junk-import@example.com>\r\n\r\nBody")
+			pm, err := ParseMessage(raw)
+			require.NoError(t, err)
+			n, err := commitBatch(t.Context(), db, []batchEntry{{pm: pm, raw: raw, date: "2026-01-01T00:00:00Z"}}, 7, contacts)
+			require.NoError(t, err)
+			assert.Equal(t, 1, n)
+			items, _, err := contacts.ListContacts(t.Context(), nil, 10, 0)
+			require.NoError(t, err)
+			if tc.existing {
+				require.Len(t, items, 1)
+				assert.Empty(t, items[0].Name)
+				assert.Equal(t, tc.explicit, items[0].Explicit)
+			} else {
+				assert.Empty(t, items)
+			}
+		})
+	}
 }

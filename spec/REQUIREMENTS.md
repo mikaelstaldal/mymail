@@ -172,8 +172,8 @@ Behaviour:
   considered unparseable when `net/mail.ReadMessage()` returns an error (missing or malformed headers); missing optional
   fields (e.g. absent `Date`) are warnings, not failures. Exception: if a message has no `Date` header **and** no usable
   fallback timestamp (mtime or `From ` separator), a warning is logged and the message is skipped.
-- For each successfully imported message, the `From` address is upserted into the contacts table using the same logic as
-  LDA (update name only when the stored name is currently empty).
+- For each successfully imported message outside Junk, the `From` address is upserted into contacts
+  using the same logic as LDA (update name only when the stored name is currently empty).
 - **Concurrency:** Running import (`-import`) concurrently with a running server against the same data directory is not
   supported. Concurrent LDA (`-lda`) processes alongside a running server are safe — SQLite WAL mode and the LDA's busy
   timeout serialize access, and `INSERT OR IGNORE` guards against duplicate inserts from concurrent LDA processes.
@@ -280,8 +280,11 @@ cancelling does not change it. The action is absent from Sent, Drafts and Schedu
 
 Contacts are upserted automatically:
 
-- On message receipt: the `From` address is upserted. The display name from the `From` header is stored as the contact
-  name, but only when the currently stored name is empty (a manually set name is never overwritten).
+- On message receipt: the `From` address is upserted unless the final destination after spam classification and filters
+  is Junk. Junk delivery and imports into Junk neither create contacts nor update existing contact names or provenance.
+  Existing contacts are retained when mail is classified or moved to Junk.
+  The display name from `From` is stored as the contact name, but only when the currently stored name is empty
+  (a manually set name is never overwritten).
 - On send: `To`, `Cc`, and `Bcc` addresses are upserted at **actual send time** — when `sendmail` is invoked, whether
   that is immediately or when the background scheduler fires for a deferred message. Contact upserts are never performed
   at schedule-creation time. This rule applies identically to `POST /messages/send`,

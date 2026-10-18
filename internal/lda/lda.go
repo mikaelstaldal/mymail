@@ -243,7 +243,7 @@ func runCore(db *sql.DB, rawBytes []byte) int {
 		return 0
 	}
 
-	if pm.FromAddr != "" {
+	if folderID != 7 && pm.FromAddr != "" {
 		addr, name := parseFromAddr(pm.FromAddr)
 		if addr != "" {
 			contactRepo := repository.NewContactRepository(db)
