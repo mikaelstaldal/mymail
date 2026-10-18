@@ -5,7 +5,7 @@ export type Route =
   | { type: 'link'; id: number; index: number }
   | { type: 'compose'; replyId?: number; replyAllId?: number; forwardId?: number; draftId?: number }
   | { type: 'search'; query: string }
-  | { type: 'settings'; tab?: string };
+  | { type: 'settings'; tab?: string; senderMessageId?: number };
 
 function parseRoute(hash: string): Route {
   const raw = hash.startsWith('#') ? hash.slice(1) : hash;
@@ -36,7 +36,8 @@ function parseRoute(hash: string): Route {
 
   if (seg === 'search') return { type: 'search', query: params.get('q') ?? '' };
 
-  if (seg === 'settings') return { type: 'settings', tab: parts[1] };
+  if (seg === 'settings') return { type: 'settings', tab: parts[1],
+    senderMessageId: params.has('sender') ? Number(params.get('sender')) : undefined };
 
   return { type: 'inbox' };
 }

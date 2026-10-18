@@ -269,7 +269,14 @@ Each contact has:
 - Created and updated timestamps
 - Read-only `explicit` flag: added or edited by the user, shown quietly in Settings.
 
-Creating a contact or saving an edit (including no changes) sets `explicit`. Creating an existing auto-collected address promotes it, retaining its ID and existing name unless a non-empty name is supplied, and returns 201. An already-explicit duplicate returns 409. Automatic receipt, send and import upserts never set or clear the flag. Existing contacts start false on upgrade (schema v11); deleting and recollecting a contact resets it.
+Creating a contact or saving an edit (including no changes) sets `explicit`. Creating an existing auto-collected
+address promotes it, retaining its ID and existing name unless a non-empty name is supplied, and returns 201. An
+already-explicit duplicate returns 409. Automatic receipt, send and import upserts never set or clear the flag.
+Existing contacts start false on upgrade (schema v11); deleting and recollecting a contact resets it.
+
+Received-message details offer “Add sender to contacts”, opening the Contacts editor with the sender address and
+name. Existing contacts open for editing, including already-explicit ones. Saving makes the contact explicit;
+cancelling does not change it. The action is absent from Sent, Drafts and Scheduled.
 
 Contacts are upserted automatically:
 

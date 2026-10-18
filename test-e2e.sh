@@ -139,7 +139,7 @@ MAIL
 #
 # -sendmail is a stub because the real one is resolved with exec.LookPath at
 # startup and the server exits if it is missing; neither this sandbox nor the CI
-# runner has a sendmail. No test here sends anything, so /bin/true is enough —
+# runner has a sendmail. Tests that send mail must discard it, so /bin/true is enough —
 # but note that it makes a send *appear* to succeed. A future spec that asserts
 # on outgoing mail needs a recording stub rather than this.
 "$BINARY" -port "$PORT" -data "$DATA_DIR" -public-url "http://localhost:${PORT}" \

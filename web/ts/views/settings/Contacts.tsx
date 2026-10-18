@@ -1,6 +1,8 @@
 import { useState, useEffect, useCallback, useRef } from 'preact/hooks';
 import { api } from '../../api/client.js';
 import { confirmDialog } from '../../util/confirm.js';
+import { foldContactAddress } from '../../util/casefold.js';
+import { senderParts } from '../../util/phishing.js';
 import { Icon } from '../../components/Icon.js';
 import type { components } from '../../api/types.js';
 
@@ -25,8 +27,9 @@ function ContactForm({ address, name, onAddress, onName, error, saving, onSave, 
     <div class="settings-form">
       {error && <div class="settings-error">{error}</div>}
       <div class="settings-field">
-        <label>Email Address</label>
+        <label for="contact-address">Email Address</label>
         <input
+          id="contact-address"
           type="email"
           value={address}
           onInput={e => onAddress((e.target as HTMLInputElement).value)}
@@ -34,8 +37,9 @@ function ContactForm({ address, name, onAddress, onName, error, saving, onSave, 
         />
       </div>
       <div class="settings-field">
-        <label>Name (optional)</label>
+        <label for="contact-name">Name (optional)</label>
         <input
+          id="contact-name"
           type="text"
           value={name}
           onInput={e => onName((e.target as HTMLInputElement).value)}
@@ -52,7 +56,7 @@ function ContactForm({ address, name, onAddress, onName, error, saving, onSave, 
   );
 }
 
-export function Contacts() {
+export function Contacts({ senderMessageId }: { senderMessageId?: number }) {
   const [items, setItems] = useState<Contact[]>([]);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
@@ -61,7 +65,9 @@ export function Contacts() {
   const [query, setQuery] = useState('');
   const [inputQuery, setInputQuery] = useState('');
   const [offset, setOffset] = useState(0);
-  const [formMode, setFormMode] = useState<null | 'create' | number>(null);
+  const [formMode, setFormMode] = useState<null | 'create' | 'sender' | number>(null);
+  const senderContactId = useRef<number | null>(null);
+  const [senderLoading, setSenderLoading] = useState(senderMessageId !== undefined);
   const [formAddress, setFormAddress] = useState('');
   const [formName, setFormName] = useState('');
   const [formError, setFormError] = useState<string | null>(null);
@@ -92,6 +98,41 @@ export function Contacts() {
 
   useEffect(() => { void load(); }, [load]);
 
+  useEffect(() => {
+    if (senderMessageId === undefined) return;
+    let cancelled = false;
+    async function openSender() {
+      try {
+        const message = await api.messages.get(senderMessageId!);
+        const sender = senderParts(message.from_addr);
+        // Use the stored addr-spec, never a display-only decoded IDN address.
+        const address = message.from_addr.includes('<')
+          ? message.from_addr.slice(message.from_addr.lastIndexOf('<') + 1, message.from_addr.lastIndexOf('>')).trim()
+          : message.from_addr.trim();
+        let contact: Contact | undefined;
+        // Contacts can span many pages; an existing explicit contact must open for
+        // editing too, rather than fail as a duplicate on save.
+        for (let offset = 0; ; offset += 100) {
+          const page = await api.contacts.list({ q: foldContactAddress(address), limit: 100, offset });
+          if (cancelled) return;
+          contact = page.items.find(c => c.address === foldContactAddress(address));
+          if (contact || offset + page.items.length >= page.total || page.items.length === 0) break;
+        }
+        if (cancelled) return;
+        senderContactId.current = contact?.id ?? null;
+        setFormAddress(contact?.address ?? address);
+        setFormName(contact && (contact.explicit || contact.name) ? contact.name : sender.name);
+        setFormMode('sender');
+      } catch (e) {
+        if (!cancelled) setError(e instanceof Error ? e.message : 'Failed to open sender contact');
+      } finally {
+        if (!cancelled) setSenderLoading(false);
+      }
+    }
+    void openSender();
+    return () => { cancelled = true; };
+  }, [senderMessageId]);
+
   function search(e: Event) {
     e.preventDefault();
     setQuery(inputQuery);
@@ -118,7 +159,14 @@ export function Contacts() {
     setFormError(null);
   }
 
+  function clearSenderRoute() {
+    if (senderMessageId !== undefined) {
+      window.history.replaceState(window.history.state, '', '#/settings/contacts');
+    }
+  }
+
   function cancelForm() {
+    clearSenderRoute();
     setFormMode(null);
     setFormError(null);
   }
@@ -132,12 +180,15 @@ export function Contacts() {
     setSaving(true);
     setFormError(null);
     try {
-      if (formMode === 'create') {
+      if (formMode === 'sender' && senderContactId.current !== null) {
+        await api.contacts.update(senderContactId.current, { address: addr, name: formName.trim() });
+      } else if (formMode === 'create' || formMode === 'sender') {
         await api.contacts.create({ address: addr, name: formName.trim() });
       } else if (typeof formMode === 'number') {
         await api.contacts.update(formMode, { address: addr, name: formName.trim() });
       }
       setFormMode(null);
+      clearSenderRoute();
       await load();
     } catch (e) {
       setFormError(e instanceof Error ? e.message : 'Failed to save contact');
@@ -186,11 +237,12 @@ export function Contacts() {
             </button>
           )}
         </form>
-        <button class="btn btn-primary btn-sm" onClick={startCreate} disabled={formMode === 'create'}>
+        <button class="btn btn-primary btn-sm" onClick={startCreate} disabled={senderLoading || saving || formMode === 'create'}>
           + Add Contact
         </button>
       </div>
-      {formMode === 'create' && (
+      {senderLoading && <div class="settings-loading">Opening sender contact…</div>}
+      {(formMode === 'create' || formMode === 'sender') && (
         <ContactForm
           address={formAddress}
           name={formName}
@@ -231,8 +283,8 @@ export function Contacts() {
               <div class="settings-item-meta">{c.address}</div>
               {c.explicit && <small class="settings-item-meta" title="Added or edited by you; sender authenticity is not verified">Added or edited by you</small>}
             </div>
-            <button class="btn btn-ghost btn-sm" onClick={() => startEdit(c)}>Edit</button>
-            <button class="btn btn-danger btn-sm" onClick={() => void deleteContact(c.id)}>Delete</button>
+            <button class="btn btn-ghost btn-sm" onClick={() => startEdit(c)} disabled={senderLoading || saving}>Edit</button>
+            <button class="btn btn-danger btn-sm" onClick={() => void deleteContact(c.id)} disabled={senderLoading || saving}>Delete</button>
           </div>
         )
       ))}

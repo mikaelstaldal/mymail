@@ -153,7 +153,7 @@ function App() {
       return <SearchView query={route.query} folders={folders} />;
     }
     if (route.type === 'settings') {
-      return <SettingsPage tab={route.tab} />;
+      return <SettingsPage tab={route.tab} senderMessageId={route.senderMessageId} />;
     }
     return <div class="placeholder-view"><p>{label}</p></div>;
   }

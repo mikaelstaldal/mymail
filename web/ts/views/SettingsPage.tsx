@@ -10,6 +10,7 @@ import { isDemo } from '../util/config.js';
 
 interface SettingsPageProps {
   tab?: string;
+  senderMessageId?: number;
 }
 
 const TABS = [
@@ -22,7 +23,7 @@ const TABS = [
   { slug: 'api-tokens', label: 'API Tokens' },
 ] as const;
 
-export function SettingsPage({ tab }: SettingsPageProps) {
+export function SettingsPage({ tab, senderMessageId }: SettingsPageProps) {
   const activeTab = tab ?? TABS[0].slug;
 
   return (
@@ -43,7 +44,7 @@ export function SettingsPage({ tab }: SettingsPageProps) {
         {activeTab === 'folders' && <Folders />}
         {activeTab === 'filters' && <Filters />}
         {activeTab === 'spam' && <SpamFilter />}
-        {activeTab === 'contacts' && <Contacts />}
+        {activeTab === 'contacts' && <Contacts key={senderMessageId ?? 'list'} senderMessageId={senderMessageId} />}
         {activeTab === 'preferences' && <Preferences />}
         {activeTab === 'api-tokens' && !isDemo() && <ApiTokens />}
       </div>

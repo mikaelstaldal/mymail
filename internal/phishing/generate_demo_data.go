@@ -95,6 +95,9 @@ func main() {
 		_, err = fmt.Fprintf(out, "const %s = %s;\n", v.decl, b)
 		check(err)
 	}
+	b, err := json.Marshal(folds)
+	check(err)
+	check(os.WriteFile("web/ts/util/casefold.ts", []byte(fmt.Sprintf("// Generated from Go cases.Fold by internal/phishing/generate_demo_data.go; DO NOT EDIT.\nconst addressCaseFold: Record<string,string> = %s;\n\n/** Same address normalization as the contact repository and browser demo. */\nexport function foldContactAddress(address: string): string {\n  return Array.from(address, c => addressCaseFold[c] ?? c).join('');\n}\n", b)), 0644))
 }
 func check(err error) {
 	if err != nil {

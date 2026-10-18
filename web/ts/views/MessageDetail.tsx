@@ -5,7 +5,7 @@ import { showToast } from '../util/toast.js';
 import { confirmDialog } from '../util/confirm.js';
 import { getMycalUrl, isDemo } from '../util/config.js';
 import { formatDateFull, formatDateAdaptive, defaultSnoozeDateTime } from '../util/date.js';
-import { hasValidRecipient } from '../util/address.js';
+import { hasValidRecipient, isValidAddress } from '../util/address.js';
 import { findIcsLinks } from '../util/icslinks.js';
 import { senderParts, warningText, attachmentReason, type MessageWarning } from '../util/phishing.js';
 import { Icon } from '../components/Icon.js';
@@ -851,6 +851,13 @@ export function MessageDetail({ id, folders }: MessageDetailProps) {
           <span class="msg-detail-label">From</span>
           <span class="msg-detail-value">
             <Sender raw={msg.from_addr} />
+            {![2, DRAFTS_ID, SCHEDULED_ID].includes(folderId) && isValidAddress(msg.from_addr.trim()) && (
+              <button class="btn btn-ghost btn-sm"
+                title="Edit and save this sender as a contact to suppress first-time-sender warnings"
+                onClick={() => navigate(`#/settings/contacts?sender=${msg.id}`)}>
+                Add sender to contacts
+              </button>
+            )}
             {showSendFailed && (
               <span class="msg-badge-fail" title="Send failed">!</span>
             )}

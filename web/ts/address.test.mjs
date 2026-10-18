@@ -132,3 +132,13 @@ test('what formatAddress produces is what the send gate accepts', () => {
   // And it survives the round-trip through a stored list.
   assert.deepEqual(splitAddressList([tag, 'a@b.com'].join(', ')), [tag, ' a@b.com']);
 });
+
+// Sender-to-contact lookup must use the repository's Unicode casefolding,
+// preserving distinct Turkish letters while matching expanding folds.
+test('contact address casefold matches server normalization', async () => {
+  const { foldContactAddress } = await import('../static/util/casefold.js');
+  assert.equal(foldContactAddress('Straße@EXAMPLE.COM'), 'strasse@example.com');
+  assert.equal(foldContactAddress('Σς@example.com'), 'σσ@example.com');
+  assert.notEqual(foldContactAddress('ı@example.com'), foldContactAddress('i@example.com'));
+  assert.equal(foldContactAddress('İ@example.com'), 'i\u0307@example.com');
+});
