@@ -64,10 +64,12 @@ Creates the data directory and SQLite database and seeds the built-in folders an
 mymail -migrate -data <dir>
 ```
 
-Applies all pending migrations to an existing database, closes it, and exits. Use this to run a database
+Applies all pending migrations to an existing database, runs `VACUUM` if any migrations were applied,
+closes the database, and exits. Already current databases are not vacuumed. Use this to run a database
 upgrade as a batch job before starting the server. It needs no sendmail binary or initial identity and
 starts no server or background jobs. Exit code is `0` on success (including when already up to date),
-or `1` with an error message on failure. Server startup still applies pending migrations automatically.
+or `1` with an error message on failure. If vacuum fails, migrations remain applied.
+Server startup still applies pending migrations automatically, without vacuuming.
 
 ### Server mode (default)
 

@@ -48,14 +48,17 @@ mymail -migrate -data <dir>
 ```
 
 Opens the existing `<data>/mymail.sqlite` database, applies all pending schema migrations,
-closes the database, and exits. An already current database succeeds without applying any migrations.
+runs `VACUUM` after they have all committed, closes the database, and exits. Vacuum runs only if at least
+one migration was needed. An already current database succeeds without applying migrations or vacuuming.
 It does not initialize an installation, seed folders or identities, resolve sendmail, start a scheduler,
 or start an HTTP server or LDA socket. The only operational option it needs is `-data` (default `data/`).
-It exits `0` on success; any failure, including a missing database, a migration error, or a close error,
+It exits `0` on success; any failure, including a missing database, a migration error, a vacuum error, or a close error,
 prints an error message to stderr and exits `1`.
 
 Server startup continues to apply pending migrations automatically. This mode allows migrations to run
-as a separate batch job before starting the server.
+as a separate batch job before starting the server. Automatic migrations during normal server startup
+do not run `VACUUM`. If vacuum fails, the completed migrations remain applied; the error message
+distinguishes this from a migration failure.
 
 ### Server mode (default)
 

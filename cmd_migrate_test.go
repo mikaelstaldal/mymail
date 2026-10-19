@@ -55,6 +55,7 @@ func TestMigrationCLI(t *testing.T) {
 	require.NoError(t, db.Close())
 	for _, name := range []string{"pending", "already current"} {
 		t.Run(name, func(t *testing.T) {
+			freeBefore := migrationFreeSpace(t, path)
 			output, err := migrationCLI(t, dir)
 			require.NoError(t, err, output)
 			assert.Empty(t, output)
@@ -77,10 +78,47 @@ func TestMigrationCLI(t *testing.T) {
 			var current int
 			require.NoError(t, db.QueryRow(`PRAGMA user_version`).Scan(&current))
 			assert.Equal(t, version, current)
+			var freeAfter int
+			require.NoError(t, db.QueryRow(`PRAGMA freelist_count`).Scan(&freeAfter))
+			if name == "pending" {
+				assert.Zero(t, freeAfter, "pending migrations must be followed by VACUUM")
+			} else {
+				assert.Equal(t, freeBefore, freeAfter, "an already current database must not be vacuumed")
+			}
 		})
 	}
 	_, err = os.Stat(filepath.Join(dir, "lda.sock"))
 	assert.True(t, os.IsNotExist(err), "migration must not create an LDA socket")
+}
+
+// Leave reusable pages in the file so tests observe actual compaction rather
+// than merely asserting that a VACUUM statement was executed.
+func migrationFreeSpace(t *testing.T, path string) int {
+	t.Helper()
+	db, err := sqlite.Open(path, 0, nil)
+	require.NoError(t, err)
+	defer db.Close()
+	_, err = db.Exec(`CREATE TABLE discarded(payload BLOB);
+		INSERT INTO discarded VALUES(zeroblob(1048576)); DROP TABLE discarded`)
+	require.NoError(t, err)
+	var free int
+	require.NoError(t, db.QueryRow(`PRAGMA freelist_count`).Scan(&free))
+	require.Positive(t, free)
+	return free
+}
+
+func TestAutomaticMigrationDoesNotVacuum(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "mymail.sqlite")
+	migrationFreeSpace(t, path)
+	// This is the same migration entry point used by normal server startup.
+	db, err := repository.OpenDB(path, 0)
+	require.NoError(t, err)
+	defer db.Close()
+	var version, free int
+	require.NoError(t, db.QueryRow(`PRAGMA user_version`).Scan(&version))
+	assert.Positive(t, version)
+	require.NoError(t, db.QueryRow(`PRAGMA freelist_count`).Scan(&free))
+	assert.Positive(t, free, "automatic migrations must leave free pages for reuse")
 }
 
 func TestMigrationCLIErrors(t *testing.T) {

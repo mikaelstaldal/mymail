@@ -330,10 +330,12 @@ Each argument is `<folder>:<format>:<path>`. Supported formats: `mbox`, `maildir
    ```bash
    sudo -u mymail /usr/local/bin/mymail -migrate -data /var/lib/mymail
    ```
-   This opens the existing database, applies pending migrations, closes it, and exits without starting a server.
+   This opens the existing database, applies pending migrations, runs `VACUUM` if any were applied,
+   closes it, and exits without starting a server. Already current databases are not vacuumed.
    It exits `0` when successful (including when already up to date), or `1` with an error message on failure.
+   If vacuum fails, migrations remain applied and the command reports the compaction failure.
    Complete this step successfully before restarting the service.
-5. Start the service — any remaining schema migrations are applied automatically on startup:
+5. Start the service — any remaining schema migrations are applied automatically on startup, without vacuuming:
    ```bash
    systemctl start mymail
    ```
