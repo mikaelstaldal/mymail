@@ -2,7 +2,8 @@
 // test-e2e.sh. No warning verdict is invented by a browser route mock.
 // Layout coverage uses private sent messages moved to Inbox: long link values,
 // visible hover/focus tooltips, both body views, expanded thread warnings and
-// divider movement in both directions, including fractional pane heights.
+// divider movement in both directions, including fractional pane heights. Label
+// readability is measured with rendered glyphs, not a machine-dependent em budget.
 import { test, expect } from '@playwright/test';
 
 async function sample(request: import('@playwright/test').APIRequestContext) {
@@ -47,19 +48,29 @@ test('long link warnings fit one line and body resizing stays above the thread',
       const values = line.locator('.phishing-warning-url');
       const geometry = await line.evaluate(el => {
         const values = [...el.querySelectorAll<HTMLElement>('.phishing-warning-url')];
+        // Measure enough of the actual label to distinguish it from an ellipsis.
+        // Font size alone does not determine glyph widths, especially in a narrow
+        // expanded thread with platform-dependent font and scrollbar metrics.
+        const prefix = values[0].cloneNode(false) as HTMLElement;
+        prefix.textContent = '“http…';
+        prefix.style.cssText = 'position: fixed; width: max-content; visibility: hidden';
+        el.append(prefix);
+        const readableWidth = prefix.getBoundingClientRect().width;
+        prefix.remove();
         return {
           height: el.getBoundingClientRect().height,
           lineHeight: parseFloat(getComputedStyle(el).lineHeight),
           width: el.clientWidth, scrollWidth: el.scrollWidth,
           truncated: values.slice(0, 2).every(value => value.scrollWidth > value.clientWidth),
-          valueWidths: values.slice(0, 2).map(value => value.clientWidth),
-          fontSize: parseFloat(getComputedStyle(el).fontSize),
+          valueWidths: values.slice(0, 2).map(value => value.getBoundingClientRect().width),
+          readableWidth,
+          font: getComputedStyle(el).font,
         };
       });
       expect(geometry.height).toBeLessThanOrEqual(geometry.lineHeight + 1);
       expect(geometry.scrollWidth).toBeLessThanOrEqual(geometry.width + 1);
       expect(geometry.truncated).toBe(true);
-      expect(geometry.valueWidths[0]).toBeGreaterThan(geometry.fontSize * 4);
+      expect(geometry.valueWidths[0], JSON.stringify(geometry)).toBeGreaterThanOrEqual(geometry.readableWidth);
       expect(Math.abs(geometry.valueWidths[0] - geometry.valueWidths[1])).toBeLessThanOrEqual(1);
 
       await values.nth(0).hover();
@@ -141,7 +152,19 @@ test('long link warnings fit one line and body resizing stays above the thread',
     expect(plain.y).toBeLessThan(pane.y + pane.height);
     expect(plain.y + plain.height).toBeGreaterThan(pane.y);
     await thread.locator('.thread-entry-btn:not(:disabled)').click();
-    await checkLink(thread.locator('.thread-expanded'));
+    const expanded = thread.locator('.thread-expanded');
+    await checkLink(expanded);
+    // Reserve classic-scrollbar space even on systems with overlay scrollbars,
+    // and exercise a narrower viewport and different glyph widths without
+    // depending on installed faces. The old 4em check fails in this combination.
+    await page.setViewportSize({ width: 796, height: 800 });
+    await thread.locator('.thread-list').evaluate(el => { (el as HTMLElement).style.scrollbarGutter = 'stable'; });
+    for (const font of ['sans-serif', 'serif']) {
+      await expanded.locator('.phishing-warnings').evaluate((el, font) => {
+        (el as HTMLElement).style.fontFamily = font;
+      }, font);
+      await checkLink(expanded);
+    }
   } finally {
     for (const id of ids) {
       await request.patch(`/api/v1/messages/${id}`, { data: { folder_id: 4 } });
