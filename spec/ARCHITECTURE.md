@@ -323,6 +323,7 @@ leaving the warning, or scrolling its container dismisses it.
 The main body pane contains its own scrolling overflow, keeping warnings and body
 content above the thread strip. The divider bounds thread height by the combined
 body/thread space, reserving at least 60px for the body when that space permits.
+Resize measurements retain fractional pixels so rounding cannot reduce that minimum.
 Body iframes ignore pointer events during a divider drag so they cannot capture it.
 Sender names and addresses are separate elements. Risky attachment controls have
 no direct download href and invoke the shared confirmation dialog before creating

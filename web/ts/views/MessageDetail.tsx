@@ -387,8 +387,10 @@ export function MessageDetail({ id, folders }: MessageDetailProps) {
   const handleResizeStart = (e: MouseEvent) => {
     e.preventDefault();
     const startY = e.clientY;
-    const startHeight = threadStripRef.current?.offsetHeight ?? 200;
-    const availableHeight = startHeight + (bodyRef.current?.offsetHeight ?? 400);
+    // Keep subpixel heights: offsetHeight rounds to integers and can over-allocate the
+    // thread, leaving the body just below its 60px minimum on some font metrics.
+    const startHeight = threadStripRef.current?.getBoundingClientRect().height ?? 200;
+    const availableHeight = startHeight + (bodyRef.current?.getBoundingClientRect().height ?? 400);
     document.body.style.cursor = 'ns-resize';
     document.body.style.userSelect = 'none';
     // Iframes otherwise capture pointer events as the divider crosses the body.

@@ -2,7 +2,7 @@
 // test-e2e.sh. No warning verdict is invented by a browser route mock.
 // Layout coverage uses private sent messages moved to Inbox: long link values,
 // visible hover/focus tooltips, both body views, expanded thread warnings and
-// divider movement in both directions.
+// divider movement in both directions, including fractional pane heights.
 import { test, expect } from '@playwright/test';
 
 async function sample(request: import('@playwright/test').APIRequestContext) {
@@ -118,6 +118,16 @@ test('long link warnings fit one line and body resizing stays above the thread',
         await body.evaluate(el => { el.scrollTop = 0; });
       }
     }
+    // Force fractional available space independently of the runner's font metrics.
+    // Rounding pane heights to whole pixels can otherwise leave the body < 60px.
+    await page.locator('.msg-detail').evaluate(container => {
+      const strip = container.querySelector<HTMLElement>('.thread-strip')!;
+      const body = container.querySelector<HTMLElement>('.msg-detail-body')!;
+      strip.style.height = '100px';
+      const bodyHeight = body.getBoundingClientRect().height;
+      (container as HTMLElement).style.height =
+        `${container.getBoundingClientRect().height - bodyHeight + Math.floor(bodyHeight) + 0.609375}px`;
+    });
     const handle = (await divider.boundingBox())!;
     await page.mouse.move(handle.x + handle.width / 2, handle.y + handle.height / 2);
     await page.mouse.down();
