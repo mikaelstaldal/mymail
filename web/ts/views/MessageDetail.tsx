@@ -8,6 +8,7 @@ import { formatDateFull, formatDateAdaptive, defaultSnoozeDateTime } from '../ut
 import { hasValidRecipient, isValidAddress } from '../util/address.js';
 import { findIcsLinks } from '../util/icslinks.js';
 import { senderParts, warningText, attachmentReason, type MessageWarning } from '../util/phishing.js';
+import { foldContactAddress } from '../util/casefold.js';
 import { Icon } from '../components/Icon.js';
 import type { components } from '../api/types.js';
 
@@ -287,6 +288,7 @@ export function MessageDetail({ id, folders }: MessageDetailProps) {
   const [rescheduleValue, setRescheduleValue] = useState('');
   const [actionInFlight, setActionInFlight] = useState(false);
   const [icsImportStatus, setIcsImportStatus] = useState<Record<string, 'loading' | 'success' | string>>({});
+  const [canAddSender, setCanAddSender] = useState(false);
   const bodyRef = useRef<HTMLDivElement>(null);
   const threadStripRef = useRef<HTMLDivElement>(null);
   const [threadHeight, setThreadHeight] = useState<number | null>(null);
@@ -325,6 +327,7 @@ export function MessageDetail({ id, folders }: MessageDetailProps) {
     setNotFound(false);
     setError(null);
     setMsg(null);
+    setCanAddSender(false);
     setThread(null);
     setExpandedThreadId(null);
     expandedThreadIdRef.current = null;
@@ -340,10 +343,30 @@ export function MessageDetail({ id, folders }: MessageDetailProps) {
     // messages — an "Imported" from the previous message must not carry over.
     setIcsImportStatus({});
 
+    async function checkSenderContact(message: MessageDetailType) {
+      const raw = message.from_addr.trim();
+      if ([2, DRAFTS_ID, SCHEDULED_ID].includes(message.folder_id) || !isValidAddress(raw)) return;
+      // Match the stored addr-spec, not the display-only decoded IDN address.
+      const angle = raw.lastIndexOf('<');
+      const address = foldContactAddress(angle >= 0 ? raw.slice(angle + 1, -1).trim() : raw);
+      for (let offset = 0; !cancelled; offset += 100) {
+        const page = await api.contacts.list({ q: address, limit: 100, offset });
+        if (cancelled) return;
+        const contact = page.items.find(c => c.address === address);
+        if (contact || offset + page.items.length >= page.total || page.items.length === 0) {
+          setCanAddSender(!contact?.explicit);
+          return;
+        }
+      }
+    }
+
     api.messages.get(id).then(m => {
       if (cancelled) return;
       setMsg(m);
       setLoading(false);
+      void checkSenderContact(m).catch(() => {
+        // Keep this optional action hidden until contact status is known.
+      });
       if (!m.read) {
         void api.messages.markRead(id).then(() => {
           window.dispatchEvent(new CustomEvent('folder-reload'));
@@ -934,7 +957,7 @@ export function MessageDetail({ id, folders }: MessageDetailProps) {
           <span class="msg-detail-label">From</span>
           <span class="msg-detail-value">
             <Sender raw={msg.from_addr} />
-            {![2, DRAFTS_ID, SCHEDULED_ID].includes(folderId) && isValidAddress(msg.from_addr.trim()) && (
+            {canAddSender && (
               <button class="btn btn-ghost btn-sm"
                 title="Edit and save this sender as a contact to suppress first-time-sender warnings"
                 onClick={() => navigate(`#/settings/contacts?sender=${msg.id}`)}>

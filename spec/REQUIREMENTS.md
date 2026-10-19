@@ -276,8 +276,9 @@ already-explicit duplicate returns 409. Automatic receipt, send and import upser
 Existing contacts start false on upgrade (schema v11); deleting and recollecting a contact resets it.
 
 Received-message details offer “Add sender to contacts”, opening the Contacts editor with the sender address and
-name. Existing contacts open for editing, including already-explicit ones. Saving makes the contact explicit;
-cancelling does not change it. The action is absent from Sent, Drafts and Scheduled.
+name, when the sender has no contact or only an automatically collected contact. The action is hidden for an
+already-explicit contact and while contact status is unknown. Automatically collected contacts open for editing.
+Saving makes the contact explicit; cancelling does not change it. The action is absent from Sent, Drafts and Scheduled.
 
 Contacts are upserted automatically:
 

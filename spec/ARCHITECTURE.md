@@ -276,6 +276,8 @@ comparison. Their domain skeletons are computed at read time so dependency updat
 index. It suppresses only first-time-sender warnings.
 
 The web message-detail sender action navigates to Settings → Contacts with the message ID in the hash route.
+Message detail checks the casefolded stored sender address against paginated contact results, offering the action
+only after confirming that no explicit contact exists. Auto-collected contacts remain eligible.
 Contacts loads the sender and resolves any existing contact across paginated results before opening its existing
 editor. Opening or cancelling performs reads only; Save uses the normal contact create/update API, including in
 demo mode.
