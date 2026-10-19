@@ -58,6 +58,17 @@ mymail -init -data <dir> -identity-address <addr> [-identity-name <name>]
 
 Creates the data directory and SQLite database and seeds the built-in folders and an initial identity. Must be run before server, LDA, import, or demo-seeding mode. The browser-only demo modes do not need a database.
 
+### Migration mode
+
+```
+mymail -migrate -data <dir>
+```
+
+Applies all pending migrations to an existing database, closes it, and exits. Use this to run a database
+upgrade as a batch job before starting the server. It needs no sendmail binary or initial identity and
+starts no server or background jobs. Exit code is `0` on success (including when already up to date),
+or `1` with an error message on failure. Server startup still applies pending migrations automatically.
+
 ### Server mode (default)
 
 ```

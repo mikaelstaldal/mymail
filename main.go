@@ -50,6 +50,7 @@ func main() {
 	})
 	backfillAuth := flag.Bool("backfill-auth", false, "Recompute sender authentication from stored raw messages using current checker host and exit")
 	initMode := flag.Bool("init", false, "Initialize database and exit")
+	migrateMode := flag.Bool("migrate", false, "Apply pending database migrations and exit")
 	ldaMode := flag.Bool("lda", false, "LDA mode: read RFC 5322 from stdin and store in DB")
 	importMode := flag.Bool("import", false, "Import messages from mbox/Maildir and exit")
 	demoMode := flag.Bool("demo", false, "Populate database with demo data and exit")
@@ -90,6 +91,10 @@ func main() {
 		runAuthBackfill(*dataDir, backfillFolders...)
 	case *initMode:
 		runInit(*dataDir, *identityAddress, *identityName)
+	case *migrateMode:
+		if err := runMigrations(*dataDir); err != nil {
+			log.Fatalf("error: %v", err)
+		}
 	case *ldaMode:
 		runLDA(*dataDir)
 	case *importMode:

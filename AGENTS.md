@@ -105,6 +105,7 @@ Web UI assets are embedded in the binary via `//go:embed`. The deployed artifact
 |------|------|---------|
 | (none) | Server | HTTP REST API + embedded web UI on `127.0.0.1:8080` |
 | `-init` | Init | Create SQLite DB with schema; seed built-in folders and the initial identity (`-identity-address` is **required**; `-identity-name` is optional) |
+| `-migrate` | Migrate | Apply pending migrations to an existing database, close it, and exit 0/1 |
 | `-lda` | LDA | Read RFC 5322 from stdin, store in DB, apply filters; exit 0/1/75 |
 | `-import` | Import | Batch import from mbox/Maildir with duplicate detection |
 | `-demo` | Demo seed | Add the demo dataset (internal/demo) to an existing database |

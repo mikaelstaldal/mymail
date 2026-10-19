@@ -52,6 +52,11 @@ the trigger is the push itself. See `AGENTS.md` § E2E Tests.
 
 ## Message storage
 
+The `-migrate` command dispatches before server initialization. It checks that the database exists,
+uses `repository.OpenDB` to apply the same strict migrations as server startup, then explicitly closes
+the database and reports any error through a non-zero process exit. It performs no application seeding
+or server, sendmail, scheduler, or socket setup.
+
 Schema version 12 stores immutable sent/received provenance in `messages.outgoing`.
 The unique key is `(message_id, outgoing)`, allowing a self-sent message to have both copies.
 LDA duplicate checks only consider received copies, independent of their current folder.

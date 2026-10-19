@@ -41,6 +41,22 @@ Initializes a fresh installation:
 The server, LDA, and import modes require the database to already exist (created by `mymail -init`). They exit with a
 fatal error if the database file is absent.
 
+### Migration mode (`-migrate`)
+
+```
+mymail -migrate -data <dir>
+```
+
+Opens the existing `<data>/mymail.sqlite` database, applies all pending schema migrations,
+closes the database, and exits. An already current database succeeds without applying any migrations.
+It does not initialize an installation, seed folders or identities, resolve sendmail, start a scheduler,
+or start an HTTP server or LDA socket. The only operational option it needs is `-data` (default `data/`).
+It exits `0` on success; any failure, including a missing database, a migration error, or a close error,
+prints an error message to stderr and exits `1`.
+
+Server startup continues to apply pending migrations automatically. This mode allows migrations to run
+as a separate batch job before starting the server.
+
 ### Server mode (default)
 
 Starts an HTTP server that serves the REST API and the embedded web UI.
