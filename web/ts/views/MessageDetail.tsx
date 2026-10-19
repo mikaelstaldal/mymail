@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useMemo } from 'preact/hooks';
+import { useState, useEffect, useRef, useMemo, useId } from 'preact/hooks';
 import { api, NotFoundError } from '../api/client.js';
 import { navigate } from '../router.js';
 import { showToast } from '../util/toast.js';
@@ -65,23 +65,69 @@ function Sender({ raw }: { raw: string }) {
   </span>;
 }
 
+function LinkWarning({ warning }: { warning: MessageWarning }) {
+  const tooltipId = useId();
+  const tooltipRef = useRef<HTMLSpanElement>(null);
+  const [position, setPosition] = useState<{ left: number; top?: number; bottom?: number; maxHeight: number } | null>(null);
+  const visible = position !== null;
+
+  useEffect(() => {
+    if (!visible) return;
+    const dismiss = () => setPosition(null);
+    const onScroll = (event: Event) => {
+      // Let long values scroll inside the tooltip itself.
+      if (!tooltipRef.current?.contains(event.target as Node)) dismiss();
+    };
+    document.addEventListener('scroll', onScroll, true);
+    window.addEventListener('resize', dismiss);
+    return () => {
+      document.removeEventListener('scroll', onScroll, true);
+      window.removeEventListener('resize', dismiss);
+    };
+  }, [visible]);
+
+  const show = (element: HTMLElement) => {
+    const rect = element.getBoundingClientRect();
+    const below = window.innerHeight - rect.bottom;
+    const placeBelow = below >= Math.min(240, rect.top);
+    setPosition({
+      left: Math.max(16, Math.min(rect.left, window.innerWidth - 320)),
+      ...(placeBelow ? { top: rect.bottom } : { bottom: window.innerHeight - rect.top }),
+      maxHeight: Math.max(0, Math.min(320, (placeBelow ? below : rect.top) - 8)),
+    });
+  };
+
+  return <span class="phishing-link-warning" tabIndex={0}
+    aria-describedby={visible ? tooltipId : undefined}
+    onMouseEnter={event => show(event.currentTarget)}
+    onMouseLeave={event => { if (!event.currentTarget.matches(':focus-within')) setPosition(null); }}
+    onFocus={event => show(event.currentTarget)}
+    onBlur={() => setPosition(null)}
+    onKeyDown={event => { if (event.key === 'Escape') setPosition(null); }}>
+    <span>Check this link:</span>
+    <bdi class="phishing-warning-url">“{warning.text}”</bdi>
+    <span>goes to</span>
+    <bdi class="phishing-warning-url">{warning.href}</bdi>
+    {warning.decoded_host && <>
+      <span>(host:</span>
+      <bdi class="phishing-warning-url phishing-warning-host">{warning.decoded_host}</bdi>
+      <span>)</span>
+    </>}
+    {position && <span ref={tooltipRef} id={tooltipId} role="tooltip" class="phishing-link-tooltip"
+      style={{ left: `${position.left}px`, top: position.top === undefined ? undefined : `${position.top}px`,
+        bottom: position.bottom === undefined ? undefined : `${position.bottom}px`, maxHeight: `${position.maxHeight}px` }}>
+      <span>Link text: <bdi>{warning.text}</bdi></span>
+      <span>Destination: <bdi>{warning.href}</bdi></span>
+      {warning.decoded_host && <span>Host: <bdi>{warning.decoded_host}</bdi></span>}
+    </span>}
+  </span>;
+}
+
 function WarningBanner({ warnings }: { warnings: MessageWarning[] }) {
   if (!warnings.length) return null;
   return <div class="phishing-warnings" role="note" aria-label="Message warnings">
     <ul>{warnings.map((warning, i) => <li key={i} class={warning.kind === 'auth_fail' || warning.kind === 'lookalike_domain' ? 'phishing-warning-strong' : ''}>
-      {warning.kind === 'deceptive_link' ? (
-        <span class="phishing-link-warning">
-          <span>Check this link:</span>
-          <bdi class="phishing-warning-url" title={warning.text}>“{warning.text}”</bdi>
-          <span>goes to</span>
-          <bdi class="phishing-warning-url" title={warning.href}>{warning.href}</bdi>
-          {warning.decoded_host && <>
-            <span>(host:</span>
-            <bdi class="phishing-warning-url phishing-warning-host" title={warning.decoded_host}>{warning.decoded_host}</bdi>
-            <span>)</span>
-          </>}
-        </span>
-      ) : warningText(warning)}
+      {warning.kind === 'deceptive_link' ? <LinkWarning warning={warning} /> : warningText(warning)}
     </li>)}</ul>
   </div>;
 }

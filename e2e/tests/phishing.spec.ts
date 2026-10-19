@@ -1,7 +1,8 @@
 // Real seeded warnings and download bytes, with fresh assets/server provided by
 // test-e2e.sh. No warning verdict is invented by a browser route mock.
 // Layout coverage uses private sent messages moved to Inbox: long link values,
-// both body views, expanded thread warnings and divider movement in both directions.
+// visible hover/focus tooltips, both body views, expanded thread warnings and
+// divider movement in both directions.
 import { test, expect } from '@playwright/test';
 
 async function sample(request: import('@playwright/test').APIRequestContext) {
@@ -12,7 +13,8 @@ async function sample(request: import('@playwright/test').APIRequestContext) {
 }
 
 test('long link warnings fit one line and body resizing stays above the thread', async ({ page, request }) => {
-  const text = `https://example.com/${'visible-path/'.repeat(80)}`;
+  // A much longer destination must not squeeze the label down to just an ellipsis.
+  const text = 'https://example.com/account/security';
   const href = `https://unrelated.example/${'destination-path/'.repeat(80)}`;
   const ids: number[] = [];
   try {
@@ -43,9 +45,6 @@ test('long link warnings fit one line and body resizing stays above the thread',
       const line = container.locator('.phishing-link-warning');
       await expect(line).toHaveCount(1);
       const values = line.locator('.phishing-warning-url');
-      await expect(values.nth(0)).toHaveAttribute('title', text);
-      await expect(values.nth(1)).toHaveAttribute('title', href);
-      await expect(values.nth(2)).toHaveAttribute('title', 'unrelated.example');
       const geometry = await line.evaluate(el => {
         const values = [...el.querySelectorAll<HTMLElement>('.phishing-warning-url')];
         return {
@@ -53,11 +52,40 @@ test('long link warnings fit one line and body resizing stays above the thread',
           lineHeight: parseFloat(getComputedStyle(el).lineHeight),
           width: el.clientWidth, scrollWidth: el.scrollWidth,
           truncated: values.slice(0, 2).every(value => value.scrollWidth > value.clientWidth),
+          valueWidths: values.slice(0, 2).map(value => value.clientWidth),
+          fontSize: parseFloat(getComputedStyle(el).fontSize),
         };
       });
       expect(geometry.height).toBeLessThanOrEqual(geometry.lineHeight + 1);
       expect(geometry.scrollWidth).toBeLessThanOrEqual(geometry.width + 1);
       expect(geometry.truncated).toBe(true);
+      expect(geometry.valueWidths[0]).toBeGreaterThan(geometry.fontSize * 4);
+      expect(Math.abs(geometry.valueWidths[0] - geometry.valueWidths[1])).toBeLessThanOrEqual(1);
+
+      await values.nth(0).hover();
+      const tooltip = page.getByRole('tooltip');
+      await expect(tooltip).toBeVisible();
+      await expect(tooltip).toContainText(`Link text: ${text}`);
+      await expect(tooltip).toContainText(`Destination: ${href}`);
+      await expect(tooltip).toContainText('Host: unrelated.example');
+      const box = (await tooltip.boundingBox())!;
+      expect(box.x).toBeGreaterThanOrEqual(0);
+      expect(box.y).toBeGreaterThanOrEqual(0);
+      expect(box.x + box.width).toBeLessThanOrEqual(page.viewportSize()!.width);
+      expect(box.y + box.height).toBeLessThanOrEqual(page.viewportSize()!.height);
+      // The tooltip must stay open when entered, including inside the clipped
+      // thread pane, so long destinations can be selected and scrolled.
+      await tooltip.hover();
+      await expect(tooltip).toBeVisible();
+      await tooltip.evaluate(el => { el.scrollTop = el.scrollHeight; });
+      await expect(tooltip).toBeVisible();
+      await page.mouse.move(0, 0);
+      await expect(tooltip).toHaveCount(0);
+      await line.focus();
+      await expect(tooltip).toBeVisible();
+      await page.keyboard.press('Escape');
+      await expect(tooltip).toHaveCount(0);
+      await line.evaluate(el => (el as HTMLElement).blur());
     };
 
     for (const width of [1280, 800]) {

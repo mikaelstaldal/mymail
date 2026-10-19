@@ -316,7 +316,10 @@ fetch/srcdoc path. The confirmation route uses the ordinary demo message API.
 The web message view formats the server warning list without recomputing signals.
 `util/phishing.ts` owns warning wording and display-only RFC 3492 decoding;
 `MessageDetail` renders warnings for the main message and expanded thread entries.
-Link-warning values use flex items with CSS ellipses and full-value title tooltips.
+Link-warning labels and destinations use equal flex shares with CSS ellipses.
+Hover or keyboard focus opens a fixed-position tooltip with full, selectable values
+outside the body/thread scrollers. Tooltip values wrap and scroll; Escape, blur,
+leaving the warning, or scrolling its container dismisses it.
 The main body pane contains its own scrolling overflow, keeping warnings and body
 content above the thread strip. The divider bounds thread height by the combined
 body/thread space, reserving at least 60px for the body when that space permits.

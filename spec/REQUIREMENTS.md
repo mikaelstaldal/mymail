@@ -1619,7 +1619,10 @@ forwards retain their original links. The browser demo follows the same rules.
   with one plain-language line and server-supplied details per warning. Authentication
   failure and lookalike-domain lines have stronger visual emphasis than first-time sender.
   Link warnings stay on one line by ellipsizing long link text, destination URLs and
-  decoded hosts to fit the available width; tooltips retain each full value. Warnings
+  decoded hosts to fit the available width; link text and destination share the
+  remaining width equally. Hovering or focusing a link warning opens a tooltip
+  with the full link text, URL and decoded host. Long tooltip values wrap and
+  scroll, and Escape dismisses the tooltip. Warnings
   and the selected body scroll above the thread strip, and dragging its divider
   preserves space for the body even when warnings are present.
   Expanded thread bodies show their own warnings. No prominent verified badge is shown.

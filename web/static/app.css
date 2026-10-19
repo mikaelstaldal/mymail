@@ -2099,8 +2099,28 @@ html, body {
 .phishing-warnings li + li { margin-top: 6px; }
 .phishing-link-warning { display: flex; align-items: baseline; gap: 0.25em; white-space: nowrap; }
 .phishing-link-warning > span { flex-shrink: 0; }
-.phishing-warning-url { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.phishing-warning-host { flex-shrink: 0; max-width: 25%; }
+.phishing-link-warning:focus-visible { outline: 2px solid var(--btn-primary); outline-offset: 2px; }
+.phishing-warning-url { flex: 1 1 0; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.phishing-warning-host { flex: 0 1 auto; max-width: 25%; }
+/* Fixed positioning escapes the body/thread scrollers. Full values wrap and can
+   be selected or scrolled without following the suspicious link. */
+.phishing-link-tooltip {
+  position: fixed;
+  right: 16px;
+  z-index: 100;
+  max-width: 52rem;
+  padding: 10px 12px;
+  border: 1px solid var(--warning-border);
+  border-radius: 4px;
+  background: var(--warning-bg);
+  color: var(--text-primary);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+  white-space: normal;
+  overflow-wrap: anywhere;
+  overflow: auto;
+}
+.phishing-link-tooltip > span { display: block; }
+.phishing-link-tooltip > span + span { margin-top: 6px; }
 .phishing-warning-strong { font-weight: 700; border-left: 4px solid currentColor; padding-left: 8px; }
 .sender-display { display: inline-flex; flex-wrap: wrap; gap: 0 8px; max-width: 100%; overflow-wrap: anywhere; }
 .sender-address, .sender-idn { font-weight: 400; }
