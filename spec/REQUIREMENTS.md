@@ -1618,6 +1618,10 @@ forwards retain their original links. The browser demo follows the same rules.
 - **REQ-PHISH-08:** Message detail shows a non-dismissible banner above either body view,
   with one plain-language line and server-supplied details per warning. Authentication
   failure and lookalike-domain lines have stronger visual emphasis than first-time sender.
+  Link warnings stay on one line by ellipsizing long link text, destination URLs and
+  decoded hosts to fit the available width; tooltips retain each full value. Warnings
+  and the selected body scroll above the thread strip, and dragging its divider
+  preserves space for the body even when warnings are present.
   Expanded thread bodies show their own warnings. No prominent verified badge is shown.
 - **REQ-PHISH-09:** Main and thread sender headers separate the name and always-visible
   addr-spec. Punycode domains are decoded and marked IDN, retaining the ASCII address too.

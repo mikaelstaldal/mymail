@@ -316,6 +316,11 @@ fetch/srcdoc path. The confirmation route uses the ordinary demo message API.
 The web message view formats the server warning list without recomputing signals.
 `util/phishing.ts` owns warning wording and display-only RFC 3492 decoding;
 `MessageDetail` renders warnings for the main message and expanded thread entries.
+Link-warning values use flex items with CSS ellipses and full-value title tooltips.
+The main body pane contains its own scrolling overflow, keeping warnings and body
+content above the thread strip. The divider bounds thread height by the combined
+body/thread space, reserving at least 60px for the body when that space permits.
+Body iframes ignore pointer events during a divider drag so they cannot capture it.
 Sender names and addresses are separate elements. Risky attachment controls have
 no direct download href and invoke the shared confirmation dialog before creating
 a download link. Compose reads `reply_to_mismatch` from the source detail response

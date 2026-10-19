@@ -68,7 +68,21 @@ function Sender({ raw }: { raw: string }) {
 function WarningBanner({ warnings }: { warnings: MessageWarning[] }) {
   if (!warnings.length) return null;
   return <div class="phishing-warnings" role="note" aria-label="Message warnings">
-    <ul>{warnings.map((warning, i) => <li key={i} class={warning.kind === 'auth_fail' || warning.kind === 'lookalike_domain' ? 'phishing-warning-strong' : ''}>{warningText(warning)}</li>)}</ul>
+    <ul>{warnings.map((warning, i) => <li key={i} class={warning.kind === 'auth_fail' || warning.kind === 'lookalike_domain' ? 'phishing-warning-strong' : ''}>
+      {warning.kind === 'deceptive_link' ? (
+        <span class="phishing-link-warning">
+          <span>Check this link:</span>
+          <bdi class="phishing-warning-url" title={warning.text}>“{warning.text}”</bdi>
+          <span>goes to</span>
+          <bdi class="phishing-warning-url" title={warning.href}>{warning.href}</bdi>
+          {warning.decoded_host && <>
+            <span>(host:</span>
+            <bdi class="phishing-warning-url phishing-warning-host" title={warning.decoded_host}>{warning.decoded_host}</bdi>
+            <span>)</span>
+          </>}
+        </span>
+      ) : warningText(warning)}
+    </li>)}</ul>
   </div>;
 }
 
@@ -227,7 +241,7 @@ export function MessageDetail({ id, folders }: MessageDetailProps) {
   const [rescheduleValue, setRescheduleValue] = useState('');
   const [actionInFlight, setActionInFlight] = useState(false);
   const [icsImportStatus, setIcsImportStatus] = useState<Record<string, 'loading' | 'success' | string>>({});
-  const msgDetailRef = useRef<HTMLDivElement>(null);
+  const bodyRef = useRef<HTMLDivElement>(null);
   const threadStripRef = useRef<HTMLDivElement>(null);
   const [threadHeight, setThreadHeight] = useState<number | null>(null);
   const [scheduleTick, setScheduleTick] = useState(0);
@@ -328,16 +342,19 @@ export function MessageDetail({ id, folders }: MessageDetailProps) {
     e.preventDefault();
     const startY = e.clientY;
     const startHeight = threadStripRef.current?.offsetHeight ?? 200;
-    const containerHeight = msgDetailRef.current?.offsetHeight ?? 600;
+    const availableHeight = startHeight + (bodyRef.current?.offsetHeight ?? 400);
     document.body.style.cursor = 'ns-resize';
     document.body.style.userSelect = 'none';
+    // Iframes otherwise capture pointer events as the divider crosses the body.
+    document.body.classList.add('thread-resizing');
     const onMove = (ev: MouseEvent) => {
       const delta = startY - ev.clientY;
-      setThreadHeight(Math.max(60, Math.min(startHeight + delta, containerHeight * 0.8)));
+      setThreadHeight(Math.max(60, Math.min(startHeight + delta, availableHeight - 60)));
     };
     const onUp = () => {
       document.body.style.cursor = '';
       document.body.style.userSelect = '';
+      document.body.classList.remove('thread-resizing');
       window.removeEventListener('mousemove', onMove);
       window.removeEventListener('mouseup', onUp);
     };
@@ -660,7 +677,7 @@ export function MessageDetail({ id, folders }: MessageDetailProps) {
   const threadEntries = thread && thread.total > 1 ? thread.items : null;
 
   return (
-    <div class="msg-detail" ref={msgDetailRef}>
+    <div class="msg-detail">
       <div class="msg-detail-actions">
         {folderId === DRAFTS_ID ? (
           <>
@@ -1017,7 +1034,7 @@ export function MessageDetail({ id, folders }: MessageDetailProps) {
         </div>
       )}
 
-      <div class="msg-detail-body">
+      <div class="msg-detail-body" ref={bodyRef}>
         <WarningBanner warnings={msg.warnings} />
         {effectiveView === 'html' ? (
           <>

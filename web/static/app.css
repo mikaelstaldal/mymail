@@ -1029,6 +1029,9 @@ html, body {
   flex-direction: column;
   min-height: 0;
   max-width: 900px;
+  /* Warnings and the body must scroll above the thread, even when the divider
+     leaves less room than the warnings or the iframe's minimum height. */
+  overflow: auto;
 }
 
 .body-iframe {
@@ -1052,7 +1055,12 @@ html, body {
   background: var(--surface-bg);
 }
 
+/* Keep a usable text viewport when the warnings need the body's outer scroller. */
+.msg-detail-body > .body-text { min-height: 200px; }
+
 /* ── Thread strip ── */
+.thread-resizing .body-iframe { pointer-events: none; }
+
 .thread-resize-handle {
   height: 5px;
   background: var(--list-border);
@@ -2089,6 +2097,10 @@ html, body {
 }
 .phishing-warnings ul { margin: 0; padding-left: 20px; }
 .phishing-warnings li + li { margin-top: 6px; }
+.phishing-link-warning { display: flex; align-items: baseline; gap: 0.25em; white-space: nowrap; }
+.phishing-link-warning > span { flex-shrink: 0; }
+.phishing-warning-url { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.phishing-warning-host { flex-shrink: 0; max-width: 25%; }
 .phishing-warning-strong { font-weight: 700; border-left: 4px solid currentColor; padding-left: 8px; }
 .sender-display { display: inline-flex; flex-wrap: wrap; gap: 0 8px; max-width: 100%; overflow-wrap: anywhere; }
 .sender-address, .sender-idn { font-weight: 400; }
