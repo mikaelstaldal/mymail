@@ -65,3 +65,22 @@ func TestRescheduleMessageNonExistent(t *testing.T) {
 	_, err := r.RescheduleMessage(ctx, 9999, time.Now().UTC().Add(2*time.Hour))
 	assert.ErrorIs(t, err, ErrNotFound)
 }
+
+func TestMarkSentAfterSelfDelivery(t *testing.T) {
+	db := openTestDB(t)
+	id := insertScheduledMsg(t, db, time.Now())
+	_, err := db.Exec(`INSERT INTO messages(folder_id,message_id,date,created_at,updated_at)
+		VALUES(1,'self@example.com','2026-01-01','2026-01-01','2026-01-01')`)
+	require.NoError(t, err)
+	r := NewDraftRepository(db)
+	claimed, err := r.ConditionalUpdateScheduled(t.Context(), id, map[string]any{"send_at": nil})
+	require.NoError(t, err)
+	require.True(t, claimed)
+	require.NoError(t, r.MarkSent(t.Context(), id, "self@example.com"))
+	var folder, outgoing, count int
+	require.NoError(t, db.QueryRow(`SELECT folder_id,outgoing FROM messages WHERE id=?`, id).Scan(&folder, &outgoing))
+	assert.Equal(t, 2, folder)
+	assert.Equal(t, 1, outgoing)
+	require.NoError(t, db.QueryRow(`SELECT COUNT(*) FROM messages WHERE message_id='self@example.com'`).Scan(&count))
+	assert.Equal(t, 2, count)
+}

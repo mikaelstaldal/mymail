@@ -165,6 +165,7 @@ Behaviour:
   Matching is a case-sensitive byte comparison of the full Message-ID string. Messages without a `Message-ID` are always
   imported (null Message-IDs are never treated as duplicates of each other). Skipped duplicates are included in the
   per-folder count as `skipped`.
+- Messages imported into Sent are marked as outgoing, so a later self-delivery can create a received copy.
 - Filters are **not** applied during import — messages go directly to the specified target folder.
 - A running count is printed to stdout as each folder completes: `inbox: 1042 imported, 3 skipped`.
 - On completion, a summary line is printed: `Total: 2381 imported, 17 skipped`.
@@ -370,7 +371,11 @@ When invoked as `mymail -lda`:
     - Falls back to current time if no `Date` header (import mode uses format-specific metadata instead; see Batch
       Import); generates a `Message-ID` if absent (LDA mode generates `<uuid@domain>` where `domain` is taken from the
       first address in the `To` header, falling back to `localhost` if absent or unparseable).
-4. Skips duplicate messages (same `Message-ID` already in database).
+4. Skips duplicate received messages (same `Message-ID` already stored as a received/imported copy).
+   A sent copy does not suppress receipt: self-send stores both a Sent and an Inbox copy with the same ID.
+   Sent/received provenance survives folder moves; repeated deliveries are still skipped.
+   Existing Sent rows and messages with raw source associated with a sending identity outside Drafts/Scheduled are
+   classified as outgoing during upgrade. Imported mail retains its existing database-wide duplicate policy.
 5. Applies spam detection and user-defined filters to determine the destination folder and read state.
 6. Stores the message and attachments.
 7. Upserts the sender into the contacts table.

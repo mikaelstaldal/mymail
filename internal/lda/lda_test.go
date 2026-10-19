@@ -705,3 +705,31 @@ func TestJunkDeliveryDoesNotUpdateExistingContact(t *testing.T) {
 		})
 	}
 }
+
+func TestRunCore_SelfDelivery(t *testing.T) {
+	for _, receiveFirst := range []bool{false, true} {
+		t.Run(fmt.Sprintf("receiveFirst=%t", receiveFirst), func(t *testing.T) {
+			db := openLDATestDB(t)
+			if receiveFirst {
+				require.Equal(t, 0, runCore(db, []byte(simpleMsg)))
+			}
+			msg := model.DBMessage{
+				FolderID: 2, MessageID: sql.NullString{String: "hello001@example.com", Valid: true},
+				FromAddr: "alice@example.com", ToAddr: "alice@example.com", Subject: "Hello",
+			}
+			sentID, err := repository.NewMessageRepository(db).InsertMessage(t.Context(), msg)
+			require.NoError(t, err)
+			// Moving the sent copy must not change its duplicate-detection role.
+			_, err = db.Exec(`UPDATE messages SET folder_id = 4 WHERE id = ?`, sentID)
+			require.NoError(t, err)
+			require.Equal(t, 0, runCore(db, []byte(simpleMsg)))
+			// Moving the received copy to Sent must not permit another delivery.
+			_, err = db.Exec(`UPDATE messages SET folder_id = 2 WHERE outgoing = 0`)
+			require.NoError(t, err)
+			require.Equal(t, 0, runCore(db, []byte(simpleMsg)))
+			var count int
+			require.NoError(t, db.QueryRow(`SELECT COUNT(*) FROM messages WHERE message_id = 'hello001@example.com'`).Scan(&count))
+			assert.Equal(t, 2, count)
+		})
+	}
+}

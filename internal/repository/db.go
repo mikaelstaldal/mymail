@@ -30,6 +30,7 @@ var migrations = [][]string{
 	// and public-suffix data, so an expression index could become stale.
 	{`ALTER TABLE contacts ADD COLUMN explicit INTEGER NOT NULL DEFAULT 0`,
 		`CREATE INDEX idx_contacts_explicit ON contacts(address) WHERE explicit = 1`},
+	schemaV12(),
 }
 
 // OpenDB opens the SQLite database at path, enables foreign keys, sets the

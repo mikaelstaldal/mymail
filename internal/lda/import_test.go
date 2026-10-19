@@ -892,3 +892,21 @@ func TestJunkImportDoesNotCollectOrUpdateContacts(t *testing.T) {
 		})
 	}
 }
+
+func TestImportedSentAllowsSelfDelivery(t *testing.T) {
+	db := openImportTestDB(t)
+	pm, err := ParseMessage([]byte(simpleMsg))
+	require.NoError(t, err)
+	inserted, err := commitBatch(t.Context(), db, []batchEntry{{
+		pm: pm, raw: []byte(simpleMsg), date: "2026-01-01T00:00:00Z",
+	}}, 2, repository.NewContactRepository(db))
+	require.NoError(t, err)
+	require.Equal(t, 1, inserted)
+	require.Equal(t, 0, runCore(db, []byte(simpleMsg)))
+	require.Equal(t, 0, runCore(db, []byte(simpleMsg)))
+	var sent, received int
+	require.NoError(t, db.QueryRow(`SELECT COUNT(*) FROM messages WHERE outgoing=1`).Scan(&sent))
+	require.NoError(t, db.QueryRow(`SELECT COUNT(*) FROM messages WHERE outgoing=0`).Scan(&received))
+	assert.Equal(t, 1, sent)
+	assert.Equal(t, 1, received)
+}

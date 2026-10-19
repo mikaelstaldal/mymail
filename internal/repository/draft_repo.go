@@ -425,7 +425,7 @@ func (r *DraftRepository) RescheduleMessage(ctx context.Context, id int64, sendA
 // Call this only after ConditionalUpdateScheduled has cleared send_at (claim step).
 func (r *DraftRepository) MarkSent(ctx context.Context, id int64, msgID string) error {
 	_, err := r.db.ExecContext(ctx,
-		`UPDATE messages SET folder_id = 2, read = 1, message_id = ? WHERE id = ?`,
+		`UPDATE messages SET folder_id = 2, read = 1, outgoing = 1, message_id = ? WHERE id = ?`,
 		msgID, id,
 	)
 	return err

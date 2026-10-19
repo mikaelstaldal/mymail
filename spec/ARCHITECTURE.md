@@ -50,6 +50,15 @@ workflow step runs after the build and before publication, and **has done since
 the trigger is the push itself. See `AGENTS.md` § E2E Tests.
 
 
+## Message storage
+
+Schema version 12 stores immutable sent/received provenance in `messages.outgoing`.
+The unique key is `(message_id, outgoing)`, allowing a self-sent message to have both copies.
+LDA duplicate checks only consider received copies, independent of their current folder.
+Send paths set outgoing provenance on successful immediate and scheduled sends.
+The migration rebuilds messages and its dependent tables, preserving IDs, attachments, references,
+FTS contents and autoincrement sequence high-water marks. Import duplicate checks remain database-wide.
+
 ## Web UI
 
 ### Technology Stack

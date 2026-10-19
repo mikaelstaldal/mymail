@@ -637,12 +637,12 @@ test('snooze remembers the folder to come back to and refuses a near deadline', 
   assert.equal(state.messages[0].read, false);
 });
 
-test('an expired snooze is released the next time a request comes in', () => {
+test('an expired snooze is released the next time a request comes in', async () => {
   const state = newState([message({
     id: 1, folderId: 6, read: true,
     snoozedUntil: '2026-01-01T00:00:00Z', snoozeFolder: 100,
   })]);
-  const changed = runScheduler(state, Date.parse('2026-01-02T00:00:00Z'));
+  const changed = await runScheduler(state, Date.parse('2026-01-02T00:00:00Z'));
   assert.ok(changed);
   assert.equal(state.messages[0].folderId, 100);
   assert.equal(state.messages[0].read, false, 'and it is unread again');
@@ -864,10 +864,10 @@ test('the queued reply arrives in the Inbox once its delay has passed', async ()
   });
 
   const before = state.messages.length;
-  assert.equal(runScheduler(state, Date.now()), false, 'nothing is due yet');
+  assert.equal(await runScheduler(state, Date.now()), false, 'nothing is due yet');
   assert.equal(state.messages.length, before);
 
-  assert.equal(runScheduler(state, Date.now() + AUTO_REPLY_DELAY_MS), true);
+  assert.equal(await runScheduler(state, Date.now() + AUTO_REPLY_DELAY_MS), true);
   const reply = state.messages.find((m) => m.id !== res.body.id && m.folderId === 1);
   assert.ok(reply !== undefined, 'a reply landed in the Inbox');
   assert.equal(reply.subject, 'Re: Q2 Budget Review');
@@ -882,7 +882,7 @@ test('the reply runs through the filter chain like any inbound message', async (
   state.folders.push({ id: 100, name: 'Work', slug: 'work', position: 7, createdAt: '2026-01-01T00:00:00Z' });
 
   await call(state, 'POST', '/messages/send', { to_addr: 'alice@example.com', subject: 'Hi' });
-  runScheduler(state, Date.now() + AUTO_REPLY_DELAY_MS);
+  await runScheduler(state, Date.now() + AUTO_REPLY_DELAY_MS);
   const reply = state.messages.find((m) => m.folderId === 100);
   assert.ok(reply !== undefined, 'the filter routed it out of the Inbox');
 });
@@ -912,7 +912,7 @@ test('a scheduled message goes out when its time comes', async () => {
   await call(state, 'POST', '/messages/send', {
     to_addr: 'alice@example.com', subject: 'Later', send_at: sendAt,
   });
-  assert.equal(runScheduler(state, Date.parse(sendAt) + 1000), true);
+  assert.equal(await runScheduler(state, Date.parse(sendAt) + 1000), true);
   assert.equal(state.messages[0].folderId, 2);
   assert.equal(state.messages[0].sendAt, null);
   assert.equal(state.pendingReplies.length, 1, 'and now its reply is queued');
@@ -996,7 +996,7 @@ test('a scheduled send keeps the date it was composed with', async () => {
   assert.equal(sentByUser.messages[0].date, '2026-01-01T00:00:00Z');
 
   const sentByScheduler = scheduled();
-  assert.equal(runScheduler(sentByScheduler, Date.parse(future) + 1000), true);
+  assert.equal(await runScheduler(sentByScheduler, Date.parse(future) + 1000), true);
   assert.equal(sentByScheduler.messages[0].folderId, 2);
   assert.equal(sentByScheduler.messages[0].date, '2026-01-01T00:00:00Z');
 });
@@ -1355,4 +1355,62 @@ test('demo replies delivered to Junk do not collect or update sender contacts', 
       assert.equal(state.contacts[0].explicit, existing);
     }
   }
+});
+
+test('self-send keeps Sent and received copies with the same Message-ID', async () => {
+  const state = newState();
+  const result = await call(state, 'POST', '/messages/send', {
+    to_addr: 'demo@example.com', subject: 'To myself', body_text: 'Remember this',
+  });
+  assert.equal(result.status, 201);
+  const sent = state.messages.find(m => m.id === result.body.id);
+  const received = state.messages.find(m => m.folderId === 1);
+  assert.ok(received);
+  assert.notEqual(received.id, sent.id);
+  assert.equal(received.messageId, sent.messageId);
+  assert.equal(received.bodyText, sent.bodyText);
+  assert.equal(received.read, false);
+});
+
+test('Bcc self-delivery hides Bcc and collects the sender contact', async () => {
+  const state = newState();
+  state.identities.push({ id: 2, name: 'Sender', address: 'sender@example.com',
+    isDefault: false, position: 1, signature: '' });
+  await call(state, 'POST', '/messages/send', {
+    identity_id: 2, to_addr: 'other@example.com', bcc_addr: 'demo@example.com',
+    subject: 'Private self-copy', body_text: 'Hello',
+  });
+  const received = state.messages.find(m => m.folderId === 1);
+  assert.ok(received);
+  assert.equal(received.bccAddr, '');
+  assert.doesNotMatch(received.raw, /^Bcc:/m);
+  assert.ok(state.contacts.some(c => c.address === 'sender@example.com'));
+  assert.equal(received.createdAt, received.updatedAt);
+});
+
+test('scheduled self-delivery copies attachments and uses the delivery timestamp', async () => {
+  const future = new Date(Date.now() + 3_600_000).toISOString();
+  const state = newState([message({
+    id: 1, folderId: 5, identityId: 1, fromAddr: 'demo@example.com',
+    toAddr: 'demo@example.com', sendAt: future, raw: null, hasAttachments: true,
+  })]);
+  state.attachments.push({ id: 1, messageId: 1, filename: 'note.txt', contentType: 'text/plain', size: 2 });
+  state.nextAttachmentId = 2;
+  const data = new TextEncoder().encode('hi').buffer;
+  globalThis.__demoBlobs.set(1, data);
+  const deliveredAt = Date.parse(future) + 1000;
+  await runScheduler(state, deliveredAt);
+  const sent = state.messages.find(m => m.folderId === 2);
+  const received = state.messages.find(m => m.folderId === 1);
+  assert.ok(received);
+  assert.equal(received.messageId, sent.messageId);
+  assert.equal(Date.parse(received.createdAt), Math.floor(deliveredAt / 1000) * 1000);
+  assert.equal(received.date, received.createdAt);
+  const attachment = state.attachments.find(a => a.messageId === received.id);
+  assert.ok(attachment);
+  assert.notEqual(attachment.id, 1);
+  assert.equal(attachment.filename, 'note.txt');
+  assert.deepEqual(globalThis.__demoBlobs.get(attachment.id), data);
+  await call(state, 'DELETE', '/messages/1');
+  assert.deepEqual(globalThis.__demoBlobs.get(attachment.id), data, 'received attachment survives deleting Sent');
 });

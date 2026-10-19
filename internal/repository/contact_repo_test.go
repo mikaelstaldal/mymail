@@ -2,9 +2,11 @@ package repository
 
 import (
 	"context"
-	oas "github.com/mikaelstaldal/mymail/internal/api"
+	"path/filepath"
 	"testing"
 
+	"github.com/mikaelstaldal/go-server-common/sqlite"
+	oas "github.com/mikaelstaldal/mymail/internal/api"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -174,8 +176,10 @@ func TestExplicitContactLifecycle(t *testing.T) {
 }
 
 func TestContactMigrationDoesNotBackfillTrust(t *testing.T) {
-	db := openTestDB(t)
-	_, err := db.Exec(`DROP INDEX idx_contacts_explicit; ALTER TABLE contacts DROP COLUMN explicit;
+	db, err := sqlite.Open(filepath.Join(t.TempDir(), "old.sqlite"), 0, migrations[:10])
+	require.NoError(t, err)
+	t.Cleanup(func() { db.Close() })
+	_, err = db.Exec(`
  INSERT INTO contacts(address,name,created_at,updated_at) VALUES('old@example.com','Old','2026-01-01T00:00:00Z','2026-01-01T00:00:00Z');
  PRAGMA user_version = 10`)
 	require.NoError(t, err)

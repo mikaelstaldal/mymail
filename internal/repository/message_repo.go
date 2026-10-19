@@ -513,21 +513,21 @@ func (r *MessageRepository) InsertMessage(ctx context.Context, msg model.DBMessa
 			date, body_text, body_html, raw, read, flagged,
 			has_attachments, has_external_images,
 			send_at, snoozed_until, snooze_folder, send_error, send_failure_count,
-			created_at, updated_at, sender_authentication, auth_generation
+			created_at, updated_at, sender_authentication, auth_generation, outgoing
 		) VALUES (
 			?, ?, ?, ?, ?,
 			?, ?, ?, ?, ?, ?,
 			?, ?, ?, ?, ?, ?,
 			?, ?,
 			?, ?, ?, ?, ?,
-			?, ?, ?, (SELECT auth_generation FROM spam_filter_settings WHERE id = 1)
+			?, ?, ?, (SELECT auth_generation FROM spam_filter_settings WHERE id = 1), ?
 		)`,
 		msg.FolderID, identityIDVal, messageIDVal, inReplyToVal, refsVal,
 		msg.FromAddr, msg.ToAddr, msg.CcAddr, msg.BccAddr, msg.ReplyToAddr, msg.Subject,
 		dateStr, msg.BodyText, msg.BodyHTML, msg.Raw, readInt, flaggedInt,
 		hasAttInt, hasExtImgInt,
 		sendAtVal, snoozedUntilVal, snoozeFolderVal, sendErrorVal, msg.SendFailureCount,
-		createdAt, updatedAt, senderauth.Encode(senderauth.Decode(msg.SenderAuthentication)),
+		createdAt, updatedAt, senderauth.Encode(senderauth.Decode(msg.SenderAuthentication)), msg.FolderID == 2,
 	)
 	if err != nil {
 		return 0, err

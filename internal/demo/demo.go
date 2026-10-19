@@ -80,13 +80,13 @@ func Run(ctx context.Context, db *sql.DB, out io.Writer) error {
 				from_addr, to_addr, cc_addr, bcc_addr, reply_to_addr, subject,
 				date, body_text, body_html, raw, read, flagged,
 				has_attachments, has_external_images,
-				send_failure_count, created_at, updated_at
-			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0, 0, ?, ?)`,
+				send_failure_count, created_at, updated_at, outgoing
+			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0, 0, ?, ?, ?)`,
 			m.folderID, m.msgID, inReplyToVal, refsVal,
 			m.from, m.to, m.cc, "", m.replyTo, m.subject,
 			m.date.Format(time.RFC3339), m.bodyText, m.bodyHTML, rawVal,
 			boolInt(m.read), boolInt(m.flagged),
-			nowStr, nowStr,
+			nowStr, nowStr, boolInt(m.folderID == 2),
 		)
 		if err != nil {
 			return fmt.Errorf("insert %q: %w", m.subject, err)

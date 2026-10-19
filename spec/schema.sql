@@ -1,6 +1,6 @@
 -- Application-owned DDL from a freshly migrated database; see AGENTS.md.
 -- This omits seed rows and is not a replacement for mymail -init.
-PRAGMA user_version = 11;
+PRAGMA user_version = 12;
 
 CREATE INDEX idx_attachments_message_id ON attachments(message_id);
 
@@ -45,9 +45,9 @@ CREATE TABLE "api_tokens" (
 		expires_at TEXT NOT NULL
 	);
 
-CREATE TABLE attachments (
+CREATE TABLE "attachments" (
 		id           INTEGER PRIMARY KEY AUTOINCREMENT,
-		message_id   INTEGER NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
+		message_id   INTEGER NOT NULL REFERENCES "messages"(id) ON DELETE CASCADE,
 		filename     TEXT    NOT NULL,
 		content_type TEXT    NOT NULL,
 		size         INTEGER NOT NULL,
@@ -108,17 +108,17 @@ CREATE TABLE identities (
 		signature  TEXT    NOT NULL DEFAULT ''
 	);
 
-CREATE TABLE message_references (
-		message_id INTEGER NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
+CREATE TABLE "message_references" (
+		message_id INTEGER NOT NULL REFERENCES "messages"(id) ON DELETE CASCADE,
 		ref_msg_id TEXT    NOT NULL,
 		UNIQUE (message_id, ref_msg_id)
 	);
 
-CREATE TABLE messages (
+CREATE TABLE "messages" (
 		id                  INTEGER PRIMARY KEY AUTOINCREMENT,
 		folder_id           INTEGER NOT NULL REFERENCES folders(id),
 		identity_id         INTEGER REFERENCES identities(id) ON DELETE SET NULL,
-		message_id          TEXT    UNIQUE,
+		message_id          TEXT,
 		in_reply_to         TEXT,
 		"references"        TEXT,
 		from_addr           TEXT    NOT NULL DEFAULT '',
@@ -141,8 +141,12 @@ CREATE TABLE messages (
 		send_error          TEXT,
 		send_failure_count  INTEGER NOT NULL DEFAULT 0,
 		created_at          TEXT    NOT NULL,
-		updated_at          TEXT    NOT NULL
-	, sender_authentication TEXT NOT NULL DEFAULT '{"dmarc":"unknown","dkim_aligned":false,"spf":"unknown"}', auth_generation INTEGER NOT NULL DEFAULT 0);
+		updated_at          TEXT    NOT NULL,
+		sender_authentication TEXT NOT NULL DEFAULT '{"dmarc":"unknown","dkim_aligned":false,"spf":"unknown"}',
+		auth_generation INTEGER NOT NULL DEFAULT 0,
+		outgoing INTEGER NOT NULL DEFAULT 0 CHECK (outgoing IN (0, 1)),
+		UNIQUE (message_id, outgoing)
+	);
 
 CREATE VIRTUAL TABLE messages_fts USING fts5(
 		from_addr,

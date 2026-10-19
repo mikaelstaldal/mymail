@@ -71,7 +71,7 @@ func TestOpenDBAndInitSchema(t *testing.T) {
 	// Schema version must match the latest migration.
 	var v int
 	db.QueryRow("PRAGMA user_version").Scan(&v)
-	assert.Equal(t, 11, v, "user_version")
+	assert.Equal(t, 12, v, "user_version")
 
 	// All tables must exist.
 	tables := []string{
@@ -121,7 +121,7 @@ func TestOpenDBAndInitSchema(t *testing.T) {
 	err = InitSchema(db)
 	assert.NoError(t, err, "second InitSchema")
 	db.QueryRow("PRAGMA user_version").Scan(&v)
-	assert.Equal(t, 11, v, "user_version after second run")
+	assert.Equal(t, 12, v, "user_version after second run")
 
 	// Basic FK cascade: insert a message row then delete it; attachment should cascade.
 	_, err = db.Exec(`INSERT INTO folders(id,name,slug,position) VALUES(1,'Inbox','inbox',0)`)
@@ -255,4 +255,77 @@ func TestAuthenticationGenerationMigrationPreservesEvidenceWithoutRewritingMail(
 	assert.Zero(t, generation)
 	require.NoError(t, db.QueryRow(`SELECT auth_generation FROM spam_filter_settings WHERE id=1`).Scan(&generation))
 	assert.Zero(t, generation)
+}
+
+func TestSelfSendMigrationPreservesMail(t *testing.T) {
+	db, err := sqlite.Open(filepath.Join(t.TempDir(), "upgrade.sqlite"), 0, migrations[:11])
+	require.NoError(t, err)
+	t.Cleanup(func() { db.Close() })
+	require.NoError(t, SeedBuiltinFolders(db))
+	_, err = db.Exec(`INSERT INTO messages(id,folder_id,message_id,subject,date,created_at,updated_at,raw)
+		VALUES(10,2,'self@example.com','migrationneedle','2026-01-01','2026-01-01','2026-01-01',x'0102');
+		INSERT INTO attachments(id,message_id,filename,content_type,size,data) VALUES(12,10,'a','text/plain',2,x'0304');
+		INSERT INTO message_references VALUES(10,'parent@example.com');
+		UPDATE sqlite_sequence SET seq=100 WHERE name IN ('messages','attachments')`)
+	require.NoError(t, err)
+	require.NoError(t, InitSchema(db))
+	var outgoing, attachments, refs, hits, seq int
+	require.NoError(t, db.QueryRow(`SELECT outgoing FROM messages WHERE id=10 AND raw=x'0102' AND has_attachments=1`).Scan(&outgoing))
+	assert.Equal(t, 1, outgoing)
+	require.NoError(t, db.QueryRow(`SELECT COUNT(*) FROM attachments WHERE id=12 AND message_id=10 AND data=x'0304'`).Scan(&attachments))
+	assert.Equal(t, 1, attachments)
+	require.NoError(t, db.QueryRow(`SELECT COUNT(*) FROM message_references WHERE message_id=10`).Scan(&refs))
+	assert.Equal(t, 1, refs)
+	require.NoError(t, db.QueryRow(`SELECT COUNT(*) FROM messages_fts WHERE messages_fts MATCH 'migrationneedle'`).Scan(&hits))
+	assert.Equal(t, 1, hits)
+	for _, name := range []string{"messages", "attachments"} {
+		require.NoError(t, db.QueryRow(`SELECT seq FROM sqlite_sequence WHERE name=?`, name).Scan(&seq))
+		assert.Equal(t, 100, seq)
+	}
+	rows, err := db.Query(`PRAGMA foreign_key_check`)
+	require.NoError(t, err)
+	assert.False(t, rows.Next())
+	require.NoError(t, rows.Close())
+	_, err = db.Exec(`INSERT INTO messages(folder_id,message_id,date,created_at,updated_at) VALUES(1,'self@example.com','2026-01-01','2026-01-01','2026-01-01')`)
+	require.NoError(t, err, "receipt can coexist with migrated Sent copy")
+	_, err = db.Exec(`DELETE FROM messages WHERE id=10`)
+	require.NoError(t, err)
+	require.NoError(t, db.QueryRow(`SELECT COUNT(*) FROM attachments`).Scan(&attachments))
+	assert.Zero(t, attachments, "foreign-key cascade is preserved")
+}
+
+func TestSelfSendMigrationClassifiesProvenance(t *testing.T) {
+	db, err := sqlite.Open(filepath.Join(t.TempDir(), "old.sqlite"), 0, migrations[:11])
+	require.NoError(t, err)
+	t.Cleanup(func() { db.Close() })
+	require.NoError(t, SeedBuiltinFolders(db))
+	_, err = db.Exec(`INSERT INTO identities(id,name,address) VALUES(1,'Me','me@example.com');
+		INSERT INTO folders(id,name,slug) VALUES(100,'Archive','archive')`)
+	require.NoError(t, err)
+	cases := []struct {
+		name     string
+		folder   int
+		identity any
+		raw      any
+		want     int
+	}{
+		{"sent", 2, nil, []byte("sent"), 1},
+		{"sent moved to trash", 4, 1, []byte("sent"), 1},
+		{"sent moved to archive", 100, 1, []byte("sent"), 1},
+		{"received", 1, nil, []byte("received"), 0},
+		{"draft", 3, 1, nil, 0},
+		{"scheduled", 5, 1, nil, 0},
+		{"discarded draft", 4, 1, nil, 0},
+	}
+	for _, tc := range cases {
+		_, err := db.Exec(`INSERT INTO messages(folder_id,identity_id,subject,raw,date,created_at,updated_at)
+			VALUES(?,?,?,?, '2026-01-01','2026-01-01','2026-01-01')`, tc.folder, tc.identity, tc.name, tc.raw)
+		require.NoError(t, err)
+	}
+	require.NoError(t, InitSchema(db))
+	for _, tc := range cases {
+		var outgoing int
+		require.NoError(t, db.QueryRow(`SELECT outgoing FROM messages WHERE subject=?`, tc.name).Scan(&outgoing))
+		assert.Equal(t, tc.want, outgoing, tc.name)
+	}
 }

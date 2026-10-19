@@ -219,13 +219,13 @@ func commitBatch(ctx context.Context, db *sql.DB, batch []batchEntry, folderID i
 				from_addr, to_addr, cc_addr, bcc_addr, reply_to_addr, subject,
 				date, body_text, body_html, raw, read, flagged,
 				has_attachments, has_external_images,
-				send_failure_count, created_at, updated_at
-			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)`,
+				send_failure_count, created_at, updated_at, outgoing
+			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?)`,
 			folderID, pm.MessageID, inReplyTo, refs,
 			pm.FromAddr, pm.ToAddr, pm.CcAddr, pm.BccAddr, pm.ReplyToAddr, pm.Subject,
 			e.date, pm.BodyText, pm.BodyHTML, e.raw, e.read, e.flagged,
 			boolInt(len(pm.Attachments) > 0), boolInt(pm.HasExternalImages),
-			now, now,
+			now, now, boolInt(folderID == 2),
 		)
 		if err != nil {
 			return 0, err

@@ -52,7 +52,7 @@ func runCore(db *sql.DB, rawBytes []byte) int {
 		var exists bool
 		if err := withRetry(func() error {
 			return db.QueryRowContext(ctx,
-				`SELECT EXISTS(SELECT 1 FROM messages WHERE message_id = ?)`,
+				`SELECT EXISTS(SELECT 1 FROM messages WHERE message_id = ? AND outgoing = 0)`,
 				*pm.MessageID,
 			).Scan(&exists)
 		}); err != nil {

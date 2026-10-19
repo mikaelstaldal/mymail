@@ -314,9 +314,9 @@ function upsertRecipients(state: DemoState, addrList: string): void {
  *
  * Returns whether anything changed, so the caller knows to persist.
  */
-function runScheduler(state: DemoState, now: number): boolean {
+async function runScheduler(state: DemoState, now: number): Promise<boolean> {
   let changed = deliverDueReplies(state, now);
-  if (processDeferredSends(state, now)) changed = true;
+  if (await processDeferredSends(state, now)) changed = true;
   if (processSnoozeExpiry(state, now)) changed = true;
   return changed;
 }
@@ -406,12 +406,12 @@ function deliverDueReplies(state: DemoState, now: number): boolean {
  * sendmail to fail, so send_failure_count and send_error stay at their initial
  * values and a demo message never falls back to Drafts.
  */
-function processDeferredSends(state: DemoState, now: number): boolean {
+async function processDeferredSends(state: DemoState, now: number): Promise<boolean> {
   const due = state.messages.filter(
     (m) => m.folderId === FOLDER_SCHEDULED && m.sendAt !== null && Date.parse(m.sendAt) <= now,
   );
   if (due.length === 0) return false;
-  for (const msg of due) deliverSentMessage(state, msg, new Date(now));
+  for (const msg of due) await deliverSentMessage(state, msg, new Date(now));
   return true;
 }
 
@@ -440,7 +440,7 @@ function processSnoozeExpiry(state: DemoState, now: number): boolean {
  * Scheduler.sendScheduledMessage — with the sendmail pipe left out, since a
  * demo has nothing to pipe to.
  */
-function deliverSentMessage(state: DemoState, msg: DemoMessage, date: Date): void {
+async function deliverSentMessage(state: DemoState, msg: DemoMessage, date: Date): Promise<void> {
   const identity = msg.identityId !== null
     ? state.identities.find((i) => i.id === msg.identityId)
     : undefined;
@@ -457,6 +457,29 @@ function deliverSentMessage(state: DemoState, msg: DemoMessage, date: Date): voi
   upsertRecipients(state, msg.toAddr);
   upsertRecipients(state, msg.ccAddr);
   upsertRecipients(state, msg.bccAddr);
+  // Mirror LDA receipt when any envelope recipient is a configured identity.
+  const recipients = [msg.toAddr, msg.ccAddr, msg.bccAddr].filter((s) => s !== '').flatMap(parseAddressList);
+  const selfSend = recipients.some((r) => state.identities.some(
+    (i) => i.address.toLowerCase() === r.address.toLowerCase(),
+  ));
+  if (selfSend) {
+    const outcome = applyFilters(msg, state.filters, new Set(state.folders.map((f) => f.id)));
+    if (outcome.folderId !== null) {
+      const received = { ...msg, id: state.nextMessageId++, identityId: null,
+        folderId: outcome.folderId, read: outcome.markRead, flagged: false, bccAddr: '',
+        date: toTimestamp(date), createdAt: toTimestamp(date), updatedAt: toTimestamp(date) };
+      received.raw = buildRawMessageFor(received, identity?.name ?? '', attachments, date);
+      state.messages.push(received);
+      const sender = firstAddress(received.fromAddr);
+      if (outcome.folderId !== FOLDER_JUNK && sender !== null) upsertContact(state, sender.address, sender.name);
+      for (const att of attachments) {
+        const id = state.nextAttachmentId++;
+        const data = await getAttachmentData(att.id);
+        if (data !== null) await putAttachmentData(id, data);
+        state.attachments.push({ ...att, id, messageId: received.id });
+      }
+    }
+  }
   queueAutoReply(state, msg, date);
 }
 
@@ -1386,7 +1409,7 @@ async function sendMessage(
     return jsonResponse(202, { id: msg.id, send_at: msg.sendAt });
   }
 
-  deliverSentMessage(state, msg, now);
+  await deliverSentMessage(state, msg, now);
   await saveState(state);
   return jsonResponse(201, { id: msg.id });
 }
@@ -1605,7 +1628,7 @@ async function sendDraft(state: DemoState, id: number): Promise<Response> {
   draft.sendAt = null;
   draft.date = toTimestamp(now);
   draft.createdAt = toTimestamp(now);
-  deliverSentMessage(state, draft, now);
+  await deliverSentMessage(state, draft, now);
   await saveState(state);
   return jsonResponse(201, { id: draft.id });
 }
@@ -1636,7 +1659,7 @@ async function sendScheduledNow(state: DemoState, id: number): Promise<Response>
     throw notFoundError('scheduled message not found or no longer in Scheduled folder');
   }
   msg.sendAt = null;
-  deliverSentMessage(state, msg, new Date());
+  await deliverSentMessage(state, msg, new Date());
   await saveState(state);
   return jsonResponse(200, { id: msg.id, folder_id: FOLDER_SENT });
 }
@@ -1987,7 +2010,7 @@ async function handleApiRequest(path: string, request: Request): Promise<Respons
 
     return await withStore(async (state) => {
       if (state.sentTo === undefined) { demoSentTo(state); await saveState(state); }
-      if (runScheduler(state, Date.now())) await saveState(state);
+      if (await runScheduler(state, Date.now())) await saveState(state);
       return route(state, segments, method, url, request);
     });
   } catch (err) {

@@ -176,7 +176,7 @@ func (s *Scheduler) sendScheduledMessage(ctx context.Context, id int64) {
 	}
 
 	if _, err := s.db.ExecContext(ctx,
-		`UPDATE messages SET folder_id = 2, send_at = NULL, read = 1, message_id = ? WHERE id = ? AND folder_id = 5`,
+		`UPDATE messages SET folder_id = 2, send_at = NULL, read = 1, outgoing = 1, message_id = ? WHERE id = ? AND folder_id = 5`,
 		msgIDValue, id,
 	); err != nil {
 		log.Printf("scheduler: move message %d to sent: %v", id, err)
