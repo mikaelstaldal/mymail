@@ -1,5 +1,5 @@
-// Pure presentation logic: warning detail and IDN sender display. Rendering,
-// dialog cancellation and downloads are covered by phishing.spec.ts.
+// Pure presentation logic: plain warning detail and IDN sender display. Structured
+// link warnings, rendering, dialog cancellation and downloads are covered by phishing.spec.ts.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { senderParts, warningText, decodeWarningDomain } from '../static/util/phishing.js';
@@ -24,14 +24,13 @@ test('IDN display preserves the original address and decodes labels', () => {
     assert.equal(decodeWarningDomain(invalid), invalid);
   }
 });
-test('every warning kind explains its details without inventing a positive verdict', () => {
+test('plain warnings explain their details without inventing a positive verdict', () => {
   for (const [warning, detail] of [
     [{ kind: 'auth_fail', failed_checks: ['dmarc', 'dkim_alignment', 'spf'] }, 'DMARC, DKIM alignment, SPF'],
     [{ kind: 'display_name_address', address: 'support@paypal.com' }, 'support@paypal.com'],
     [{ kind: 'lookalike_domain', domain: 'bücher.de', punycode: 'xn--bcher-kva.de', resembles: 'bucher.de' }, 'resembles bucher.de'],
     [{ kind: 'reply_to_mismatch', address: 'thief@evil.example' }, 'thief@evil.example'],
     [{ kind: 'first_time_sender' }, 'never sent'],
-    [{ kind: 'deceptive_link', text: 'paypal.com', href: 'https://evil.example' }, 'https://evil.example'],
     [{ kind: 'risky_attachment', filename: 'bill.pdf.exe', reason: 'double_extension' }, 'double extension'],
     [{ kind: 'risky_attachment', filename: 'run.exe', reason: 'executable_extension' }, 'executable extension'],
     [{ kind: 'risky_attachment', filename: 'file', reason: 'executable_content_type' }, 'executable content type'],

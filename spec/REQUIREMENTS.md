@@ -1624,7 +1624,8 @@ forwards retain their original links. The browser demo follows the same rules.
   with the full link text, URL and decoded host. Long tooltip values wrap and
   scroll, and Escape dismisses the tooltip. Warnings
   and the selected body scroll above the thread strip, and dragging its divider
-  preserves space for the body even when warnings are present.
+  preserves space for the body even when warnings are present. Resizing the window
+  re-limits a saved thread height to preserve that space when it is available.
   Expanded thread bodies show their own warnings. No prominent verified badge is shown.
 - **REQ-PHISH-09:** Main and thread sender headers separate the name and always-visible
   addr-spec. Punycode domains are decoded and marked IDN, retaining the ASCII address too.

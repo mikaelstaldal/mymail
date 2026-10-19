@@ -292,6 +292,24 @@ export function MessageDetail({ id, folders }: MessageDetailProps) {
   const [threadHeight, setThreadHeight] = useState<number | null>(null);
   const [scheduleTick, setScheduleTick] = useState(0);
 
+  useEffect(() => {
+    const body = bodyRef.current;
+    const strip = threadStripRef.current;
+    const container = body?.parentElement;
+    if (!body || !strip || !container) return;
+    // A saved pixel height must fit again when the viewport changes. Measure
+    // the fixed siblings too, since a narrower toolbar can wrap onto more rows.
+    const observer = new ResizeObserver(() => {
+      const occupiedHeight = [...container.children]
+        .filter(child => child !== body && child !== strip)
+        .reduce((sum, child) => sum + child.getBoundingClientRect().height, 0);
+      const maximum = Math.max(60, container.getBoundingClientRect().height - occupiedHeight - 60);
+      setThreadHeight(height => height === null ? null : Math.min(height, maximum));
+    });
+    observer.observe(container);
+    return () => observer.disconnect();
+  }, [msg?.id, thread?.total]);
+
   // Parsing the body is not free, and it depends on nothing else in this view.
   // Skipped entirely with no MyCal configured, which is most deployments — the
   // pref is read here as well as at render, so a message opened before it was

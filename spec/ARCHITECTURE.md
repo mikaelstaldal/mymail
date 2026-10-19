@@ -314,8 +314,9 @@ links in an inert template. It returns that document through the existing body
 fetch/srcdoc path. The confirmation route uses the ordinary demo message API.
 
 The web message view formats the server warning list without recomputing signals.
-`util/phishing.ts` owns warning wording and display-only RFC 3492 decoding;
-`MessageDetail` renders warnings for the main message and expanded thread entries.
+`util/phishing.ts` owns plain warning wording and display-only RFC 3492 decoding;
+`MessageDetail` owns structured link-warning wording and renders warnings for the
+main message and expanded thread entries.
 Link-warning labels and destinations use equal flex shares with CSS ellipses.
 Hover or keyboard focus opens a fixed-position tooltip with full, selectable values
 outside the body/thread scrollers. Tooltip values wrap and scroll; Escape, blur,
@@ -324,6 +325,7 @@ The main body pane contains its own scrolling overflow, keeping warnings and bod
 content above the thread strip. The divider bounds thread height by the combined
 body/thread space, reserving at least 60px for the body when that space permits.
 Resize measurements retain fractional pixels so rounding cannot reduce that minimum.
+A resize observer re-limits a saved thread height when the message pane changes size.
 Body iframes ignore pointer events during a divider drag so they cannot capture it.
 Sender names and addresses are separate elements. Risky attachment controls have
 no direct download href and invoke the shared confirmation dialog before creating

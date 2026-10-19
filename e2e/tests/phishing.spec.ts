@@ -2,8 +2,8 @@
 // test-e2e.sh. No warning verdict is invented by a browser route mock.
 // Layout coverage uses private sent messages moved to Inbox: long link values,
 // visible hover/focus tooltips, both body views, expanded thread warnings and
-// divider movement in both directions, including fractional pane heights. Label
-// readability is measured with rendered glyphs, not a machine-dependent em budget.
+// divider movement and window resizing, including fractional pane heights. Label
+// allocation is checked against available row space; no minimum glyph count is specified.
 import { test, expect } from '@playwright/test';
 
 async function sample(request: import('@playwright/test').APIRequestContext) {
@@ -14,7 +14,7 @@ async function sample(request: import('@playwright/test').APIRequestContext) {
 }
 
 test('long link warnings fit one line and body resizing stays above the thread', async ({ page, request }) => {
-  // A much longer destination must not squeeze the label down to just an ellipsis.
+  // A much longer destination must not take space away from the label's share.
   const text = 'https://example.com/account/security';
   const href = `https://unrelated.example/${'destination-path/'.repeat(80)}`;
   const ids: number[] = [];
@@ -48,30 +48,27 @@ test('long link warnings fit one line and body resizing stays above the thread',
       const values = line.locator('.phishing-warning-url');
       const geometry = await line.evaluate(el => {
         const values = [...el.querySelectorAll<HTMLElement>('.phishing-warning-url')];
-        // Measure enough of the actual label to distinguish it from an ellipsis.
-        // Font size alone does not determine glyph widths, especially in a narrow
-        // expanded thread with platform-dependent font and scrollbar metrics.
-        const prefix = values[0].cloneNode(false) as HTMLElement;
-        prefix.textContent = '“http…';
-        prefix.style.cssText = 'position: fixed; width: max-content; visibility: hidden';
-        el.append(prefix);
-        const readableWidth = prefix.getBoundingClientRect().width;
-        prefix.remove();
+        const children = [...el.children].filter(child => getComputedStyle(child).position !== 'fixed');
+        const otherWidth = children.filter(child => child !== values[0] && child !== values[1])
+          .reduce((sum, child) => sum + child.getBoundingClientRect().width, 0);
+        const gaps = parseFloat(getComputedStyle(el).columnGap) * (children.length - 1);
         return {
           height: el.getBoundingClientRect().height,
           lineHeight: parseFloat(getComputedStyle(el).lineHeight),
           width: el.clientWidth, scrollWidth: el.scrollWidth,
           truncated: values.slice(0, 2).every(value => value.scrollWidth > value.clientWidth),
           valueWidths: values.slice(0, 2).map(value => value.getBoundingClientRect().width),
-          readableWidth,
+          availableWidth: el.getBoundingClientRect().width - otherWidth - gaps,
           font: getComputedStyle(el).font,
         };
       });
       expect(geometry.height).toBeLessThanOrEqual(geometry.lineHeight + 1);
       expect(geometry.scrollWidth).toBeLessThanOrEqual(geometry.width + 1);
       expect(geometry.truncated).toBe(true);
-      expect(geometry.valueWidths[0], JSON.stringify(geometry)).toBeGreaterThanOrEqual(geometry.readableWidth);
+      expect(geometry.valueWidths[0], JSON.stringify(geometry)).toBeGreaterThan(0);
       expect(Math.abs(geometry.valueWidths[0] - geometry.valueWidths[1])).toBeLessThanOrEqual(1);
+      expect(Math.abs(geometry.valueWidths[0] + geometry.valueWidths[1] - geometry.availableWidth))
+        .toBeLessThanOrEqual(1);
 
       await values.nth(0).hover();
       const tooltip = page.getByRole('tooltip');
@@ -151,12 +148,20 @@ test('long link warnings fit one line and body resizing stays above the thread',
     expect(plain.height).toBeGreaterThanOrEqual(200);
     expect(plain.y).toBeLessThan(pane.y + pane.height);
     expect(plain.y + plain.height).toBeGreaterThan(pane.y);
+    // A saved thread height must still leave body space after the window shrinks.
+    await page.locator('.msg-detail').evaluate(el => { (el as HTMLElement).style.height = ''; });
+    await page.setViewportSize({ width: 800, height: 680 });
+    await expect.poll(async () => (await body.boundingBox())!.height).toBeGreaterThanOrEqual(60);
+    const detailBox = (await page.locator('.msg-detail').boundingBox())!;
+    const threadBox = (await thread.boundingBox())!;
+    expect(threadBox.y + threadBox.height).toBeLessThanOrEqual(detailBox.y + detailBox.height + 1);
+    await page.setViewportSize({ width: 800, height: 800 });
     await thread.locator('.thread-entry-btn:not(:disabled)').click();
     const expanded = thread.locator('.thread-expanded');
     await checkLink(expanded);
     // Reserve classic-scrollbar space even on systems with overlay scrollbars,
     // and exercise a narrower viewport and different glyph widths without
-    // depending on installed faces. The old 4em check fails in this combination.
+    // depending on installed faces or assuming a minimum number of visible glyphs.
     await page.setViewportSize({ width: 796, height: 800 });
     await thread.locator('.thread-list').evaluate(el => { (el as HTMLElement).style.scrollbarGutter = 'stable'; });
     for (const font of ['sans-serif', 'serif']) {

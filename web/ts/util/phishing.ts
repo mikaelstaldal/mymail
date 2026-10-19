@@ -1,15 +1,16 @@
 import type { components } from '../api/types.js';
 export type MessageWarning = components['schemas']['MessageWarning'];
 
-/** Presentation only: warning decisions belong to the server. */
-export function warningText(w: MessageWarning): string {
+/** Plain warning text; deceptive links use structured markup in MessageDetail.
+ * Warning decisions belong to the server. */
+export function warningText(w: MessageWarning): string | null {
   switch (w.kind) {
     case 'auth_fail': return `This sender failed authentication checks: ${(w.failed_checks ?? []).map(c => ({ dmarc: 'DMARC', dkim_alignment: 'DKIM alignment', spf: 'SPF' })[c] ?? c).join(', ')}`;
     case 'display_name_address': return `The sender's name contains a different address or domain: ${w.address}`;
     case 'lookalike_domain': return `The sender's domain uses international characters: ${w.domain} (${w.punycode})${w.resembles ? `; it resembles ${w.resembles}` : ''}`;
     case 'reply_to_mismatch': return `Replies will go to ${w.address}, on a different domain from the sender`;
     case 'first_time_sender': return 'You have never sent mail to this sender';
-    case 'deceptive_link': return `Check this link: “${w.text}” goes to ${w.href}${w.decoded_host ? ` (host: ${w.decoded_host})` : ''}`;
+    case 'deceptive_link': return null;
     case 'risky_attachment': return `Attachment “${w.filename}” ${attachmentReason(w.reason)}`;
   }
 }
