@@ -12,6 +12,7 @@ import (
 	"strconv"
 	"strings"
 	"unicode"
+	"unicode/utf8"
 
 	"github.com/mikaelstaldal/mymail/internal/api"
 	"github.com/mikaelstaldal/mymail/internal/model"
@@ -81,6 +82,7 @@ func Registrable(host string) string {
 	}
 	return d
 }
+
 // HasFormatChar reports whether s contains an invisible formatting character:
 // Unicode category Cf (bidi overrides and isolates, zero-width characters,
 // U+061C) or a line or paragraph separator. None belongs in an addr-spec, and
@@ -93,7 +95,57 @@ func HasFormatChar(s string) bool {
 }
 
 func addressDomain(addr string) string { _, d, _ := strings.Cut(addr, "@"); return Domain(d) }
-func FoldAddress(addr string) string   { return cases.Fold().String(addr) }
+
+// FoldAddress is the one address normalization for identities, contacts and
+// sent-to history: Unicode full case folding, except that a non-ASCII rune
+// which is only a compatibility variant of ASCII (its fold and its NFKC form
+// are both ASCII) is kept. The Kelvin sign K (U+212A), long s ſ (U+017F) and
+// the ﬀ..ﬆ ligatures would otherwise make bob@banK.com the same correspondent
+// as bob@bank.com. ß and ẞ are letters in their own right and still fold to ss.
+func FoldAddress(addr string) string {
+	var b strings.Builder
+	for _, r := range addr {
+		b.WriteString(FoldRune(r))
+	}
+	return b.String()
+}
+
+// FoldRune is FoldAddress for a single rune; the generated browser table is
+// built from it.
+func FoldRune(r rune) string {
+	s := string(r)
+	f := cases.Fold().String(s)
+	if r >= utf8.RuneSelf && isASCII(f) && isASCII(norm.NFKC.String(s)) {
+		return s
+	}
+	return f
+}
+
+func isASCII(s string) bool {
+	for i := 0; i < len(s); i++ {
+		if s[i] >= utf8.RuneSelf {
+			return false
+		}
+	}
+	return true
+}
+
+// mapsToASCII reports whether host, as received, holds a non-ASCII character
+// that IDNA mapping turns into ASCII or removes: a compatibility form such as
+// the Kelvin sign, long s, fullwidth or mathematical letters, or a soft hyphen.
+// Domain() would then return a plain ASCII host indistinguishable from the one
+// it imitates. Ordinary IDN characters map to an xn-- label instead.
+func mapsToASCII(host string) bool {
+	for _, r := range host {
+		if r < utf8.RuneSelf {
+			continue
+		}
+		if m := Domain(string(r)); m != string(r) && isASCII(m) && !punycode(m) {
+			return true
+		}
+	}
+	return false
+}
 
 // Context separates the durable sent-to signal from receipt-created contacts.
 // KnownDomains contains own identity, sent-to and explicitly saved contact domains.
@@ -214,30 +266,43 @@ func ComputeWithLinks(m model.DBMessage, atts []api.AttachmentMeta, c Context, l
 		}
 	}
 	seen := map[string]bool{}
-	lookalike := func(host string) {
-		host = Domain(host)
-		if host == "" || net.ParseIP(host) != nil || seen[host] {
+	// raw is the host as received. Whether it is an IDN is decided from that,
+	// not from Domain(raw): compatibility characters map to plain ASCII.
+	lookalike := func(raw string) {
+		host := Domain(raw)
+		compat := mapsToASCII(raw)
+		key := host
+		if compat {
+			key = raw
+		}
+		if host == "" || net.ParseIP(host) != nil || seen[key] {
 			return
 		}
-		seen[host] = true
+		seen[key] = true
 		resembles := known[Skeleton(host)]
 		if resembles == "" {
 			resembles = known[Skeleton(Registrable(host))]
 		}
-		if exact[host] || exact[Registrable(host)] {
+		if !compat && (exact[host] || exact[Registrable(host)]) {
 			resembles = ""
 		}
-		if !punycode(host) && !mixedScript(host) && resembles == "" {
+		if !compat && !punycode(host) && !mixedScript(host) && resembles == "" {
 			return
 		}
 		w := add(api.MessageWarningKindLookalikeDomain)
-		w.Domain = api.NewOptString(decoded(host))
+		if compat {
+			// decoded(host) would display exactly as the domain imitated.
+			w.Domain = api.NewOptString(raw)
+		} else {
+			w.Domain = api.NewOptString(decoded(host))
+		}
 		w.Punycode = api.NewOptString(host)
 		if resembles != "" {
 			w.Resembles = api.NewOptString(resembles)
 		}
 	}
-	lookalike(addressDomain(from.Address))
+	_, fromDomain, _ := strings.Cut(from.Address, "@")
+	lookalike(fromDomain)
 	if replies, err := mail.ParseAddressList(m.ReplyToAddr); err == nil {
 		for _, reply := range replies {
 			if Registrable(addressDomain(reply.Address)) != Registrable(addressDomain(from.Address)) {

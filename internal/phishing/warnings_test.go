@@ -234,3 +234,42 @@ func TestFormatCharacterInSenderAddressIsFlagged(t *testing.T) {
 	// reason to doubt the address.
 	assert.Empty(t, Compute(model.DBMessage{FolderID: 1, FromAddr: "\u202eLapyaP <service@paypal.com>"}, nil, Context{SentTo: true, ExplicitContact: true}))
 }
+
+// Compatibility characters map to plain ASCII under IDNA, so the IDN decision
+// must be made on the domain as received, and the address fold must not
+// collapse them onto the ASCII address they imitate.
+func TestCompatibilityCharacterSenderDomain(t *testing.T) {
+	known := Context{SentTo: true, KnownDomains: []string{"bank.com", "business.com"}}
+	for _, tc := range []struct{ from, domain, resembles string }{
+		{"bob@ban\u212A.com", "ban\u212A.com", "bank.com"},                                 // Kelvin sign
+		{"ceo@bu\u017Fine\u017F\u017F.com", "bu\u017Fine\u017F\u017F.com", "business.com"}, // long s
+		{"bob@ｂａｎｋ.com", "ｂａｎｋ.com", "bank.com"},                                           // fullwidth
+		{"bob@\U0001D41B\U0001D41A\U0001D427\U0001D424.com", "\U0001D41B\U0001D41A\U0001D427\U0001D424.com", "bank.com"},
+		{"bob@ba\u00ADnk.com", "ba\u00ADnk.com", "bank.com"}, // soft hyphen, removed by mapping
+	} {
+		t.Run(tc.from, func(t *testing.T) {
+			got := Compute(model.DBMessage{FolderID: 1, FromAddr: "Bob <" + tc.from + ">"}, nil, known)
+			var w *api.MessageWarning
+			for i := range got {
+				if got[i].Kind == api.MessageWarningKindLookalikeDomain {
+					w = &got[i]
+				}
+			}
+			require.NotNil(t, w, "a non-ASCII sender domain must produce lookalike_domain")
+			assert.Equal(t, tc.domain, w.Domain.Value)
+			assert.Equal(t, tc.resembles, w.Punycode.Value)
+			assert.Equal(t, tc.resembles, w.Resembles.Value)
+		})
+	}
+	// Ordinary case differences still fold; compatibility characters do not.
+	assert.Equal(t, "bob@bank.com", FoldAddress("BOB@BANK.COM"))
+	assert.NotEqual(t, FoldAddress("bob@bank.com"), FoldAddress("bob@ban\u212A.com"))
+	assert.NotEqual(t, FoldAddress("ceo@business.com"), FoldAddress("ceo@bu\u017Fine\u017F\u017F.com"))
+	assert.NotEqual(t, FoldAddress("bob@office.com"), FoldAddress("bob@o\uFB03ce.com"))
+	assert.Equal(t, "bob@münchen.de", FoldAddress("Bob@MÜNCHEN.de"))
+	assert.Equal(t, "strasse@example.org", FoldAddress("STRAẞE@example.org"))
+	// A known IDN correspondent is not said to resemble itself.
+	got := Compute(model.DBMessage{FolderID: 1, FromAddr: "bob@müller.de"}, nil, Context{SentTo: true, KnownDomains: []string{"müller.de"}})
+	require.Len(t, got, 1)
+	assert.False(t, got[0].Resembles.Set)
+}

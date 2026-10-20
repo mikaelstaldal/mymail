@@ -1183,6 +1183,26 @@ test('demo treats registrable-domain subdomains, ordinary link text and IDNs lik
   assert.equal(warnings[0].resembles, undefined);
 });
 
+// Mirrors TestCompatibilityCharacterSenderDomain: compatibility characters map
+// to plain ASCII under IDNA, and must neither hide the IDN nor fold onto the
+// address they imitate.
+test('demo flags sender domains written with compatibility characters like Go', async () => {
+  for (const [from, domain, resembles] of [
+    ['bob@ban\u212A.com', 'ban\u212A.com', 'bank.com'],
+    ['ceo@bu\u017Fine\u017F\u017F.com', 'bu\u017Fine\u017F\u017F.com', 'business.com'],
+    ['bob@ｂａｎｋ.com', 'ｂａｎｋ.com', 'bank.com'],
+    ['bob@\u{1D41B}\u{1D41A}\u{1D427}\u{1D424}.com', '\u{1D41B}\u{1D41A}\u{1D427}\u{1D424}.com', 'bank.com'],
+  ]) {
+    const state = newState([message({ id: 1, fromAddr: `Bob <${from}>` })]);
+    state.sentTo = ['bob@bank.com', 'ceo@business.com'];
+    const warnings = (await call(state, 'GET', '/messages/1')).body.warnings;
+    assert.deepEqual(warnings.map(w => w.kind), ['lookalike_domain', 'first_time_sender'], from);
+    assert.equal(warnings[0].domain, domain);
+    assert.equal(warnings[0].punycode, resembles);
+    assert.equal(warnings[0].resembles, resembles);
+  }
+});
+
 test('demo exempts outgoing and own authenticated mail and revokes evidence on checker changes', async () => {
   for (const folderId of [2, 3, 5]) {
     const state = newState([message({ id: 1, folderId })]);

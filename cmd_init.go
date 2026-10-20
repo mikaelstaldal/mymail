@@ -7,7 +7,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"golang.org/x/text/cases"
+	"github.com/mikaelstaldal/mymail/internal/phishing"
 
 	"github.com/mikaelstaldal/mymail/internal/repository"
 )
@@ -53,7 +53,7 @@ func runInit(dataDir, identityAddress, identityName string) {
 
 	// spam_filter_settings is seeded inside InitSchema (schemaV1); no extra step needed.
 
-	normalizedAddress := cases.Fold().String(addr.Address)
+	normalizedAddress := phishing.FoldAddress(addr.Address)
 
 	if err := repository.SeedIdentity(db, identityName, normalizedAddress); err != nil {
 		log.Printf("error: seed identity: %v", err)

@@ -1652,7 +1652,18 @@ Basic authentication or tokens configured. Both discovery resources return
   has no exemption. Unknown authentication never becomes pass. Unparseable sender
   headers do not suppress independent body/attachment/authentication warnings.
 - **REQ-PHISH-04:** Correspondence means a successful send to To, Cc or Bcc, with
-  the same Unicode casefolding as contacts. Schema v10 backfills existing Sent
+  the same Unicode casefolding as contacts. That folding (shared by identities,
+  contacts and sent history) is Unicode full case folding except that a non-ASCII
+  character which is only a compatibility variant of ASCII — its fold and its NFKC
+  form are both ASCII, such as the Kelvin sign U+212A, long s U+017F and the
+  U+FB00–FB06 ligatures — is kept, so `bob@banK.com` is not `bob@bank.com`; `ß`
+  still folds to `ss`. Rows stored under the older folding are not re-derived: it
+  turned those characters into ASCII and the original spelling is not recoverable,
+  so a row folded from, say, `boſ@example.org` keeps vouching for `bos@example.org`.
+  Only addresses the owner sent to, saved as a contact or configured as an identity
+  are affected, so a remote sender cannot create such a row. Link hosts and Reply-To
+  addresses are compared after IDNA mapping; a compatibility character there leads
+  to the mapped ASCII domain, so it is not separately flagged. Schema v10 backfills existing Sent
   messages and retains a separate durable set of addresses. Receipt-created
   contacts, contact edits/deletion, failed/deferred sends and moving received mail
   into Sent do not count. Deleting Sent mail does not erase the set. The backfill
@@ -1660,7 +1671,13 @@ Basic authentication or tokens configured. Both discovery resources return
 - **REQ-PHISH-05:** Domain comparison uses IDNA normalization and x/net/publicsuffix
   eTLD+1, so same-registrable-domain subdomains do not imply redirection. Skeletons
   use pinned Unicode 16 confusables, NFD → mapping → NFD, comparing full and registrable domains. Exact known domains are
-  not labelled as resembling another correspondent. IDN/punycode still produces
+  not labelled as resembling another correspondent. Whether a sender domain is an
+  IDN is decided on the domain as received, not on its IDNA-mapped form: a
+  character that the mapping turns into ASCII or removes (Kelvin sign, long s,
+  fullwidth or mathematical letters, soft hyphen) produces `lookalike_domain` with
+  the received form as `domain`, the mapped form as `punycode`, and `resembles`
+  set to it when it is a known domain, since the mapped form is then an exact
+  match that displays differently. IDN/punycode still produces
   an advisory warning for a legitimate known correspondent; it does not assert
   impersonation. Common/Inherited characters are ignored for per-label script
   mixing. Japanese labels combining Han with Hiragana or Katakana can therefore

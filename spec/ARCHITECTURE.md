@@ -301,7 +301,10 @@ demo mode.
 
 The detector vendors Unicode 16 confusables with its license and provenance.
 `generate_demo_data.go` reproduces the browser tables, pinned to x/net's PSL
-revision and Go's Unicode casefolding/scripts. Changing domain normalization or
+revision, Go's Unicode scripts, and `phishing.FoldRune` — the per-character form of
+`phishing.FoldAddress`, the one address fold for identities, contacts and sent history
+(see REQ-PHISH-04). The sender's IDN decision is made on the domain as received, before
+IDNA mapping (REQ-PHISH-05). Changing domain normalization or
 skeleton mappings requires a migration to rebuild the stored generated values;
 regenerating browser tables alone would leave the persisted index stale. Demo warning evaluation lives in
 the worker; HTML parsing is an RPC to the page's inert template parser because

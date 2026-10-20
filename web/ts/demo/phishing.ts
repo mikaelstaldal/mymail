@@ -57,6 +57,15 @@ function warningRegistrable(host: string): string {
   }
   return labels.slice(Math.max(0, labels.length - suffix - 1)).join('.');
 }
+// Mirrors phishing.mapsToASCII. The leading x keeps a character that maps to
+// nothing (soft hyphen) from leaving URL an empty, invalid host.
+function warningMapsToASCII(host: string): boolean {
+  return Array.from(host).some(c => {
+    if (c.codePointAt(0)! < 0x80) return false;
+    const m = warningDomain('x' + c);
+    return m !== 'x' + c && !/(^|\.)xn--/.test(m) && /^[\x00-\x7f]*$/.test(m);
+  });
+}
 function warningIP(host: string): boolean { return host.includes(':') || /^\d+\.\d+\.\d+\.\d+$/.test(host); }
 function warningHost(href: string): string {
   try {
@@ -143,13 +152,16 @@ async function demoWarnings(state: DemoState, msg: DemoMessage, atts: DemoAttach
     }
   }
   const seen = new Set<string>();
-  const lookalike = (host: string) => {
-    host = warningDomain(host); if (!host || warningIP(host) || seen.has(host)) return; seen.add(host);
-    const resembles = exact.has(host) || exact.has(warningRegistrable(host)) ? undefined : known.get(warningSkeleton(host)) ?? known.get(warningSkeleton(warningRegistrable(host)));
-    if (!/(^|\.)xn--/.test(host) && !warningMixed(host) && (!resembles || resembles === host)) return;
-    out.push({ kind: 'lookalike_domain', domain: decodeWarningDomain(host), punycode: host, ...(resembles && resembles !== host ? { resembles } : {}) });
+  // Mirrors the Go closure: raw is the host as received, since compatibility
+  // characters map to plain ASCII under IDNA.
+  const lookalike = (raw: string) => {
+    const host = warningDomain(raw), compat = warningMapsToASCII(raw), key = compat ? raw : host;
+    if (!host || warningIP(host) || seen.has(key)) return; seen.add(key);
+    const resembles = !compat && (exact.has(host) || exact.has(warningRegistrable(host))) ? undefined : known.get(warningSkeleton(host)) ?? known.get(warningSkeleton(warningRegistrable(host)));
+    if (!compat && !/(^|\.)xn--/.test(host) && !warningMixed(host) && !resembles) return;
+    out.push({ kind: 'lookalike_domain', domain: compat ? raw : decodeWarningDomain(host), punycode: host, ...(resembles ? { resembles } : {}) });
   };
-  lookalike(domain);
+  lookalike(from.address.split('@')[1] ?? '');
   let replies: ParsedAddress[] = [];
   try { replies = parseAddressList(msg.replyToAddr); } catch { /* malformed legacy header */ }
   for (const reply of replies) {

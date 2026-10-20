@@ -142,3 +142,11 @@ test('contact address casefold matches server normalization', async () => {
   assert.notEqual(foldContactAddress('ı@example.com'), foldContactAddress('i@example.com'));
   assert.equal(foldContactAddress('İ@example.com'), 'i\u0307@example.com');
 });
+
+// Mirrors phishing.FoldAddress: a compatibility variant of ASCII is kept.
+test('contact address casefold keeps compatibility variants of ASCII distinct', async () => {
+  const { foldContactAddress } = await import('../static/util/casefold.js');
+  assert.equal(foldContactAddress('bob@ban\u212A.com'), 'bob@ban\u212A.com');
+  assert.equal(foldContactAddress('ceo@bu\u017Finess.com'), 'ceo@bu\u017Finess.com');
+  assert.equal(foldContactAddress('STRAẞE@example.com'), 'strasse@example.com');
+});

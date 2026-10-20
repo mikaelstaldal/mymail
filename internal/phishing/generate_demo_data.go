@@ -17,8 +17,8 @@ import (
 	"strings"
 	"unicode"
 
+	"github.com/mikaelstaldal/mymail/internal/phishing"
 	"golang.org/x/net/idna"
-	"golang.org/x/text/cases"
 )
 
 func main() {
@@ -65,11 +65,10 @@ func main() {
 		}
 	}
 	sort.Strings(scripts)
-	fold := cases.Fold()
 	folds := map[string]string{}
 	for r := rune(0); r <= unicode.MaxRune; r++ {
 		s := string(r)
-		if v := fold.String(s); v != s {
+		if v := phishing.FoldRune(r); v != s {
 			folds[s] = v
 		}
 	}
@@ -97,7 +96,7 @@ func main() {
 	}
 	b, err := json.Marshal(folds)
 	check(err)
-	check(os.WriteFile("web/ts/util/casefold.ts", []byte(fmt.Sprintf("// Generated from Go cases.Fold by internal/phishing/generate_demo_data.go; DO NOT EDIT.\nconst addressCaseFold: Record<string,string> = %s;\n\n/** Same address normalization as the contact repository and browser demo. */\nexport function foldContactAddress(address: string): string {\n  return Array.from(address, c => addressCaseFold[c] ?? c).join('');\n}\n", b)), 0644))
+	check(os.WriteFile("web/ts/util/casefold.ts", []byte(fmt.Sprintf("// Generated from Go phishing.FoldRune by internal/phishing/generate_demo_data.go; DO NOT EDIT.\nconst addressCaseFold: Record<string,string> = %s;\n\n/** Same address normalization as the contact repository and browser demo. */\nexport function foldContactAddress(address: string): string {\n  return Array.from(address, c => addressCaseFold[c] ?? c).join('');\n}\n", b)), 0644))
 }
 func check(err error) {
 	if err != nil {

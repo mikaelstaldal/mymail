@@ -7,7 +7,7 @@ import (
 	"net/mail"
 
 	oas "github.com/mikaelstaldal/mymail/internal/api"
-	"golang.org/x/text/cases"
+	"github.com/mikaelstaldal/mymail/internal/phishing"
 )
 
 // IdentityRepository provides identity CRUD operations backed by SQLite.
@@ -21,13 +21,13 @@ func NewIdentityRepository(db *sql.DB) *IdentityRepository {
 }
 
 // parseAndFoldAddress validates that s is a bare RFC 5322 addr-spec (no display name),
-// then returns the Unicode-simple-casefolded address.
+// then returns the phishing.FoldAddress-folded address.
 func parseAndFoldAddress(s string) (string, error) {
 	addr, err := mail.ParseAddress(s)
 	if err != nil || addr.Name != "" {
 		return "", ErrInvalidAddress
 	}
-	return cases.Fold().String(addr.Address), nil
+	return phishing.FoldAddress(addr.Address), nil
 }
 
 func boolToInt(b bool) int {

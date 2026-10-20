@@ -9,7 +9,7 @@ import (
 	"time"
 
 	oas "github.com/mikaelstaldal/mymail/internal/api"
-	"golang.org/x/text/cases"
+	"github.com/mikaelstaldal/mymail/internal/phishing"
 )
 
 // ContactRepository provides contact CRUD operations backed by SQLite.
@@ -185,9 +185,9 @@ func (r *ContactRepository) DeleteContact(ctx context.Context, id int64) error {
 }
 
 // UpsertContact atomically inserts a contact or, if the address already exists with an empty name,
-// updates the name. The address is Unicode-simple-casefolded before storage.
+// updates the name. The address is phishing.FoldAddress-folded before storage.
 func (r *ContactRepository) UpsertContact(ctx context.Context, address, name string) error {
-	address = cases.Fold().String(address)
+	address = phishing.FoldAddress(address)
 	_, err := r.db.ExecContext(ctx, `
 		INSERT INTO contacts (address, name, created_at, updated_at)
 		VALUES (?, ?, strftime('%Y-%m-%dT%H:%M:%SZ','now'), strftime('%Y-%m-%dT%H:%M:%SZ','now'))
