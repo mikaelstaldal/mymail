@@ -127,7 +127,7 @@ function LinkWarning({ warning }: { warning: MessageWarning }) {
 function WarningBanner({ warnings }: { warnings: MessageWarning[] }) {
   if (!warnings.length) return null;
   return <div class="phishing-warnings" role="note" aria-label="Message warnings">
-    <ul>{warnings.map((warning, i) => <li key={i} class={warning.kind === 'auth_fail' || warning.kind === 'lookalike_domain' ? 'phishing-warning-strong' : ''}>
+    <ul>{warnings.map((warning, i) => <li key={i} class={warning.kind === 'auth_fail' || warning.kind === 'malformed_sender' || warning.kind === 'lookalike_domain' ? 'phishing-warning-strong' : ''}>
       {warning.kind === 'deceptive_link' ? <LinkWarning warning={warning} /> : warningText(warning)}
     </li>)}</ul>
   </div>;
@@ -345,7 +345,10 @@ export function MessageDetail({ id, folders }: MessageDetailProps) {
 
     async function checkSenderContact(message: MessageDetailType) {
       const raw = message.from_addr.trim();
-      if ([2, DRAFTS_ID, SCHEDULED_ID].includes(message.folder_id) || !isValidAddress(raw)) return;
+      // A malformed sender has no one address to save, whatever the UI's
+      // looser parsing would make of it.
+      if ([2, DRAFTS_ID, SCHEDULED_ID].includes(message.folder_id) || !isValidAddress(raw)
+        || message.warnings.some(w => w.kind === 'malformed_sender')) return;
       // Match the stored addr-spec, not the display-only decoded IDN address.
       const angle = raw.lastIndexOf('<');
       const address = foldContactAddress(angle >= 0 ? raw.slice(angle + 1, -1).trim() : raw);

@@ -1,10 +1,12 @@
 import type { components } from '../api/types.js';
+import { splitAddressList } from './address.js';
 export type MessageWarning = components['schemas']['MessageWarning'];
 
 /** Plain warning text; deceptive links use structured markup in MessageDetail.
  * Warning decisions belong to the server. */
 export function warningText(w: MessageWarning): string | null {
   switch (w.kind) {
+    case 'malformed_sender': return 'The sender address is missing or malformed, so it cannot be checked';
     case 'auth_fail': return `This sender failed authentication checks: ${(w.failed_checks ?? []).map(c => ({ dmarc: 'DMARC', dkim_alignment: 'DKIM alignment', spf: 'SPF' })[c] ?? c).join(', ')}`;
     case 'display_name_address': return `The sender's name contains a different address or domain: ${w.address}`;
     case 'lookalike_domain': return `The sender's domain uses international characters: ${w.domain} (${w.punycode})${w.resembles ? `; it resembles ${w.resembles}` : ''}`;
@@ -64,6 +66,9 @@ export function decodeWarningDomain(host: string): string {
 }
 
 export function senderParts(raw: string): { name: string; address: string; ascii: string; idn: boolean } {
+  // Several mailboxes (or a stray top-level comma): no one of them is the
+  // sender, so show the text as received rather than pick the last `<…>`.
+  if (splitAddressList(raw).length > 1) return { name: '', address: raw.trim(), ascii: raw.trim(), idn: false };
   const angle = raw.lastIndexOf('<');
   const original = angle >= 0 && raw.trimEnd().endsWith('>') ? raw.slice(angle + 1, raw.lastIndexOf('>')).trim() : raw.trim();
   const name = angle >= 0 ? raw.slice(0, angle).trim().replace(/^"|"$/g, '') : '';

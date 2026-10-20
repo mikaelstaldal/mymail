@@ -377,7 +377,7 @@ func TestDecodeHeader(t *testing.T) {
 		{
 			name:    "Adjacent encoded-words with non-ASCII and comma",
 			raw:     "=?utf-8?b?QWNtZSBDYWbDqSAtIEhhdXB0c3RyYcOfZSA0?= =?utf-8?b?MiwgWsO8cmljaA==?= <info@example.com>",
-			decoded: "Acme Café - Hauptstraße 42, Zürich <info@example.com>",
+			decoded: `"Acme Café - Hauptstraße 42, Zürich" <info@example.com>`,
 		},
 		{
 			name:    "Encoded-word wrapped in quotes",
@@ -385,19 +385,71 @@ func TestDecodeHeader(t *testing.T) {
 			decoded: "Jöhn Døe <sender@example.com>",
 		},
 		{
-			name:    "Malformed address with space salvages display name",
+			name:    "Malformed address is kept as unparseable text",
 			raw:     "Ali_express <summer items@woowstars.shop>",
-			decoded: "Ali_express",
+			decoded: "Ali_express <summer items@woowstars.shop>",
 		},
 		{
 			name:    "Malformed address with no name and no angle brackets",
 			raw:     "summer items@woowstars.shop",
-			decoded: "",
+			decoded: "summer items@woowstars.shop",
 		},
 		{
-			name:    "Windows-1252 charset in header",
-			raw:     "=?Windows-1252?Q?Max_G=E4rdet_=28gardet=40max=2Ese=29?= <gardet@max.se>",
-			decoded: "Max Gärdet <gardet@max.se>",
+			name: "Windows-1252 charset in header",
+			raw:  "=?Windows-1252?Q?Max_G=E4rdet_=28gardet=40max=2Ese=29?= <gardet@max.se>",
+			// The parentheses are inside the encoded word, so they are part of
+			// the name, not a comment.
+			decoded: `"Max Gärdet (gardet@max.se)" <gardet@max.se>`,
+		},
+		{
+			name:    "Display name with an address stays quoted",
+			raw:     `"boss@company.org" <evil@example.com>`,
+			decoded: `"boss@company.org" <evil@example.com>`,
+		},
+		{
+			name:    "Display name with a comma stays quoted",
+			raw:     `"Doe, John" <john@example.com>`,
+			decoded: `"Doe, John" <john@example.com>`,
+		},
+		{
+			name:    "Quotes and backslashes in a display name are dropped",
+			raw:     `"Jo \"JJ\" Doe" <jo@example.com>`,
+			decoded: "Jo JJ Doe <jo@example.com>",
+		},
+		{
+			name:    "Encoded display name with an address is quoted",
+			raw:     `=?utf-8?q?ceo=40bank.com?= <a@evil.com>`,
+			decoded: `"ceo@bank.com" <a@evil.com>`,
+		},
+		{
+			name:    "Quoted encoded display name with an address is quoted",
+			raw:     `"=?utf-8?q?ceo=40bank.com?=" <a@evil.com>`,
+			decoded: `"ceo@bank.com" <a@evil.com>`,
+		},
+		{
+			name:    "Malformed addr-spec does not leave the display name as the address",
+			raw:     `"ceo@bank.com" <x..y@attacker.example>`,
+			decoded: `"ceo@bank.com" <x..y@attacker.example>`,
+		},
+		{
+			name:    "Malformed addr-spec with an encoded display name is decoded",
+			raw:     `=?utf-8?q?ceo=40bank.com?= <a b@evil.com>`,
+			decoded: `ceo@bank.com <a b@evil.com>`,
+		},
+		{
+			name:    "Encoded word cannot become an address",
+			raw:     `=?utf-8?q?ceo=40bank.com?=`,
+			decoded: `=?utf-8?q?ceo=40bank.com?=`,
+		},
+		{
+			name:    "Encoded word cannot become an angle address",
+			raw:     `=?utf-8?q?Bank_=3Cceo=40bank.com=3E?=`,
+			decoded: `=?utf-8?q?Bank_=3Cceo=40bank.com=3E?=`,
+		},
+		{
+			name:    "Several mailboxes",
+			raw:     `x@evil.com, "Bank" <ceo@bank.com>`,
+			decoded: `x@evil.com, Bank <ceo@bank.com>`,
 		},
 	}
 

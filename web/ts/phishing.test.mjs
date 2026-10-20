@@ -11,6 +11,13 @@ test('sender name cannot hide the actual address', () => {
   assert.equal(senderParts('Jane Doe <jane@example.com>').name, 'Jane Doe');
   assert.equal(senderParts('jane@example.com').address, 'jane@example.com');
 });
+test('several mailboxes are shown as received, not as the last one', () => {
+  assert.deepEqual(senderParts('x@evil.com, Bank <ceo@bank.com>'), {
+    name: '', address: 'x@evil.com, Bank <ceo@bank.com>', ascii: 'x@evil.com, Bank <ceo@bank.com>', idn: false,
+  });
+  assert.equal(senderParts('"Doe, Jane" <jane@example.com>').name, 'Doe, Jane');
+  assert.equal(senderParts('"Doe, Jane" <jane@example.com>').address, 'jane@example.com');
+});
 test('IDN display preserves the original address and decodes labels', () => {
   const sender = senderParts('Support <help@xn--bcher-kva.de>');
   assert.equal(sender.address, 'help@bücher.de');
@@ -31,6 +38,7 @@ test('plain warnings explain their details without inventing a positive verdict'
     [{ kind: 'lookalike_domain', domain: 'bücher.de', punycode: 'xn--bcher-kva.de', resembles: 'bucher.de' }, 'resembles bucher.de'],
     [{ kind: 'reply_to_mismatch', address: 'thief@evil.example' }, 'thief@evil.example'],
     [{ kind: 'first_time_sender' }, 'never sent'],
+    [{ kind: 'malformed_sender' }, 'malformed'],
     [{ kind: 'risky_attachment', filename: 'bill.pdf.exe', reason: 'double_extension' }, 'double extension'],
     [{ kind: 'risky_attachment', filename: 'run.exe', reason: 'executable_extension' }, 'executable extension'],
     [{ kind: 'risky_attachment', filename: 'file', reason: 'executable_content_type' }, 'executable content type'],

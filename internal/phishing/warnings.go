@@ -148,14 +148,17 @@ func ComputeWithLinks(m model.DBMessage, atts []api.AttachmentMeta, c Context, l
 	if Exempt(m, c) {
 		return out
 	}
-	from, err := mail.ParseAddress(m.FromAddr)
-	if err != nil {
-		from = &mail.Address{}
-	}
 	auth := senderauth.Decode(m.SenderAuthentication)
 	add := func(kind api.MessageWarningKind) *api.MessageWarning {
 		out = append(out, api.MessageWarning{Kind: kind})
 		return &out[len(out)-1]
+	}
+	from, err := mail.ParseAddress(m.FromAddr)
+	if err != nil {
+		// Missing, malformed or several mailboxes: the sender checks below
+		// have no address to work with, so say so rather than staying silent.
+		from = &mail.Address{}
+		add(api.MessageWarningKindMalformedSender)
 	}
 	if auth.Dmarc == "fail" {
 		w := add(api.MessageWarningKindAuthFail)

@@ -414,6 +414,22 @@ func TestImportMaildir_ContactUpsert(t *testing.T) {
 	assert.Equal(t, "Carol", name)
 }
 
+func TestImportMaildir_NoContactForSeveralMailboxes(t *testing.T) {
+	db := openImportTestDB(t)
+	dir := makeMaildir(t)
+
+	makeMaildirMsg(t, dir, "new", "1000000001.M1.host", "",
+		"From: \"Bank CEO\" <ceo@bank.com>, evil@attacker.example\r\nTo: dave@example.com\r\nSubject: Hello\r\n"+
+			"Date: Mon, 01 Jan 2024 10:00:00 +0000\r\nMessage-Id: <contact2@host>\r\n\r\nBody\r\n")
+
+	_, _, err := importMaildir(dir, 1, db)
+	require.NoError(t, err)
+
+	var n int
+	require.NoError(t, db.QueryRowContext(context.Background(), `SELECT COUNT(*) FROM contacts`).Scan(&n))
+	assert.Zero(t, n)
+}
+
 func TestImportMaildir_NoDateNoMtime(t *testing.T) {
 	db := openImportTestDB(t)
 	dir := makeMaildir(t)

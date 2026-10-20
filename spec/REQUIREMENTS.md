@@ -712,6 +712,24 @@ contains bytes that cannot be decoded under the declared charset, the content is
 sequences replaced by the Unicode replacement character (U+FFFD). The original encoded bytes remain accessible via the
 raw RFC 5322 blob.
 
+### Address Headers
+
+`From`, `To`, `Cc`, `Bcc` and `Reply-To` are stored as decoded text in one of two forms:
+
+- **A valid address list.** Each address is re-serialized as `addr` or `name <addr>`, with the display name decoded
+  to UTF-8 and wrapped in double quotes when it contains an RFC 5322 special (`"(),.:;<>@[]\`), so that
+  `"boss@company.org" <evil@example.com>` and `"Doe, Jane" <jane@example.com>` still parse back as one address with
+  that name. A `"` or `\` inside a display name is dropped rather than escaped, the same as the web UI does when it
+  builds an address. RFC 2047 encoded words are decoded only in display names, never in an addr-spec.
+- **Anything else** is stored as the header's text (decoded, unless decoding would make it parse as an address list,
+  in which case undecoded), so that it never parses as an address. A display name is never stored in place of an
+  addr-spec that does not parse: every consumer re-parses the stored value, and `"ceo@bank.com" <x..y@evil.example>`
+  would otherwise read back as a well-formed `ceo@bank.com`, while sender authentication describes the real domain.
+
+A `From` that is not exactly one mailbox — missing, malformed, or a list — is reported by the `malformed_sender`
+warning (REQ-PHISH-02), and no contact is collected for it. Messages stored before this rule are not re-derived from
+`raw`; an unparseable stored `From` gets the warning.
+
 ### `cid:` Inline Image Resolution
 
 Before sanitization, all `<img src="cid:...">` references are resolved to `data:` URIs:
@@ -1214,9 +1232,10 @@ Hovering a folder in the sidebar shows a tooltip with its slug and numeric id, e
    save before sending. On send failure, keeps the compose form open and shows the error inline.
 
    **Address list quoting:** a display name containing a comma (or any other RFC 5322 special) is quoted when a pill is
-   built from a contact, otherwise the comma reads as a recipient separator and the list is malformed. Since
-   `DecodeAddressHeader` stores address headers with the quoting removed, a stored sender is re-quoted on its way into a
-   pill when replying, forwarding, or reopening a draft. This is only possible for one address at a time — a *list* that
+   built from a contact, otherwise the comma reads as a recipient separator and the list is malformed.
+   `DecodeAddressHeader` stores address headers with such names quoted (§ Address Headers), but messages stored before
+   it did have the quoting removed, so a stored sender is re-quoted on its way into a pill when replying, forwarding,
+   or reopening a draft. This is only possible for one address at a time — a *list* that
    was stored with an unquoted comma is genuinely ambiguous and is split at that comma.
 
    **Auto-save failure:** If an auto-save request fails, a transient error toast is shown. The save is retried on the
@@ -1461,6 +1480,13 @@ bug.
 
 ### Behaviour that differs
 
+- **Sender parsing is narrower than `net/mail`.** `malformed_sender` is decided by
+  the compose form's address parser plus Go's dot-atom rule (no leading, trailing
+  or consecutive dots), so the demo flags the forms Go flags for the mail it can
+  hold. It does not understand comments, groups or quoted local parts, which no
+  demo message contains: the seed is stored by the real LDA and replies are
+  generated from well-formed addresses.
+
 - **The scheduler runs on request, not on a timer.** A service worker is stopped
   whenever it is idle, so deferred sends, snooze expiry, and reply delivery are
   processed at the start of each API request instead of by a 60-second
@@ -1594,7 +1620,9 @@ Basic authentication or tokens configured. Both discovery resources return
   advisory signals: an empty list is not proof that a message is safe. No banner,
   link rewriting, automatic Junk move, or prominent verified badge is added here.
 - **REQ-PHISH-02:** Kinds are `auth_fail` (trusted stored DMARC failure, with failed
-  DMARC/SPF checks and absent DKIM alignment), `display_name_address` (different
+  DMARC/SPF checks and absent DKIM alignment), `malformed_sender` (the stored `From` is
+  not exactly one mailbox — missing, malformed or several — so the sender checks below
+  have no address to examine; see § Address Headers), `display_name_address` (different
   embedded address/domain), `lookalike_domain` (IDN/punycode, a mixed-script label,
   or a different own/sent-to/explicit-contact domain with an equal Unicode TR39-style skeleton),
   `reply_to_mismatch` (different registrable domains), `first_time_sender`
@@ -1636,7 +1664,9 @@ Basic authentication or tokens configured. Both discovery resources return
   the API download endpoint. The web UI asks for confirmation before risky downloads.
 - **REQ-PHISH-07:** Demo mode returns the same warning shape, keeps durable sent-to
   history in IndexedDB, and contains an intentionally suspicious sample with all
-  seven kinds. It uses the same pinned confusables and public suffix rules as Go.
+  seven kinds a well-formed sender can produce (`malformed_sender` excludes the
+  other sender checks, so no one message can show all eight). It uses the same
+  pinned confusables and public suffix rules as Go.
   The worker asks a controlled page to parse an inert HTML document. Synthetic
   authentication failure is labelled sample data; other demo mail stays unknown.
 
@@ -1678,4 +1708,7 @@ forwards retain their original links. The browser demo follows the same rules.
   mismatched Reply-To address. Risky attachments are labelled with their reason, and
   downloading one requires explicit confirmation; cancelling makes no download request.
   Ordinary attachments retain direct downloads. Browser demo uses the same UI and its
-  intentionally suspicious sample exercises every warning kind.
+  intentionally suspicious sample exercises every warning kind but `malformed_sender`.
+  When the server reports `malformed_sender`, the "Add sender to contacts" shortcut is
+  not offered, and a `From` holding several mailboxes is shown as received rather than
+  as one of them.

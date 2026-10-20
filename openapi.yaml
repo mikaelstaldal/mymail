@@ -225,7 +225,7 @@ components:
       properties:
         kind:
           type: string
-          enum: [auth_fail, display_name_address, lookalike_domain, reply_to_mismatch, first_time_sender, deceptive_link, risky_attachment]
+          enum: [auth_fail, malformed_sender, display_name_address, lookalike_domain, reply_to_mismatch, first_time_sender, deceptive_link, risky_attachment]
         failed_checks:
           type: array
           items:

@@ -84,9 +84,10 @@ export function formatAddress(name: string, address: string): string {
 /**
  * Re-quotes one stored address so it can go back out as part of a list.
  *
- * `service.DecodeAddressHeader` rebuilds a header as `name + " <" + addr + ">"`
- * with no quoting, so a message from `"Doe, Jane" <jane@example.com>` is stored
- * with the quotes gone — a form the server's own validator then rejects.
+ * `service.DecodeAddressHeader` once rebuilt a header as `name + " <" + addr + ">"`
+ * with no quoting, so a message from `"Doe, Jane" <jane@example.com>` stored by
+ * an older version has the quotes gone — a form the server's own validator then
+ * rejects. It quotes such names now, but those rows remain.
  * Replying to such a message would otherwise produce a recipient that can never
  * be sent. A single entry is unambiguous (the address is the last `<…>`), so it
  * can be repaired here; a list that was already stored that way cannot be, since

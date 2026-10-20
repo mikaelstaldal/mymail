@@ -1124,7 +1124,7 @@ test('demo message authentication stays unknown without scanner evidence', async
 
 // Read-time warning parity, including the page's real document parser. The
 // service-worker/page MessageChannel transport is checked in a browser.
-test('demo exposes all seven warning kinds and stable document link details', async () => {
+test('demo exposes the seven warning kinds of a well-formed sender and stable document link details', async () => {
   const state = newState([message({ id: 1, fromAddr: '"boss@company.org" <user@pаypal.com>',
     senderAuthentication: { dmarc: 'fail', dkim_aligned: false, spf: 'fail' },
     replyToAddr: 'x@evil.org', bodyHtml: '<a>skip</a><!-- <a>fake</a> --><a href="https://evil.org?a=1&amp;b=2">https://<b>paypal.com</b></a>' })]);
@@ -1140,6 +1140,15 @@ test('demo exposes all seven warning kinds and stable document link details', as
   assert.equal(body.warnings[5].link_index, 1);
   assert.equal(body.warnings[5].text, 'https://paypal.com');
   assert.equal(body.warnings[5].href, 'https://evil.org?a=1&b=2');
+});
+
+test('demo flags a sender that is not exactly one mailbox, like Go', async () => {
+  for (const fromAddr of ['', 'Bank Security', '"ceo@bank.com" <x y@attacker.example>', 'x@evil.com, Bank <ceo@bank.com>',
+    '"ceo@bank.com" <x..y@evil.com>', 'x@evil..com', '.x@evil.com', 'x.@evil.com', 'x@.evil.com', 'x@evil.com.']) {
+    const state = newState([message({ id: 1, fromAddr, senderAuthentication: { dmarc: 'pass', dkim_aligned: true, spf: 'pass' } })]);
+    state.identities[0].address = 'x@evil.com';
+    assert.deepEqual((await call(state, 'GET', '/messages/1')).body.warnings.map(w => w.kind), ['malformed_sender'], fromAddr);
+  }
 });
 
 test('demo sent history is independent of contacts and survives sent-message deletion', async () => {

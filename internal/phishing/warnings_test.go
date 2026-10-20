@@ -113,7 +113,24 @@ func TestInvalidSenderCannotSuppressIndependentSignals(t *testing.T) {
 	for _, w := range got {
 		kinds = append(kinds, w.Kind)
 	}
-	assert.Equal(t, []api.MessageWarningKind{"auth_fail", "deceptive_link", "risky_attachment"}, kinds)
+	assert.Equal(t, []api.MessageWarningKind{"malformed_sender", "auth_fail", "deceptive_link", "risky_attachment"}, kinds)
+}
+
+// A sender that is not exactly one mailbox leaves the sender checks nothing to
+// compare, so it must be flagged rather than pass with no warnings at all.
+func TestSenderThatIsNotOneMailboxIsFlagged(t *testing.T) {
+	for _, from := range []string{
+		``,
+		`Bank Security`,
+		`"ceo@bank.com" <x..y@attacker.example>`,
+		`x@evil.com, Bank <ceo@bank.com>`,
+	} {
+		t.Run(from, func(t *testing.T) {
+			got := Compute(model.DBMessage{FolderID: 1, FromAddr: from}, nil, Context{SentTo: true, ExplicitContact: true})
+			require.Len(t, got, 1)
+			assert.Equal(t, api.MessageWarningKindMalformedSender, got[0].Kind)
+		})
+	}
 }
 
 func TestReplyToListCannotHideMismatch(t *testing.T) {

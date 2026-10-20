@@ -110,9 +110,16 @@ function recordDemoSent(state: DemoState, msg: DemoMessage): void {
 async function demoWarnings(state: DemoState, msg: DemoMessage, atts: DemoAttachment[]): Promise<DemoWarning[]> {
   const out: DemoWarning[] = [];
   if ([FOLDER_SENT, FOLDER_DRAFTS, FOLDER_SCHEDULED].includes(msg.folderId)) return out;
-  const from = firstAddress(msg.fromAddr) ?? { address: '', name: '' };
+  // Mirrors mail.ParseAddress: exactly one mailbox, or none at all. The compose
+  // parser is looser than Go about dots, so apply Go's dot-atom rule on top.
+  let from: ParsedAddress | null = null;
+  try {
+    const addrs = parseAddressList(msg.fromAddr);
+    if (addrs.length === 1 && !/^\.|\.\.|\.@|@\.|\.$/.test(addrs[0].address)) from = addrs[0];
+  } catch { /* malformed */ }
   const auth = msg.senderAuthentication ?? unknownDemoAuth();
-  if (auth.dmarc === 'pass' && state.identities.some(i => foldAddress(i.address) === foldAddress(from.address))) return out;
+  if (from && auth.dmarc === 'pass' && state.identities.some(i => foldAddress(i.address) === foldAddress(from!.address))) return out;
+  if (!from) { from = { address: '', name: '' }; out.push({ kind: 'malformed_sender' }); }
   const domain = warningDomain(from.address.split('@')[1] ?? '');
   if (auth.dmarc === 'fail') {
     const failed = ['dmarc']; if (!auth.dkim_aligned) failed.push('dkim_alignment'); if (['fail', 'softfail'].includes(auth.spf)) failed.push('spf');

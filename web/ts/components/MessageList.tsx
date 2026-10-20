@@ -68,7 +68,9 @@ function IndeterminateCheckbox({ checked, indeterminate, onChange, ariaLabel }: 
 
 function senderName(from: string): string {
   const m = from.match(/^([^<>]+?)\s*<[^>]+>$/);
-  return m ? m[1].trim() : from;
+  // The server quotes a display name containing specials, e.g. `"Doe, Jane"`;
+  // the quotes are wire format, not part of the name.
+  return m ? m[1].trim().replace(/^"(.*)"$/, '$1') : from;
 }
 
 function Badges({ msg }: { msg: MessageSummary }) {

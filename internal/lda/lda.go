@@ -301,12 +301,16 @@ func filterMatches(pm *model.ParsedMessage, f oas.Filter) bool {
 	return true
 }
 
+// parseFromAddr returns the sender to collect as a contact, or "" when the
+// stored From is not exactly one mailbox — the case phishing.Compute flags as
+// malformed_sender. Taking the first of several would collect an address the
+// sender only claimed.
 func parseFromAddr(fromAddr string) (address, name string) {
-	addrs, err := mail.ParseAddressList(fromAddr)
-	if err != nil || len(addrs) == 0 {
+	addr, err := mail.ParseAddress(fromAddr)
+	if err != nil {
 		return "", ""
 	}
-	return addrs[0].Address, addrs[0].Name
+	return addr.Address, addr.Name
 }
 
 func withRetry(fn func() error) error {
