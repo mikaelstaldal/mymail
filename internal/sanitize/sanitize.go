@@ -2,7 +2,9 @@ package sanitize
 
 import (
 	"encoding/base64"
+	"errors"
 	"fmt"
+	"io"
 	"regexp"
 	"slices"
 	"strings"
@@ -138,6 +140,9 @@ func newPolicy(elements, cssProperties []string) *bluemonday.Policy {
 	p := bluemonday.NewPolicy()
 
 	p.AllowElements(elements...)
+	// A browser never renders template content, so neither do we. bluemonday
+	// would otherwise unwrap the element and show it.
+	p.SkipElementsContent("template")
 
 	p.AllowAttrs("href").Matching(reHref).OnElements("a")
 	p.AllowAttrs("src").Matching(reSrc).OnElements("img")
@@ -197,7 +202,18 @@ func NewOutgoingPolicy() *bluemonday.Policy {
 var (
 	policy         = NewEmailPolicy()
 	outgoingPolicy = NewOutgoingPolicy()
+	// softWrapPolicy is the outgoing policy plus class and comments, which
+	// joinSoftWrappedParagraphs reads. The outgoing pass strips both after.
+	softWrapPolicy = newSoftWrapPolicy()
 )
+
+func newSoftWrapPolicy() *bluemonday.Policy {
+	elements := slices.Concat(allAllowedElements, outgoingOnlyElements)
+	p := newPolicy(elements, slices.Concat(cssAllowlist, outgoingOnlyCSS))
+	p.AllowAttrs("class").OnElements(elements...)
+	p.AllowComments()
+	return p
+}
 
 // HTML sanitizes untrusted (inbound) email HTML using the email policy.
 func HTML(h string) string {
@@ -220,6 +236,9 @@ func joinSoftWrappedParagraphs(h string) string {
 	if !strings.Contains(h, softWrapClass) {
 		return h
 	}
+	// Sanitized and bounded first, like inbound HTML, so the parse cannot
+	// amplify (see BoundFormatting).
+	h = BoundFormatting(softWrapPolicy.Sanitize(h))
 	root := &html.Node{Type: html.ElementNode, Data: "div", DataAtom: atom.Div}
 	nodes, err := html.ParseFragment(strings.NewReader(h), root)
 	if err != nil {
@@ -303,79 +322,29 @@ const (
 	maxImageSize = 1 * 1024 * 1024
 )
 
+// Limits on what normalizing inbound HTML may produce. Output beyond
+// maxAmplification times its input (plus amplificationSlack) is treated as an
+// amplification attack and the message is normalized again with every
+// formatting element removed, which keeps the output linear in the input.
+const (
+	maxAmplification   = 8
+	amplificationSlack = 64 << 10
+)
+
 // ResolveCID resolves cid: src attributes to inline data URIs, then sanitizes.
 // It also returns the Content-IDs actually embedded, for excluding those MIME
 // parts from the attachment list. CID values longer than maxCIDLength are
 // rejected before lookup or copying.
 // cidMap maps Content-ID (without angle brackets) to raw bytes.
 // cidContentTypes maps the same keys to MIME content types.
+//
+// The attacker's markup never reaches html.Parse: the cid: rewrite and the
+// sanitizer are tokenizer-based, and only sanitized markup with a bounded
+// number of active formatting elements is parsed for normalization.
 func ResolveCID(h string, cidMap map[string][]byte, cidContentTypes map[string]string) (string, map[string]bool) {
 	used := make(map[string]bool)
-	doc, err := html.Parse(strings.NewReader(h))
-	if err != nil {
-		return policy.Sanitize(h), used
-	}
-
-	// Count cid: images.
-	count := 0
-	walkNodes(doc, func(n *html.Node) {
-		if n.Type == html.ElementNode && n.Data == "img" {
-			for _, a := range n.Attr {
-				if a.Key == "src" && isCIDSrc(a.Val) {
-					count++
-				}
-			}
-		}
-	})
-
-	if count > maxCIDImages {
-		walkNodes(doc, func(n *html.Node) {
-			if n.Type == html.ElementNode && n.Data == "img" {
-				n.Attr = filterAttrs(n.Attr, func(a html.Attribute) bool {
-					return a.Key != "src" || !isCIDSrc(a.Val)
-				})
-			}
-		})
-		return policy.Sanitize(renderBodyFragment(doc)), used
-	}
-
-	totalBytes := 0
-	// A resolved image can still be removed with its parent by the HTML
-	// sanitizer (for example, inside <object>). Track candidates by URI and
-	// count them as used only if an img src survives sanitization.
-	candidates := make(map[string][]string)
-	walkNodes(doc, func(n *html.Node) {
-		if n.Type != html.ElementNode || n.Data != "img" {
-			return
-		}
-		for i, a := range n.Attr {
-			if a.Key != "src" || !isCIDSrc(a.Val) {
-				continue
-			}
-			cid := a.Val[4:] // strip "cid:"
-			if len(cid) == 0 || len(cid) > maxCIDLength {
-				n.Attr = append(n.Attr[:i], n.Attr[i+1:]...)
-				break
-			}
-			data, found := cidLookup(cidMap, cid)
-			if found && len(data) <= maxImageSize && totalBytes+len(data) <= maxTotalSize {
-				ct := cidContentTypeLookup(cidContentTypes, cid)
-				uri := fmt.Sprintf("data:%s;base64,%s", ct, base64.StdEncoding.EncodeToString(data))
-				if reSrc.MatchString(uri) {
-					totalBytes += len(data)
-					n.Attr[i].Val = uri
-					candidates[uri] = append(candidates[uri], strings.ToLower(cid))
-				} else {
-					n.Attr = append(n.Attr[:i], n.Attr[i+1:]...)
-				}
-			} else {
-				n.Attr = append(n.Attr[:i], n.Attr[i+1:]...)
-			}
-			break
-		}
-	})
-
-	clean := policy.Sanitize(renderBodyFragment(doc))
+	rewritten, candidates := rewriteCIDs(h, cidMap, cidContentTypes)
+	clean := normalize(policy.Sanitize(rewritten), len(rewritten))
 	z := html.NewTokenizer(strings.NewReader(clean))
 	for {
 		tt := z.Next()
@@ -402,6 +371,140 @@ func ResolveCID(h string, cidMap map[string][]byte, cidContentTypes map[string]s
 		}
 	}
 	return clean, used
+}
+
+// rewriteCIDs replaces each cid: img src with a data URI, or removes it when
+// the image is missing or over a limit. Beyond maxCIDImages it removes them
+// all. A resolved image can still be removed with its parent by the HTML
+// sanitizer (for example, inside <object>), so it returns candidates by URI,
+// to count as used only if an img src survives sanitization.
+func rewriteCIDs(h string, cidMap map[string][]byte, cidContentTypes map[string]string) (string, map[string][]string) {
+	candidates := make(map[string][]string)
+	count := 0
+	z := html.NewTokenizer(strings.NewReader(h))
+	for tt := z.Next(); tt != html.ErrorToken; tt = z.Next() {
+		if tt == html.StartTagToken || tt == html.SelfClosingTagToken {
+			if tok := z.Token(); tok.Data == "img" {
+				if i := attrIndex(tok.Attr, "src"); i >= 0 && isCIDSrc(tok.Attr[i].Val) {
+					count++
+				}
+			}
+		}
+	}
+	if count == 0 {
+		return h, candidates
+	}
+
+	var out strings.Builder
+	totalBytes := 0
+	z = html.NewTokenizer(strings.NewReader(h))
+	for {
+		tt := z.Next()
+		if tt == html.ErrorToken {
+			out.Write(z.Raw())
+			break
+		}
+		if tt != html.StartTagToken && tt != html.SelfClosingTagToken {
+			out.Write(z.Raw())
+			continue
+		}
+		raw := z.Raw()
+		tok := z.Token()
+		i := attrIndex(tok.Attr, "src")
+		if tok.Data != "img" || i < 0 || !isCIDSrc(tok.Attr[i].Val) {
+			out.Write(raw)
+			continue
+		}
+		cid := tok.Attr[i].Val[4:] // strip "cid:"
+		uri := ""
+		if count <= maxCIDImages && len(cid) > 0 && len(cid) <= maxCIDLength {
+			data, found := cidLookup(cidMap, cid)
+			if found && len(data) <= maxImageSize && totalBytes+len(data) <= maxTotalSize {
+				ct := cidContentTypeLookup(cidContentTypes, cid)
+				if u := fmt.Sprintf("data:%s;base64,%s", ct, base64.StdEncoding.EncodeToString(data)); reSrc.MatchString(u) {
+					totalBytes += len(data)
+					uri = u
+					candidates[uri] = append(candidates[uri], strings.ToLower(cid))
+				}
+			}
+		}
+		// Drop every src, keeping the resolved one: the tree builder and the
+		// sanitizer would both honour only the first.
+		tok.Attr = filterAttrs(tok.Attr, func(a html.Attribute) bool { return a.Key != "src" })
+		if uri != "" {
+			tok.Attr = slices.Insert(tok.Attr, min(i, len(tok.Attr)), html.Attribute{Key: "src", Val: uri})
+		}
+		out.WriteString(tok.String())
+	}
+	return out.String(), candidates
+}
+
+func attrIndex(attrs []html.Attribute, key string) int {
+	for i, a := range attrs {
+		if a.Key == key {
+			return i
+		}
+	}
+	return -1
+}
+
+// normalize parses sanitized markup and serializes it back, then sanitizes
+// the result again. The parse sees at most MaxActiveFormatting active
+// formatting elements; if the output still exceeds the amplification limit
+// (cloned elements can carry long style attributes) every formatting element
+// is removed instead. inputLen is the length the limit is relative to.
+func normalize(clean string, inputLen int) string {
+	limit := maxAmplification*inputLen + amplificationSlack
+	if out, ok := renderNormalized(boundFormatting(clean, MaxActiveFormatting), limit); ok {
+		return out
+	}
+	stripped := boundFormatting(clean, 0)
+	if out, ok := renderNormalized(stripped, -1); ok {
+		return out
+	}
+	// Only nesting beyond the parser's depth limit gets here.
+	return stripped
+}
+
+func renderNormalized(h string, limit int) (string, bool) {
+	doc, err := html.Parse(strings.NewReader(h))
+	if err != nil {
+		return "", false
+	}
+	w := &limitedBuilder{limit: limit}
+	if !renderBodyFragment(w, doc) {
+		return "", false
+	}
+	return policy.Sanitize(w.String()), true
+}
+
+var errOutputLimit = errors.New("output limit exceeded")
+
+// limitedBuilder fails writes beyond limit bytes; a negative limit is none.
+type limitedBuilder struct {
+	strings.Builder
+	limit int
+}
+
+func (b *limitedBuilder) Write(p []byte) (int, error) {
+	if b.limit >= 0 && b.Len()+len(p) > b.limit {
+		return 0, errOutputLimit
+	}
+	return b.Builder.Write(p)
+}
+
+func (b *limitedBuilder) WriteByte(c byte) error {
+	if b.limit >= 0 && b.Len()+1 > b.limit {
+		return errOutputLimit
+	}
+	return b.Builder.WriteByte(c)
+}
+
+func (b *limitedBuilder) WriteString(s string) (int, error) {
+	if b.limit >= 0 && b.Len()+len(s) > b.limit {
+		return 0, errOutputLimit
+	}
+	return b.Builder.WriteString(s)
 }
 
 // HasExternalImages reports whether the HTML contains any <img> with an http
@@ -434,13 +537,6 @@ func HasExternalImages(h string) bool {
 
 func isCIDSrc(val string) bool {
 	return len(val) >= 4 && strings.EqualFold(val[:4], "cid:")
-}
-
-func walkNodes(n *html.Node, fn func(*html.Node)) {
-	fn(n)
-	for c := n.FirstChild; c != nil; c = c.NextSibling {
-		walkNodes(c, fn)
-	}
 }
 
 func filterAttrs(attrs []html.Attribute, keep func(html.Attribute) bool) []html.Attribute {
@@ -480,21 +576,21 @@ func cidContentTypeLookup(cidContentTypes map[string]string, cid string) string 
 }
 
 // renderBodyFragment serializes the children of the <body> element that
-// html.Parse always inserts when parsing a fragment.
-func renderBodyFragment(doc *html.Node) string {
+// html.Parse always inserts when parsing a fragment. It reports false if
+// writing fails.
+func renderBodyFragment(w io.Writer, doc *html.Node) bool {
 	body := findNode(doc, func(n *html.Node) bool {
 		return n.Type == html.ElementNode && n.Data == "body"
 	})
 	if body == nil {
-		var b strings.Builder
-		_ = html.Render(&b, doc)
-		return b.String()
+		return html.Render(w, doc) == nil
 	}
-	var b strings.Builder
 	for c := body.FirstChild; c != nil; c = c.NextSibling {
-		_ = html.Render(&b, c)
+		if html.Render(w, c) != nil {
+			return false
+		}
 	}
-	return b.String()
+	return true
 }
 
 func findNode(n *html.Node, match func(*html.Node) bool) *html.Node {

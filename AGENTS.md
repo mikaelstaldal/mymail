@@ -202,6 +202,13 @@ and `transform` stay out. `<style>` must never be allowed: bluemonday does not
 validate stylesheet text, so `@import url(…)` would bypass the value handler
 entirely.
 
+The allowlist also bounds HTML amplification: `BoundFormatting` (`formatting.go`)
+models the tree builder exactly only for elements the policies allow. Allowing
+foreign content (`svg`, `math`), a raw-text element, `select`, or another marker
+element (`object`, `applet`, `marquee`, `template`) means revisiting it; its
+property test, `TestBoundFormattingNeverUnderCounts`, only generates the
+current set.
+
 `TestOutgoingKeepsEverySecurityGate`, `TestOutgoingIsSupersetOfInbound` and
 `TestSentHTMLSurvivesBeingReceived` are the regression gates — extend them when
 the allowlist grows.

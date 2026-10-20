@@ -380,7 +380,7 @@ When invoked as `mymail -lda`:
       upgraded, all messages whose `body_text` was derived (i.e. messages without a native plain-text part) should be
       re-derived and the FTS5 index rebuilt to keep search results consistent.
     - Resolves `cid:` inline image references to `data:` URIs before sanitizing.
-    - Sanitizes the HTML body.
+    - Sanitizes the HTML body, then normalizes it within bounds (see HTML Sanitization → Bounded normalization).
     - Collects attachments.
     - Keeps up to 1,000 newest non-empty `References` entries that fit in 16 KiB when joined with newlines. Rejects a message whose
       unfolded `References` header exceeds 256 KiB before splitting it into entries; this is a permanent parse failure.
@@ -723,6 +723,26 @@ Before sanitization, all `<img src="cid:...">` references are resolved to `data:
   removed.
 
 This step runs at storage time so `body_html` is stored with `data:` URIs already embedded.
+
+### Bounded normalization
+
+An inbound HTML body is stored normalized: parsed into a tree and serialized again. Tree construction can multiply its
+input — each new paragraph re-creates every formatting element still open (`a`, `b`, `code`, `em`, `i`, `s`, `small`,
+`strong`, `tt`, `u`, …), and ones that differ in an attribute are never merged — so a few kilobytes of markup could
+otherwise produce gigabytes of tree and megabytes of stored body. Normalization is therefore bounded:
+
+- The sender's markup is never parsed into a tree. `cid:` resolution and sanitization work on the token stream, and only
+  sanitized markup is parsed.
+- At most 8 formatting elements may be active at once. Further formatting start tags, and their end tags, are dropped.
+  Where the count cannot be certain the parser has closed one (unusual table markup), it keeps it, so odd markup may
+  lose formatting but never escapes the bound.
+- If the normalized body is still more than 8 times the HTML it came from, plus 64 KiB, (cloned elements carrying long
+  `style` attributes), the message is normalized again with every formatting element removed, keeping the text.
+
+The message is always delivered; none of this is a parse failure. The same formatting bound is applied before link
+analysis parses a stored body when it is viewed, which protects bodies stored before it existed.
+
+`<template>` content is dropped, as a browser never renders it.
 
 ## Security
 
