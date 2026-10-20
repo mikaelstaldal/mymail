@@ -213,3 +213,24 @@ func TestExplicitContactSuppressesOnlyFirstTimeWarning(t *testing.T) {
 	}
 	assert.Equal(t, []api.MessageWarningKind{"auth_fail", "display_name_address", "lookalike_domain", "reply_to_mismatch", "deceptive_link", "risky_attachment"}, kinds)
 }
+
+// A bidi override inside the addr-spec reverses what follows it even inside an
+// isolating <bdi>, so `\u202emoc.lapyap@ecivres` displays as service@paypal.com.
+func TestFormatCharacterInSenderAddressIsFlagged(t *testing.T) {
+	for _, from := range []string{
+		"PayPal <\u202emoc.lapyap@ecivres>",
+		"Support <service@\u202emoc.lapyap>",
+		"\u2067service@paypal.com\u2069@evil.example",
+		"service\u200b@paypal.com",
+		"a\u2028b@example.com",
+	} {
+		t.Run(from, func(t *testing.T) {
+			got := Compute(model.DBMessage{FolderID: 1, FromAddr: from}, nil, Context{SentTo: true, ExplicitContact: true})
+			require.NotEmpty(t, got)
+			assert.Equal(t, api.MessageWarningKindMalformedSender, got[0].Kind)
+		})
+	}
+	// A format character in the display name is isolated by <bdi> and is no
+	// reason to doubt the address.
+	assert.Empty(t, Compute(model.DBMessage{FolderID: 1, FromAddr: "\u202eLapyaP <service@paypal.com>"}, nil, Context{SentTo: true, ExplicitContact: true}))
+}

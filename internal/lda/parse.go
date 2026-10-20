@@ -18,6 +18,7 @@ import (
 
 	"github.com/mikaelstaldal/mymail/internal/model"
 	"github.com/mikaelstaldal/mymail/internal/sanitize"
+	"github.com/mikaelstaldal/mymail/internal/senderauth"
 )
 
 const (
@@ -79,7 +80,7 @@ func ParseMessage(raw []byte) (*model.ParsedMessage, error) {
 	}
 	refs = truncateRefs(refs)
 
-	fromAddr := service.DecodeAddressHeader(msg.Header.Get("From"))
+	fromAddr := decodeFromFields(senderauth.Fields(msg.Header, "From"))
 	toAddr := service.DecodeAddressHeader(msg.Header.Get("To"))
 	ccAddr := service.DecodeAddressHeader(msg.Header.Get("Cc"))
 	bccAddr := service.DecodeAddressHeader(msg.Header.Get("Bcc"))
@@ -412,6 +413,39 @@ func decodeCTE(data []byte, cte string, remaining int64) ([]byte, error) {
 }
 
 // --- Small utilities ---
+
+// decodeFromFields stores every From field, so that a message with more than
+// one — a second `From:` line, or one in obsolete `From :` syntax that
+// Header.Get does not see but a DMARC checker does — never reads back as one
+// mailbox. It is shown as received and gets the malformed_sender warning.
+func decodeFromFields(fields []string) string {
+	if len(fields) <= 1 {
+		if len(fields) == 0 {
+			return ""
+		}
+		return service.DecodeAddressHeader(fields[0])
+	}
+	var parts []string
+	for _, f := range fields {
+		if d := service.DecodeAddressHeader(f); d != "" {
+			parts = append(parts, d)
+		}
+	}
+	// Each part is a valid list or text that never parses, so the join is a
+	// list of several mailboxes unless parts straddle a quote or a comment, or
+	// all but one are empty groups.
+	joined := strings.Join(parts, ", ")
+	if addrs, err := mail.ParseAddressList(joined); err != nil || len(addrs) > 1 {
+		return joined
+	}
+	// Separated by newlines, which no address list may contain outside a
+	// comment, so that it does not parse as one mailbox.
+	joined = strings.Join(parts, "\n")
+	if _, err := mail.ParseAddressList(joined); err != nil {
+		return joined
+	}
+	return ""
+}
 
 func stripAngles(s string) string {
 	if len(s) >= 2 && s[0] == '<' && s[len(s)-1] == '>' {

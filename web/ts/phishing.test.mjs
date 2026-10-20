@@ -2,7 +2,7 @@
 // link warnings, rendering, dialog cancellation and downloads are covered by phishing.spec.ts.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { senderParts, warningText, decodeWarningDomain } from '../static/util/phishing.js';
+import { senderParts, warningText, decodeWarningDomain, revealFormatChars } from '../static/util/phishing.js';
 
 test('sender name cannot hide the actual address', () => {
   assert.deepEqual(senderParts('"support@paypal.com" <thief@evil.example>'), {
@@ -43,4 +43,20 @@ test('plain warnings explain their details without inventing a positive verdict'
     [{ kind: 'risky_attachment', filename: 'run.exe', reason: 'executable_extension' }, 'executable extension'],
     [{ kind: 'risky_attachment', filename: 'file', reason: 'executable_content_type' }, 'executable content type'],
   ]) assert.ok(warningText(warning).includes(detail), JSON.stringify(warning));
+});
+test('a bidi override cannot make the sender address display as another', () => {
+  assert.equal(senderParts('PayPal <\u202Emoc.lapyap@ecivres>').address, '<U+202E>moc.lapyap@ecivres');
+  const idn = senderParts('Support <service@\u202Emoc.lapyap>');
+  assert.equal(idn.address, 'service@<U+202E>moc.lapyap');
+  assert.equal(idn.ascii, 'service@<U+202E>moc.lapyap');
+  assert.equal(senderParts('x@evil.com, \u2067Bank\u2069 <ceo@bank.com>').address, 'x@evil.com, <U+2067>Bank<U+2069> <ceo@bank.com>');
+  // URL normalization drops these from a domain; they must still show.
+  for (const c of ['\u200B', '\u00AD', '\uFEFF']) {
+    const hex = c.codePointAt(0).toString(16).toUpperCase().padStart(4, '0');
+    assert.deepEqual(senderParts(`a@pay${c}pal.com`), { name: '', address: `a@pay<U+${hex}>pal.com`, ascii: `a@pay<U+${hex}>pal.com`, idn: false });
+  }
+  assert.equal(revealFormatChars('a\u200Bb\u2028c\u061Cd'), 'a<U+200B>b<U+2028>c<U+061C>d');
+  assert.equal(revealFormatChars('help@bücher.de'), 'help@bücher.de');
+  assert.equal(warningText({ kind: 'reply_to_mismatch', address: 'x@\u202Emoc.lapyap' }),
+    'Replies will go to x@<U+202E>moc.lapyap, on a different domain from the sender');
 });

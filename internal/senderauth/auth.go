@@ -5,8 +5,12 @@ package senderauth
 import (
 	"bytes"
 	"encoding/json"
+	"io"
+	"mime"
 	"net/mail"
+	"net/textproto"
 	"regexp"
+	"slices"
 	"strings"
 
 	oas "github.com/mikaelstaldal/mymail/internal/api"
@@ -22,9 +26,52 @@ func Unknown() oas.SenderAuthentication {
 	return oas.SenderAuthentication{Dmarc: "unknown", Spf: "unknown"}
 }
 
+// Fields returns every value of the named header field, including fields in
+// RFC 5322 obsolete syntax with whitespace before the colon (`From : x`).
+// net/textproto accepts those but files them under a key such as "From ", so
+// Header.Get never sees them, while SpamAssassin strips the whitespace and
+// counts them. Canonical fields come first; the relative order of differently
+// spelled keys is not recorded by net/textproto.
+func Fields(h mail.Header, name string) []string {
+	name = textproto.CanonicalMIMEHeaderKey(name)
+	out := slices.Clone(h[name])
+	var keys []string
+	for k := range h {
+		if k != name && strings.EqualFold(strings.TrimRight(k, " \t"), name) {
+			keys = append(keys, k)
+		}
+	}
+	slices.Sort(keys)
+	for _, k := range keys {
+		out = append(out, h[k]...)
+	}
+	return out
+}
+
+// singleMailbox reports whether the message has exactly one From field and it
+// holds exactly one mailbox. Encoded words are not decoded, so an unknown
+// charset in a display name does not matter: only the structure is counted.
+func singleMailbox(h mail.Header) bool {
+	from := Fields(h, "From")
+	if len(from) != 1 {
+		return false
+	}
+	parser := mail.AddressParser{WordDecoder: &mime.WordDecoder{
+		CharsetReader: func(_ string, input io.Reader) (io.Reader, error) { return input, nil },
+	}}
+	addrs, err := parser.ParseList(from[0])
+	return err == nil && len(addrs) == 1
+}
+
 // Parse requires exactly one checker and status header. It deliberately makes
 // no inference from Received positions: neither their provenance nor the scan
 // insertion point is known. See REQUIREMENTS.md for the trust boundary.
+//
+// The verdict is also unknown unless the message has exactly one From field
+// holding exactly one mailbox. A checker's DMARC result names no domain, so it
+// is only attributable to the From MyMail stores when no other From exists —
+// an obsolete-syntax `From :` line or a second mailbox could be the one DMARC
+// evaluated, and a pass for it would exempt a forged own-identity sender.
 func Parse(raw []byte, host string) oas.SenderAuthentication {
 	v := Unknown()
 	if host == "" {
@@ -34,7 +81,10 @@ func Parse(raw []byte, host string) oas.SenderAuthentication {
 	if err != nil {
 		return v
 	}
-	c, s := msg.Header["X-Spam-Checker-Version"], msg.Header["X-Spam-Status"]
+	if !singleMailbox(msg.Header) {
+		return v
+	}
+	c, s := Fields(msg.Header, "X-Spam-Checker-Version"), Fields(msg.Header, "X-Spam-Status")
 	if len(c) != 1 || len(s) != 1 {
 		return v
 	}

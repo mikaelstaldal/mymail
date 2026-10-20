@@ -1,6 +1,7 @@
 import { useRef, useEffect } from 'preact/hooks';
 import { formatDateAdaptive, formatDateSchedule } from '../util/date.js';
 import { Icon } from './Icon.js';
+import { revealFormatChars } from '../util/phishing.js';
 import type { components } from '../api/types.js';
 
 type MessageSummary = components['schemas']['MessageSummary'];
@@ -70,7 +71,7 @@ function senderName(from: string): string {
   const m = from.match(/^([^<>]+?)\s*<[^>]+>$/);
   // The server quotes a display name containing specials, e.g. `"Doe, Jane"`;
   // the quotes are wire format, not part of the name.
-  return m ? m[1].trim().replace(/^"(.*)"$/, '$1') : from;
+  return m ? m[1].trim().replace(/^"(.*)"$/, '$1') : revealFormatChars(from);
 }
 
 function Badges({ msg }: { msg: MessageSummary }) {

@@ -43,9 +43,57 @@ func TestParse(t *testing.T) {
 func TestForgedHeadersTrustBoundary(t *testing.T) {
 	forged := "X-Spam-Checker-Version: SpamAssassin 4.0.1 (2024-03-25) on checker\r\nX-Spam-Status: No, tests=DMARC_PASS,DKIM_VALID_AU,SPF_PASS\r\n"
 	for _, headers := range []string{forged, "Received: by local\r\n" + forged, forged + "Received: by local\r\n"} {
-		raw := []byte(headers + "\r\n" + strings.Repeat("x", 600000))
+		raw := []byte("From: a@example.org\r\n" + headers + "\r\n" + strings.Repeat("x", 600000))
 		assert.Equal(t, Unknown(), Parse(raw, ""))
 		assert.Equal(t, Unknown(), Parse(raw, "different"))
 		assert.Equal(t, oas.SenderAuthenticationDmarcPass, Parse(raw, "checker").Dmarc, "hostname opt-in alone cannot detect unchecked pass-through")
 	}
+}
+
+// A DMARC verdict names no domain, so it can only be attributed to the From
+// MyMail stores when there is no other From it may have been computed for.
+func TestVerdictRequiresExactlyOneFromMailbox(t *testing.T) {
+	scan := "X-Spam-Checker-Version: SpamAssassin 4.0.1 (2024-03-25) on checker\r\n" +
+		"X-Spam-Status: No, tests=DMARC_PASS,DKIM_VALID_AU,SPF_PASS autolearn=ham\r\n"
+	for _, tc := range []struct {
+		name, from string
+		pass       bool
+	}{
+		{"one mailbox", "From: Me <own@example.com>\r\n", true},
+		{"unknown charset in display name", "From: =?x-unknown?q?Me?= <own@example.com>\r\n", true},
+		{"obsolete-syntax From before the canonical one", "From : x@attacker.example\r\nFrom: Me <own@example.com>\r\n", false},
+		{"obsolete-syntax From with a tab", "From\t: x@attacker.example\r\nFrom: Me <own@example.com>\r\n", false},
+		{"lower-case obsolete-syntax From", "from : x@attacker.example\r\nFrom: Me <own@example.com>\r\n", false},
+		{"two From fields", "From: x@attacker.example\r\nFrom: Me <own@example.com>\r\n", false},
+		{"several mailboxes", "From: x@attacker.example, Me <own@example.com>\r\n", false},
+		{"empty group", "From: undisclosed:;\r\n", false},
+		{"unparseable", "From: Me <own@example..com>\r\n", false},
+		{"no From", "", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got := Parse([]byte(tc.from+scan+"\r\nbody"), "checker")
+			if tc.pass {
+				assert.Equal(t, oas.SenderAuthenticationDmarcPass, got.Dmarc)
+			} else {
+				assert.Equal(t, Unknown(), got)
+			}
+		})
+	}
+}
+
+// SpamAssassin counts an obsolete-syntax `X-Spam-Status :` field as a status
+// header; so must the duplicate check.
+func TestObsoleteSyntaxScanHeadersCount(t *testing.T) {
+	checker := "X-Spam-Checker-Version: SpamAssassin 4.0.1 (2024-03-25) on checker\r\n"
+	for _, headers := range []string{
+		checker + "X-Spam-Status : No, tests=DMARC_FAIL\r\nX-Spam-Status: No, tests=DMARC_PASS\r\n",
+		checker + checker[:len("X-Spam-Checker-Version")] + " " + checker[len("X-Spam-Checker-Version"):] + "X-Spam-Status: No, tests=DMARC_PASS\r\n",
+	} {
+		assert.Equal(t, Unknown(), Parse([]byte("From: a@example.org\r\n"+headers+"\r\nbody"), "checker"))
+	}
+}
+
+func TestFields(t *testing.T) {
+	h := map[string][]string{"From": {"a"}, "From ": {"b"}, "From\t": {"c"}, "Fromage": {"x"}, "X-From": {"y"}}
+	assert.Equal(t, []string{"a", "c", "b"}, Fields(h, "from"))
 }

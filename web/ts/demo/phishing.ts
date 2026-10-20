@@ -120,6 +120,8 @@ async function demoWarnings(state: DemoState, msg: DemoMessage, atts: DemoAttach
   const auth = msg.senderAuthentication ?? unknownDemoAuth();
   if (from && auth.dmarc === 'pass' && state.identities.some(i => foldAddress(i.address) === foldAddress(from!.address))) return out;
   if (!from) { from = { address: '', name: '' }; out.push({ kind: 'malformed_sender' }); }
+  // Mirrors phishing.HasFormatChar: parses, but need not display as what it is.
+  else if (/[\p{Cf}\p{Zl}\p{Zp}]/u.test(from.address)) out.push({ kind: 'malformed_sender' });
   const domain = warningDomain(from.address.split('@')[1] ?? '');
   if (auth.dmarc === 'fail') {
     const failed = ['dmarc']; if (!auth.dkim_aligned) failed.push('dkim_alignment'); if (['fail', 'softfail'].includes(auth.spf)) failed.push('spf');

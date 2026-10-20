@@ -1151,6 +1151,13 @@ test('demo flags a sender that is not exactly one mailbox, like Go', async () =>
   }
 });
 
+test('demo flags a format character in the sender address, like Go', async () => {
+  for (const fromAddr of ['PayPal <\u202Emoc.lapyap@ecivres>', 'service\u200B@paypal.com']) {
+    const state = newState([message({ id: 1, fromAddr })]);
+    assert.deepEqual((await call(state, 'GET', '/messages/1')).body.warnings.map(w => w.kind), ['malformed_sender', 'first_time_sender'], fromAddr);
+  }
+});
+
 test('demo sent history is independent of contacts and survives sent-message deletion', async () => {
   const state = newState([message({ id: 1, fromAddr: 'Straße@example.org' })]);
   state.contacts.push({ id: 1, address: 'strasse@example.org', name: 'Known contact' });

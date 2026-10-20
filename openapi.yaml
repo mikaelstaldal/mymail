@@ -234,7 +234,7 @@ components:
           description: auth_fail checks with negative or absent alignment evidence.
         address:
           type: string
-          description: Embedded display-name address/domain or mismatched Reply-To address.
+          description: Embedded display-name address/domain or mismatched Reply-To address, as received; it may contain invisible formatting characters, which a client should make visible.
         domain:
           type: string
           description: Decoded lookalike domain.

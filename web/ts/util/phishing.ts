@@ -2,15 +2,27 @@ import type { components } from '../api/types.js';
 import { splitAddressList } from './address.js';
 export type MessageWarning = components['schemas']['MessageWarning'];
 
+/** Invisible formatting characters: what Go's phishing.HasFormatChar flags. */
+const FORMAT_CHARS = /[\p{Cf}\p{Zl}\p{Zp}]/gu;
+const HAS_FORMAT_CHAR = /[\p{Cf}\p{Zl}\p{Zp}]/u;
+
+/** Replace invisible formatting characters with visible `<U+202E>` escapes.
+ * A bidi override inside an address reverses the text after it even inside an
+ * isolating `<bdi>`, so `\u202Emoc.lapyap@ecivres` would display as
+ * service@paypal.com. Apply it to every attacker-supplied address on display. */
+export function revealFormatChars(s: string): string {
+  return s.replace(FORMAT_CHARS, c => `<U+${c.codePointAt(0)!.toString(16).toUpperCase().padStart(4, '0')}>`);
+}
+
 /** Plain warning text; deceptive links use structured markup in MessageDetail.
  * Warning decisions belong to the server. */
 export function warningText(w: MessageWarning): string | null {
   switch (w.kind) {
     case 'malformed_sender': return 'The sender address is missing or malformed, so it cannot be checked';
     case 'auth_fail': return `This sender failed authentication checks: ${(w.failed_checks ?? []).map(c => ({ dmarc: 'DMARC', dkim_alignment: 'DKIM alignment', spf: 'SPF' })[c] ?? c).join(', ')}`;
-    case 'display_name_address': return `The sender's name contains a different address or domain: ${w.address}`;
-    case 'lookalike_domain': return `The sender's domain uses international characters: ${w.domain} (${w.punycode})${w.resembles ? `; it resembles ${w.resembles}` : ''}`;
-    case 'reply_to_mismatch': return `Replies will go to ${w.address}, on a different domain from the sender`;
+    case 'display_name_address': return `The sender's name contains a different address or domain: ${revealFormatChars(w.address ?? '')}`;
+    case 'lookalike_domain': return `The sender's domain uses international characters: ${revealFormatChars(w.domain ?? '')} (${revealFormatChars(w.punycode ?? '')})${w.resembles ? `; it resembles ${w.resembles}` : ''}`;
+    case 'reply_to_mismatch': return `Replies will go to ${revealFormatChars(w.address ?? '')}, on a different domain from the sender`;
     case 'first_time_sender': return 'You have never sent mail to this sender';
     case 'deceptive_link': return null;
     case 'risky_attachment': return `Attachment “${w.filename}” ${attachmentReason(w.reason)}`;
@@ -68,10 +80,16 @@ export function decodeWarningDomain(host: string): string {
 export function senderParts(raw: string): { name: string; address: string; ascii: string; idn: boolean } {
   // Several mailboxes (or a stray top-level comma): no one of them is the
   // sender, so show the text as received rather than pick the last `<…>`.
-  if (splitAddressList(raw).length > 1) return { name: '', address: raw.trim(), ascii: raw.trim(), idn: false };
+  if (splitAddressList(raw).length > 1) {
+    const text = revealFormatChars(raw.trim());
+    return { name: '', address: text, ascii: text, idn: false };
+  }
   const angle = raw.lastIndexOf('<');
   const original = angle >= 0 && raw.trimEnd().endsWith('>') ? raw.slice(angle + 1, raw.lastIndexOf('>')).trim() : raw.trim();
   const name = angle >= 0 ? raw.slice(0, angle).trim().replace(/^"|"$/g, '') : '';
+  // URL normalization would silently drop some of them (U+200B, U+00AD,
+  // U+FEFF), hiding the very thing the server warned about: show as received.
+  if (HAS_FORMAT_CHAR.test(original)) return { name, address: revealFormatChars(original), ascii: revealFormatChars(original), idn: false };
   const at = original.lastIndexOf('@');
   const host = original.slice(at + 1);
   let asciiHost = host.toLowerCase();
@@ -82,5 +100,6 @@ export function senderParts(raw: string): { name: string; address: string; ascii
   const decoded = decodeWarningDomain(asciiHost);
   const idn = at >= 0 && (/^xn--|\.xn--/i.test(host) || decoded !== asciiHost || /[^\x00-\x7f]/.test(host));
   const ascii = at >= 0 ? original.slice(0, at + 1) + asciiHost : original;
-  return { name, ascii, address: idn ? original.slice(0, at + 1) + decoded : original, idn };
+  const address = idn ? original.slice(0, at + 1) + decoded : original;
+  return { name, ascii: revealFormatChars(ascii), address: revealFormatChars(address), idn };
 }

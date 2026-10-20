@@ -415,6 +415,11 @@ means no authentication evidence is trusted. A nonempty value is matched exactly
 case-sensitively to the hostname after `on` in a SpamAssassin
 `X-Spam-Checker-Version` header. Exactly one checker header and one
 `X-Spam-Status` header are required; duplicates are ambiguous and give unknown.
+Fields in obsolete syntax with whitespace before the colon count as duplicates, as
+they do for SpamAssassin. The message must also have exactly one `From` field (again
+counting obsolete syntax) holding exactly one mailbox, or the result is unknown: a
+checker's DMARC rule names no domain, so it is attributable to the stored `From` only
+when no other `From` exists that it may have evaluated.
 Folded headers are unfolded. Only complete rule names from the single `tests=`
 list count; absent, empty, malformed or repeated tests lists give unknown.
 
@@ -726,8 +731,16 @@ raw RFC 5322 blob.
   addr-spec that does not parse: every consumer re-parses the stored value, and `"ceo@bank.com" <x..y@evil.example>`
   would otherwise read back as a well-formed `ceo@bank.com`, while sender authentication describes the real domain.
 
-A `From` that is not exactly one mailbox — missing, malformed, or a list — is reported by the `malformed_sender`
-warning (REQ-PHISH-02), and no contact is collected for it. Messages stored before this rule are not re-derived from
+A message with more than one `From` field stores all of them, each as above, joined into a list (or, if the join
+would read back as a single mailbox, kept as text separated by newlines so that it never parses as one). That
+includes a field in RFC 5322 obsolete syntax with whitespace before the colon (`From : x@attacker.example`), which
+`net/textproto` keeps under a different key than `From` but which a DMARC checker such as SpamAssassin counts —
+and may be the one it evaluated.
+
+A `From` that is not exactly one mailbox — missing, malformed, a list, or several fields — is reported by the
+`malformed_sender` warning (REQ-PHISH-02), and no contact is collected for it. Neither is one whose addr-spec
+contains an invisible formatting character (Unicode category Cf, such as the bidi override U+202E, or a line or
+paragraph separator), which makes `\u202Emoc.lapyap@ecivres` display as `service@paypal.com`. Messages stored before this rule are not re-derived from
 `raw`; an unparseable stored `From` gets the warning.
 
 ### `cid:` Inline Image Resolution
@@ -1622,7 +1635,8 @@ Basic authentication or tokens configured. Both discovery resources return
 - **REQ-PHISH-02:** Kinds are `auth_fail` (trusted stored DMARC failure, with failed
   DMARC/SPF checks and absent DKIM alignment), `malformed_sender` (the stored `From` is
   not exactly one mailbox — missing, malformed or several — so the sender checks below
-  have no address to examine; see § Address Headers), `display_name_address` (different
+  have no address to examine, or its addr-spec contains an invisible formatting character,
+  in which case the checks still run on it; see § Address Headers), `display_name_address` (different
   embedded address/domain), `lookalike_domain` (IDN/punycode, a mixed-script label,
   or a different own/sent-to/explicit-contact domain with an equal Unicode TR39-style skeleton),
   `reply_to_mismatch` (different registrable domains), `first_time_sender`
@@ -1664,7 +1678,7 @@ Basic authentication or tokens configured. Both discovery resources return
   the API download endpoint. The web UI asks for confirmation before risky downloads.
 - **REQ-PHISH-07:** Demo mode returns the same warning shape, keeps durable sent-to
   history in IndexedDB, and contains an intentionally suspicious sample with all
-  seven kinds a well-formed sender can produce (`malformed_sender` excludes the
+  seven kinds a well-formed sender can produce (an unparseable `From` excludes the
   other sender checks, so no one message can show all eight). It uses the same
   pinned confusables and public suffix rules as Go.
   The worker asks a controlled page to parse an inert HTML document. Synthetic
@@ -1704,6 +1718,10 @@ forwards retain their original links. The browser demo follows the same rules.
   Expanded thread bodies show their own warnings. No prominent verified badge is shown.
 - **REQ-PHISH-09:** Main and thread sender headers separate the name and always-visible
   addr-spec. Punycode domains are decoded and marked IDN, retaining the ASCII address too.
+  Invisible formatting characters in the addr-spec, in a `From` shown as received, in the
+  message list's sender column when it shows an address, and in the addresses and domains of
+  warning texts are shown as visible escapes such as `<U+202E>`: an isolating `<bdi>` keeps a
+  bidi override from leaking out, but not from reversing the text after it inside.
 - **REQ-PHISH-10:** Reply and Reply All show a note by To naming the server-reported
   mismatched Reply-To address. Risky attachments are labelled with their reason, and
   downloading one requires explicit confirmation; cancelling makes no download request.

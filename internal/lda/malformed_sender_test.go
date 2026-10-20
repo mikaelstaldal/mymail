@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/mail"
 	"net/http/httptest"
 	"testing"
 
@@ -159,4 +160,118 @@ func TestMalformedFromMustNotStoreDisplayNameAsSender(t *testing.T) {
 		assert.Equal(t, `"boss@company.org" <evil@example.com>`, from)
 		assert.Equal(t, []string{"display_name_address", "first_time_sender"}, senderKinds(d))
 	})
+}
+
+// A second From field, in obsolete `From :` syntax or not, may be the one a
+// DMARC checker evaluated (SpamAssassin strips the whitespace and takes the
+// first). Its pass must not exempt the other From as authenticated own mail.
+func TestSecondFromFieldCannotBorrowDMARCPass(t *testing.T) {
+	raw := func(from, id string) string {
+		return from + "To: own@example.com\r\nSubject: note to self\r\nMessage-ID: <" + id + ">\r\n" +
+			"X-Spam-Checker-Version: SpamAssassin 4.0.1 (2024-03-25) on checker\r\n" +
+			"X-Spam-Status: No, tests=DMARC_PASS,DKIM_VALID_AU,SPF_PASS autolearn=ham\r\n" +
+			"Content-Type: text/html; charset=utf-8\r\n\r\n" +
+			"<p><a href=\"https://evil.example/login\">example.com</a></p>\r\n"
+	}
+	setup := func(t *testing.T) *sql.DB {
+		db := openLDATestDB(t)
+		_, err := db.Exec(`INSERT INTO identities(name,address,is_default,position) VALUES('Me','own@example.com',1,0);
+			UPDATE spam_filter_settings SET trusted_checker_host='checker', enabled=0 WHERE id=1`)
+		require.NoError(t, err)
+		return db
+	}
+	t.Run("control: authenticated own-identity mail is exempt", func(t *testing.T) {
+		db := setup(t)
+		from, d := senderDeliverAndRead(t, db, raw("From: Me <own@example.com>\r\n", "ctl@x"), "ctl@x")
+		assert.Equal(t, "Me <own@example.com>", from)
+		assert.Empty(t, d.Warnings)
+	})
+	for _, tc := range []struct{ name, from, stored string }{
+		{"obsolete-syntax From", "From : x@attacker.example\r\nFrom: Me <own@example.com>\r\n", "Me <own@example.com>, x@attacker.example"},
+		{"two From fields", "From: x@attacker.example\r\nFrom: Me <own@example.com>\r\n", "x@attacker.example, Me <own@example.com>"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			db := setup(t)
+			from, d := senderDeliverAndRead(t, db, raw(tc.from, "obs@x"), "obs@x")
+			assert.Equal(t, tc.stored, from)
+			assert.Equal(t, "unknown", string(d.SenderAuthentication.Dmarc))
+			assert.Contains(t, senderKinds(d), "malformed_sender")
+			assert.Contains(t, senderKinds(d), "deceptive_link")
+			assert.Empty(t, senderContacts(t, db))
+		})
+	}
+}
+
+func TestDecodeFromFields(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		fields []string
+		want   string
+	}{
+		{"none", nil, ""},
+		{"one", []string{`"Doe, J" <j@example.com>`}, `"Doe, J" <j@example.com>`},
+		{"two", []string{"a@example.com", "B <b@example.com>"}, "a@example.com, B <b@example.com>"},
+		{"one malformed", []string{"a@example.com", "B <b@example..com>"}, "a@example.com, B <b@example..com>"},
+		// Each field is malformed alone, but joined by a comma they would
+		// read back as the single mailbox `"x, y" <ceo@bank.com>`.
+		{"straddling a quote", []string{`"x`, `y" <ceo@bank.com>`}, "\"x\n" + `y" <ceo@bank.com>`},
+		// An empty group leaves one mailbox from two fields.
+		{"empty group", []string{"undisclosed:;", "ceo@bank.com"}, ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got := decodeFromFields(tc.fields)
+			assert.Equal(t, tc.want, got)
+			if len(tc.fields) > 1 {
+				_, err := mail.ParseAddress(got)
+				assert.Error(t, err, "several From fields read back as one mailbox")
+			}
+		})
+	}
+}
+
+// A bidi override in the addr-spec makes it display as another address, even
+// inside the UI's isolating <bdi>.
+func TestFormatCharacterInSenderAddress(t *testing.T) {
+	for _, from := range []string{"PayPal <\u202emoc.lapyap@ecivres>", "Support <service@\u202emoc.lapyap>"} {
+		t.Run(from, func(t *testing.T) {
+			db := openLDATestDB(t)
+			_, d := senderDeliverAndRead(t, db, "From: "+from+fmt.Sprintf(senderBEC, "bidi@x"), "bidi@x")
+			assert.Contains(t, senderKinds(d), "malformed_sender")
+			assert.Contains(t, senderKinds(d), "first_time_sender")
+			assert.Empty(t, senderContacts(t, db), "contact collected for an address that displays as another")
+		})
+	}
+}
+
+// Display names with specials must be stored quoted, or the stored header no
+// longer parses as what was sent and every sender check is skipped.
+func TestStoredAddressHeadersKeepTheirMailboxes(t *testing.T) {
+	db := openLDATestDB(t)
+	_, err := db.Exec(`INSERT INTO messages(folder_id,from_addr,to_addr,date,created_at,updated_at)
+		VALUES(2,'me@mydomain.com','x@paypal.com, y@bank.com','2026-01-01T00:00:00Z','2026-01-01T00:00:00Z','2026-01-01T00:00:00Z')`)
+	require.NoError(t, err)
+	for i, tc := range []struct {
+		name, headers, contact string
+		want                   []string
+	}{
+		{"comma in name, lookalike domain", "From: \"Pay, Pal\" <attacker@paypa1.com>\r\n", "attacker@paypa1.com",
+			[]string{"lookalike_domain", "first_time_sender"}},
+		{"comma in names, reply-to", "From: \"Bank, Security Team\" <alerts@xn--bnk-sdd.com>\r\nReply-To: \"Bank, Billing\" <pay@evil.example>\r\n", "alerts@xn--bnk-sdd.com",
+			[]string{"lookalike_domain", "reply_to_mismatch", "first_time_sender"}},
+		{"address list in quoted name", "From: \"PayPal <service@paypal.com>, x\" <attacker@evil.example>\r\n", "attacker@evil.example",
+			[]string{"display_name_address", "first_time_sender"}},
+		{"address list in encoded name", "From: =?utf-8?q?PayPal_=3Cservice=40paypal=2Ecom=3E=2C_x?= <attacker@evil.example>\r\n", "attacker@evil.example",
+			[]string{"display_name_address", "first_time_sender"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			id := fmt.Sprintf("q%d@x", i)
+			raw := tc.headers + "To: me@mydomain.com\r\nSubject: s\r\nMessage-ID: <" + id + ">\r\n\r\nbody\r\n"
+			from, d := senderDeliverAndRead(t, db, raw, id)
+			a, err := mail.ParseAddress(from)
+			require.NoError(t, err, from)
+			assert.Equal(t, tc.contact, a.Address)
+			assert.Equal(t, tc.want, senderKinds(d))
+			assert.Contains(t, senderContacts(t, db), tc.contact)
+		})
+	}
 }

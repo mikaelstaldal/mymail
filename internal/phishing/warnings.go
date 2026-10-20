@@ -81,6 +81,17 @@ func Registrable(host string) string {
 	}
 	return d
 }
+// HasFormatChar reports whether s contains an invisible formatting character:
+// Unicode category Cf (bidi overrides and isolates, zero-width characters,
+// U+061C) or a line or paragraph separator. None belongs in an addr-spec, and
+// a bidi override there makes `\u202emoc.lapyap@ecivres` display as
+// service@paypal.com even inside an isolating <bdi>.
+func HasFormatChar(s string) bool {
+	return strings.ContainsFunc(s, func(r rune) bool {
+		return unicode.Is(unicode.Cf, r) || unicode.Is(unicode.Zl, r) || unicode.Is(unicode.Zp, r)
+	})
+}
+
 func addressDomain(addr string) string { _, d, _ := strings.Cut(addr, "@"); return Domain(d) }
 func FoldAddress(addr string) string   { return cases.Fold().String(addr) }
 
@@ -158,6 +169,10 @@ func ComputeWithLinks(m model.DBMessage, atts []api.AttachmentMeta, c Context, l
 		// Missing, malformed or several mailboxes: the sender checks below
 		// have no address to work with, so say so rather than staying silent.
 		from = &mail.Address{}
+		add(api.MessageWarningKindMalformedSender)
+	} else if HasFormatChar(from.Address) {
+		// Parses, but need not display as what it is. The checks below still
+		// run on the address as received.
 		add(api.MessageWarningKindMalformedSender)
 	}
 	if auth.Dmarc == "fail" {

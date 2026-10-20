@@ -18,6 +18,7 @@ import (
 
 	oas "github.com/mikaelstaldal/mymail/internal/api"
 	"github.com/mikaelstaldal/mymail/internal/model"
+	"github.com/mikaelstaldal/mymail/internal/phishing"
 	"github.com/mikaelstaldal/mymail/internal/repository"
 )
 
@@ -302,12 +303,13 @@ func filterMatches(pm *model.ParsedMessage, f oas.Filter) bool {
 }
 
 // parseFromAddr returns the sender to collect as a contact, or "" when the
-// stored From is not exactly one mailbox — the case phishing.Compute flags as
-// malformed_sender. Taking the first of several would collect an address the
-// sender only claimed.
+// stored From is not exactly one mailbox, or its address holds an invisible
+// formatting character — the cases phishing.Compute flags as malformed_sender.
+// Taking the first of several would collect an address the sender only
+// claimed, and a bidi override would make the contact display as another.
 func parseFromAddr(fromAddr string) (address, name string) {
 	addr, err := mail.ParseAddress(fromAddr)
-	if err != nil {
+	if err != nil || phishing.HasFormatChar(addr.Address) {
 		return "", ""
 	}
 	return addr.Address, addr.Name
