@@ -71,7 +71,7 @@ func TestOpenDBAndInitSchema(t *testing.T) {
 	// Schema version must match the latest migration.
 	var v int
 	db.QueryRow("PRAGMA user_version").Scan(&v)
-	assert.Equal(t, 12, v, "user_version")
+	assert.Equal(t, 13, v, "user_version")
 
 	// All tables must exist.
 	tables := []string{
@@ -121,7 +121,7 @@ func TestOpenDBAndInitSchema(t *testing.T) {
 	err = InitSchema(db)
 	assert.NoError(t, err, "second InitSchema")
 	db.QueryRow("PRAGMA user_version").Scan(&v)
-	assert.Equal(t, 12, v, "user_version after second run")
+	assert.Equal(t, 13, v, "user_version after second run")
 
 	// Basic FK cascade: insert a message row then delete it; attachment should cascade.
 	_, err = db.Exec(`INSERT INTO folders(id,name,slug,position) VALUES(1,'Inbox','inbox',0)`)
@@ -328,4 +328,34 @@ func TestSelfSendMigrationClassifiesProvenance(t *testing.T) {
 		require.NoError(t, db.QueryRow(`SELECT outgoing FROM messages WHERE subject=?`, tc.name).Scan(&outgoing))
 		assert.Equal(t, tc.want, outgoing, tc.name)
 	}
+}
+
+func TestOutOfRangeDateMigrationRepairsListings(t *testing.T) {
+	db, err := sqlite.Open(filepath.Join(t.TempDir(), "date-upgrade.sqlite"), 0, migrations[:12])
+	require.NoError(t, err)
+	t.Cleanup(func() { db.Close() })
+	require.NoError(t, SeedBuiltinFolders(db))
+	_, err = db.Exec(`INSERT INTO messages(id,folder_id,subject,date,created_at,updated_at) VALUES
+		(1,1,'good','2024-01-01T10:00:00Z','2024-01-01T10:00:05Z','2024-01-01T10:00:05Z'),
+		(2,1,'late','10000-01-01T23:58:00Z','2024-02-01T00:00:00Z','2024-02-01T00:00:00Z'),
+		(3,1,'early','-0001-12-31T23:00:00Z','2024-03-01T00:00:00Z','2024-03-01T00:00:00Z')`)
+	require.NoError(t, err)
+	require.NoError(t, InitSchema(db))
+
+	dates := map[int64]string{}
+	rows, err := db.Query(`SELECT id, date FROM messages`)
+	require.NoError(t, err)
+	for rows.Next() {
+		var id int64
+		var date string
+		require.NoError(t, rows.Scan(&id, &date))
+		dates[id] = date
+	}
+	require.NoError(t, rows.Err())
+	require.NoError(t, rows.Close())
+	assert.Equal(t, map[int64]string{
+		1: "2024-01-01T10:00:00Z",
+		2: "2024-02-01T00:00:00Z",
+		3: "2024-03-01T00:00:00Z",
+	}, dates, "only unparseable dates fall back to delivery time")
 }

@@ -31,6 +31,21 @@ const (
 	maxMIMEDecodedBytes = 64 << 20
 )
 
+// storableDate returns t in UTC, or nil when its UTC year is outside 1..9999.
+// net/mail.ParseDate accepts any four-digit year with any offset up to ±2359,
+// so "31 Dec 9999 … -2359" converts to year 10000 and "01 Jan 0000 … +0100" to
+// year -1. Neither formats as RFC 3339 that time.Parse reads back, and the read
+// path parses messages.date for every row of a listing, so one such message
+// would fail every folder page, search and thread it appears in. Callers treat
+// nil as an absent date and use their usual fallback.
+func storableDate(t time.Time) *time.Time {
+	u := t.UTC()
+	if y := u.Year(); y < 1 || y > 9999 {
+		return nil
+	}
+	return &u
+}
+
 // ParseMessage parses a raw RFC 5322 message into a ParsedMessage.
 // Malformed messages and messages exceeding MIME resource limits return an error.
 func ParseMessage(raw []byte) (*model.ParsedMessage, error) {
@@ -47,7 +62,7 @@ func ParseMessage(raw []byte) (*model.ParsedMessage, error) {
 	var date *time.Time
 	if ds := msg.Header.Get("Date"); ds != "" {
 		if t, err := mail.ParseDate(ds); err == nil {
-			date = &t
+			date = storableDate(t)
 		}
 	}
 

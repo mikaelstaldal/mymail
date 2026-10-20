@@ -359,11 +359,15 @@ func importMaildir(dir string, folderID int64, db *sql.DB) (imported, skipped in
 		}
 
 		// Date: header preferred, then mtime.
+		var mtime *time.Time
+		if statErr == nil {
+			mtime = storableDate(fi.ModTime())
+		}
 		var date time.Time
 		if pm.Date != nil {
 			date = pm.Date.UTC()
-		} else if statErr == nil {
-			date = fi.ModTime().UTC()
+		} else if mtime != nil {
+			date = *mtime
 		} else {
 			log.Printf("import maildir: no date or mtime for %s, skipping", msg.filename)
 			skipped++
@@ -411,8 +415,7 @@ func importMaildir(dir string, folderID int64, db *sql.DB) (imported, skipped in
 func importMbox(path string, folderID int64, db *sql.DB) (imported, skipped int, _ error) {
 	var fileMtime *time.Time
 	if fi, err := os.Stat(path); err == nil {
-		t := fi.ModTime().UTC()
-		fileMtime = &t
+		fileMtime = storableDate(fi.ModTime())
 	}
 
 	// Pass 1: collect From-separator timestamps (and implicit separator count).
@@ -577,7 +580,7 @@ func scanMboxSeparators(path string) ([]string, error) {
 func parseFromTimestamp(s string) *time.Time {
 	for _, layout := range fromLayouts {
 		if t, err := time.Parse(layout, s); err == nil {
-			return &t
+			return storableDate(t)
 		}
 	}
 	return nil
@@ -602,8 +605,7 @@ func importMbx(path string, folderID int64, db *sql.DB) (imported, skipped int, 
 
 	var fileMtime *time.Time
 	if fi, err := os.Stat(path); err == nil {
-		t := fi.ModTime().UTC()
-		fileMtime = &t
+		fileMtime = storableDate(fi.ModTime())
 	}
 
 	f, err := os.Open(path)
@@ -801,6 +803,5 @@ func parseMbxDate(s string) *time.Time {
 	if err != nil {
 		return nil
 	}
-	u := t.UTC()
-	return &u
+	return storableDate(t)
 }

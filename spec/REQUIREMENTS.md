@@ -106,6 +106,11 @@ identity return 500 otherwise — an internal data-integrity violation that shou
 When invoked with `-lda`, the program reads a single RFC 5322 message from **stdin**, stores it in the database, applies
 filters, and exits. Only `-data` is used; all server flags are irrelevant.
 
+The stored message date is the `Date:` header converted to UTC, or the delivery time when the header is absent or
+unparseable. A `Date:` whose UTC conversion falls outside years 1–9999 (e.g. `31 Dec 9999 23:59 -2359`) counts as
+unparseable, both here and in import (which then uses its own fallback chain), because such a date has no RFC 3339
+form the read path accepts. Migration to schema version 13 resets any such date already stored to the delivery time.
+
 This allows Postfix configuration like:
 
 ```

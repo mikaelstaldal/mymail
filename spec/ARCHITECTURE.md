@@ -67,6 +67,11 @@ Send paths set outgoing provenance on successful immediate and scheduled sends.
 The migration rebuilds messages and its dependent tables, preserving IDs, attachments, references,
 FTS contents and autoincrement sequence high-water marks. Import duplicate checks remain database-wide.
 
+Schema version 13 changes no DDL: it resets `messages.date` to `created_at` wherever the stored value is not a
+four-digit-year RFC 3339 string. Ingest (`lda.storableDate`, also applied to import
+fallbacks: mbx internal date, `From ` line, file mtime) now discards dates whose UTC year is outside 1–9999, which
+were previously stored as `10000-…` or `-0001-…` and failed `time.Parse` on every read that touched the row.
+
 ## Web UI
 
 ### Technology Stack
