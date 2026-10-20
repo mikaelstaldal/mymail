@@ -183,10 +183,13 @@ test('warnings explain the server signals and sender address stays visible', asy
   expect(message.warnings).toHaveLength(6);
   await page.goto(`/#/message/${message.id}`);
   const banner = page.getByRole('note', { name: 'Message warnings' });
-  await expect(banner.locator('li')).toHaveCount(6);
-  for (const detail of ['security@example.com', 'xn--exmple-4nf.com', 'help@unrelated.example', 'never sent', 'https://unrelated.example/', 'invoice.pdf.exe']) {
+  await expect(banner.locator('li')).toHaveCount(5);
+  for (const detail of ['security@example.com', 'xn--exmple-4nf.com', 'help@unrelated.example', 'https://unrelated.example/', 'invoice.pdf.exe']) {
     await expect(banner).toContainText(detail);
   }
+  // First-time sender sits beside the From address, not in the banner.
+  await expect(banner).not.toContainText('never sent');
+  await expect(page.locator('.msg-detail-header').getByRole('note', { name: 'Sender warning' })).toContainText('never sent');
   await expect(banner.locator('.phishing-warning-strong')).toHaveCount(1);
   await expect(page.locator('.msg-detail-header .sender-name')).toHaveText('security@example.com');
   await expect(page.locator('.msg-detail-header .sender-address')).toBeVisible();

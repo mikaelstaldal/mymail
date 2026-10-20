@@ -1727,8 +1727,10 @@ forwards retain their original links. The browser demo follows the same rules.
 ### Phishing signals in the web UI
 
 - **REQ-PHISH-08:** Message detail shows a non-dismissible banner above either body view,
-  with one plain-language line and server-supplied details per warning. Authentication
-  failure and lookalike-domain lines have stronger visual emphasis than first-time sender.
+  with one plain-language line and server-supplied details per warning, except the
+  first-time-sender warning, which is shown beside the From address instead (in the main
+  header and in expanded thread entries). Authentication failure and lookalike-domain lines
+  have stronger visual emphasis than other warnings.
   Link warnings stay on one line by ellipsizing long link text, destination URLs and
   decoded hosts to fit the available width; link text and destination share the
   remaining width equally. Hovering or focusing a link warning opens a tooltip

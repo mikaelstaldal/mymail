@@ -124,7 +124,16 @@ function LinkWarning({ warning }: { warning: MessageWarning }) {
   </span>;
 }
 
-function WarningBanner({ warnings }: { warnings: MessageWarning[] }) {
+/** The first-time-sender warning, shown beside the From address it is about
+ * rather than in the banner above the body. */
+function FirstTimeSenderNote({ warnings }: { warnings: MessageWarning[] }) {
+  const warning = warnings.find(w => w.kind === 'first_time_sender');
+  if (!warning) return null;
+  return <span class="sender-first-time" role="note" aria-label="Sender warning">{warningText(warning)}</span>;
+}
+
+function WarningBanner({ warnings: all }: { warnings: MessageWarning[] }) {
+  const warnings = all.filter(w => w.kind !== 'first_time_sender');
   if (!warnings.length) return null;
   return <div class="phishing-warnings" role="note" aria-label="Message warnings">
     <ul>{warnings.map((warning, i) => <li key={i} class={warning.kind === 'auth_fail' || warning.kind === 'malformed_sender' || warning.kind === 'lookalike_domain' ? 'phishing-warning-strong' : ''}>
@@ -238,7 +247,7 @@ function ThreadEntry({ entry, isCurrent, expanded, expandedMsg, expandedLoading,
             <>
               <div class="thread-expanded-meta">
                 <span class="msg-detail-label">From</span>
-                <span class="msg-detail-value"><Sender raw={expandedMsg.from_addr} /></span>
+                <span class="msg-detail-value"><Sender raw={expandedMsg.from_addr} /><FirstTimeSenderNote warnings={expandedMsg.warnings} /></span>
                 <span class="thread-expanded-sep" />
                 <span class="msg-detail-label">Date</span>
                 <span class="msg-detail-value">{formatDateFull(expandedMsg.date)}</span>
@@ -960,6 +969,7 @@ export function MessageDetail({ id, folders }: MessageDetailProps) {
           <span class="msg-detail-label">From</span>
           <span class="msg-detail-value">
             <Sender raw={msg.from_addr} />
+            <FirstTimeSenderNote warnings={msg.warnings} />
             {canAddSender && (
               <button class="btn btn-ghost btn-sm"
                 title="Edit and save this sender as a contact to suppress first-time-sender warnings"

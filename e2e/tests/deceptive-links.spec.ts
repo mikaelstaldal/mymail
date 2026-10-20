@@ -55,7 +55,9 @@ test('browser demo rewrites and confirms deceptive links through its worker', as
     });
     await page.goto(`${origin}/#/message/${selected.id}`);
     const banner = page.getByRole('note', { name: 'Message warnings' });
-    await expect(banner.locator('li')).toHaveCount(7);
+    // Seven warnings; first-time sender is shown beside From, not in the banner.
+    await expect(banner.locator('li')).toHaveCount(6);
+    await expect(page.locator('.msg-detail-header').getByRole('note', { name: 'Sender warning' })).toContainText('never sent');
     await expect(banner).toContainText('DMARC');
     await expect(banner).toContainText('help@unrelated.example');
     await page.getByRole('button', { name: /invoice.pdf.exe/ }).click();

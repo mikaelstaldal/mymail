@@ -2121,6 +2121,15 @@ html, body {
 }
 .phishing-link-tooltip > span { display: block; }
 .phishing-link-tooltip > span + span { margin-top: 6px; }
+/* First-time sender sits beside the From address: a signal, not an alarm. */
+.sender-first-time {
+  padding: 1px 8px;
+  background: var(--warning-bg);
+  border: 1px solid var(--warning-border);
+  border-radius: 4px;
+  color: var(--text-primary);
+  font-size: 12px;
+}
 .phishing-warning-strong { font-weight: 700; border-left: 4px solid currentColor; padding-left: 8px; }
 .sender-display { display: inline-flex; flex-wrap: wrap; gap: 0 8px; max-width: 100%; overflow-wrap: anywhere; }
 .sender-address, .sender-idn { font-weight: 400; }
