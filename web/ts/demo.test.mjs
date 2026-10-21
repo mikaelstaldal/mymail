@@ -1491,3 +1491,19 @@ test('nested encoded filename words finish decoding before separator removal', (
   for (let i = 0; i < 10; i++) name = '=?utf-8?b?' + Buffer.from(name).toString('base64') + '?=';
   assert.equal(normalizeAttachmentName(name), 'invoice.exe');
 });
+
+// Mirrors the repository regression: ranking applies before the result limit.
+test('contact search ranks exact addresses, saved contacts and sent history before inbound names', async () => {
+  const state = newState();
+  state.contacts = [
+    { id: 1, address: 'bob@corp.com.evil.example', name: 'bob@corp.com', explicit: false },
+    { id: 2, address: 'sent@example.com', name: 'bob@corp.com', explicit: false },
+    { id: 3, address: 'bob@corp.com', name: 'Z Bob', explicit: true },
+  ];
+  state.sentTo = ['sent@example.com'];
+  const ranked = await call(state, 'GET', '/contacts?q=BOB@CORP.COM&limit=1');
+  assert.equal(ranked.body.total, 3);
+  assert.deepEqual(ranked.body.items.map(c => c.address), ['bob@corp.com']);
+  const prefix = await call(state, 'GET', '/contacts?q=bob');
+  assert.deepEqual(prefix.body.items.map(c => c.id), [3, 2, 1]);
+});

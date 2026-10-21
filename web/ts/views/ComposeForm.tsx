@@ -557,7 +557,7 @@ function AddressField({ label, tags, onTagsChange, input, onInputChange, extra }
   const [suggestions, setSuggestions] = useState<Contact[]>([]);
   const [total, setTotal] = useState(0);
   const [showDrop, setShowDrop] = useState(false);
-  const [selIdx, setSelIdx] = useState(0);
+  const [selIdx, setSelIdx] = useState(-1);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const inputRef = useRef<HTMLInputElement | null>(null);
   // What is in the field right now, readable before the state update lands: a
@@ -573,7 +573,7 @@ function AddressField({ label, tags, onTagsChange, input, onInputChange, extra }
     onInputChange('');
     setSuggestions([]);
     setShowDrop(false);
-    setSelIdx(0);
+    setSelIdx(-1);
   }
 
   function addContact(c: Contact) {
@@ -582,7 +582,7 @@ function AddressField({ label, tags, onTagsChange, input, onInputChange, extra }
     onInputChange('');
     setSuggestions([]);
     setShowDrop(false);
-    setSelIdx(0);
+    setSelIdx(-1);
     inputRef.current?.focus();
   }
 
@@ -594,7 +594,9 @@ function AddressField({ label, tags, onTagsChange, input, onInputChange, extra }
     const v = (e.target as HTMLInputElement).value;
     inputValRef.current = v;
     onInputChange(v);
-    setSelIdx(0);
+    setSelIdx(-1);
+    setSuggestions([]);
+    setShowDrop(false);
 
     if (timerRef.current) clearTimeout(timerRef.current);
     const q = v.replace(/,$/, '').trim();
@@ -603,17 +605,18 @@ function AddressField({ label, tags, onTagsChange, input, onInputChange, extra }
     timerRef.current = setTimeout(async () => {
       try {
         const res = await api.contacts.list({ q, limit: 10 });
+        if (inputValRef.current !== v) return;
         setSuggestions(res.items);
         setTotal(res.total);
         setShowDrop(res.items.length > 0);
-        setSelIdx(0);
+        setSelIdx(-1);
       } catch { /* ignore */ }
     }, 280);
   }
 
   function handleKeyDown(e: KeyboardEvent) {
     if (e.key === 'Enter' || e.key === 'Tab' || e.key === ',') {
-      if (showDrop && suggestions.length > 0 && e.key !== 'Tab') {
+      if (showDrop && selIdx >= 0 && suggestions[selIdx] && e.key !== 'Tab') {
         e.preventDefault();
         addContact(suggestions[selIdx]);
         return;
@@ -646,7 +649,7 @@ function AddressField({ label, tags, onTagsChange, input, onInputChange, extra }
         <div class="cf-tags-input" onClick={() => inputRef.current?.focus()}>
           {tags.map((t, i) => (
             <span key={i} class="cf-addr-tag" title={addrSpec(t)}>
-              {displayName(t) || t}
+              {t}
               <button type="button" onClick={() => removeTag(i)} aria-label="Remove"><Icon name="x" size={13} /></button>
             </span>
           ))}

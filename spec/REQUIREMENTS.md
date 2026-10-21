@@ -321,6 +321,12 @@ Contacts are upserted automatically:
 
 Automatic upserts fill empty names only; provenance is independent of whether the name is empty.
 
+Contact searches rank an exact case-folded address match first, then explicitly saved contacts, then
+previously sent-to addresses, before the normal name/address order. Unfiltered listings retain alphabetical order.
+Compose autocomplete selects no suggestion until arrow-key navigation or a mouse click. Typing again clears
+selection and stale results; Enter and comma otherwise commit the typed text, and Tab always does so.
+Recipient pills show the actual address alongside any display name.
+
 ### Filters
 
 Each filter has:

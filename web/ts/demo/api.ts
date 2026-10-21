@@ -1896,12 +1896,16 @@ function listContacts(state: DemoState, url: URL): Response {
 
   const matching = state.contacts
     .filter((c) => q === null || c.name.toLowerCase().includes(q) || c.address.toLowerCase().includes(q))
-    // Named contacts first, then by name, then by address, then by id — the
+    // Search ranks exact address, explicit contacts and sent history first.
+    // Otherwise named contacts first, then name, address and id — the
     // ORDER BY in ContactRepository.ListContacts. The id is what makes it total:
     // address is unique case-sensitively, so two contacts differing only in the
     // case of their address fold together on the term before it, and paging a
     // tie needs a defined winner.
     .sort((a, b) =>
+      (q ? Number(b.address === foldAddress(q)) - Number(a.address === foldAddress(q)) ||
+        Number(b.explicit) - Number(a.explicit) ||
+        Number(demoSentTo(state).includes(b.address)) - Number(demoSentTo(state).includes(a.address)) : 0) ||
       (a.name === '' ? 1 : 0) - (b.name === '' ? 1 : 0) ||
       a.name.toLowerCase().localeCompare(b.name.toLowerCase()) ||
       a.address.toLowerCase().localeCompare(b.address.toLowerCase()) ||

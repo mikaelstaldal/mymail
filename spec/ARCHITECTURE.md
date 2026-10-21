@@ -367,3 +367,8 @@ for Reply/Reply All and displays the destination beside To. Demo uses these same
 Inbound contact collection checks the final delivery folder after spam classification and user filters.
 Junk (folder 7) skips contact upserts entirely; the shared import batch writer applies the same rule to Junk imports.
 Demo auto-reply delivery mirrors this exclusion. Existing contacts are preserved.
+
+Contact search ordering uses the exact folded address, explicit provenance and durable `sent_recipients`
+history ahead of alphabetical order, before pagination. The demo mirrors that ranking. Compose clears selection
+on input changes and ignores responses for old input; suggestion replacement requires deliberate selection.
+Recipient pills expose the addr-spec rather than hiding it behind a sender-controlled name.

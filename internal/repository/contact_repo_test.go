@@ -189,3 +189,32 @@ func TestContactMigrationDoesNotBackfillTrust(t *testing.T) {
 	require.Len(t, items, 1)
 	assert.False(t, items[0].Explicit)
 }
+
+// Remote senders must not crowd a saved exact address out of a limited search.
+func TestContactAutocompleteRanking(t *testing.T) {
+	ctx := context.Background()
+	db := openTestDB(t)
+	r := NewContactRepository(db)
+	_, err := r.CreateContact(ctx, oas.Contact{Address: "bob@corp.com", Name: "Z Bob"})
+	require.NoError(t, err)
+	for _, address := range []string{"bob@corp.com.evil.example", "other@evil.example"} {
+		require.NoError(t, r.UpsertContact(ctx, address, "bob@corp.com"))
+	}
+	q := "BOB@CORP.COM"
+	items, total, err := r.ListContacts(ctx, &q, 1, 0)
+	require.NoError(t, err)
+	assert.Equal(t, 3, total)
+	require.Len(t, items, 1)
+	assert.Equal(t, "bob@corp.com", items[0].Address)
+	q = "bob"
+	items, _, err = r.ListContacts(ctx, &q, 1, 0)
+	require.NoError(t, err)
+	require.Len(t, items, 1)
+	assert.True(t, items[0].Explicit)
+	_, err = db.Exec(`INSERT INTO sent_recipients(address) VALUES ('other@evil.example')`)
+	require.NoError(t, err)
+	items, _, err = r.ListContacts(ctx, &q, 10, 0)
+	require.NoError(t, err)
+	require.Len(t, items, 3)
+	assert.Equal(t, "other@evil.example", items[1].Address)
+}

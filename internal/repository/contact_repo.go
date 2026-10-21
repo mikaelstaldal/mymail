@@ -86,9 +86,16 @@ func (r *ContactRepository) ListContacts(ctx context.Context, q *string, limit, 
 		return nil, 0, err
 	}
 
+	order := contactOrderSQL
+	if q != nil && *q != "" {
+		order = ` ORDER BY (address = ?) DESC, explicit DESC,
+            EXISTS(SELECT 1 FROM sent_recipients WHERE sent_recipients.address = contacts.address) DESC,` +
+			strings.TrimPrefix(contactOrderSQL, " ORDER BY")
+		args = append(args, phishing.FoldAddress(*q))
+	}
 	queryArgs := append(args, limit, offset)
 	rows, err := r.db.QueryContext(ctx,
-		contactSelectSQL+where+contactOrderSQL+` LIMIT ? OFFSET ?`,
+		contactSelectSQL+where+order+` LIMIT ? OFFSET ?`,
 		queryArgs...,
 	)
 	if err != nil {
