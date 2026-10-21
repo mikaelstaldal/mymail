@@ -1040,7 +1040,10 @@ Hovering a folder in the sidebar shows a tooltip with its slug and numeric id, e
 3. **Compose / Reply / Reply All / Forward** — Form with From selector, To/Cc/Bcc/Reply-To fields (To/Cc/Bcc offer
    address autocomplete), Subject, rich-text body editor (Quill), file upload for attachments. For Reply / Reply All /
    Forward, a read-only quoted-text block sits below the editor (see Body quoting). A **Send later** toggle reveals a
-   date/time picker. Auto-saves to Drafts every 30 seconds. Navigate-away triggers an immediate draft save.
+   date/time picker. After an in-app edit, auto-saves to Drafts every 30 seconds.
+   Navigate-away saves only compositions edited in the app. Opening a compose URL alone must not create a draft,
+   including for replies and forwards. Forward attachments are previewed from the source and copied only when an
+   edit or Send first persists the draft.
 
    **Sending a draft:** the **Send** button calls `POST /drafts/{id}/send`, which reads all draft fields and attachments
    from the server, validates, sends or schedules, then deletes the draft. Attachments are never re-uploaded by the

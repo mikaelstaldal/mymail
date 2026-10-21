@@ -372,3 +372,7 @@ Contact search ordering uses the exact folded address, explicit provenance and d
 history ahead of alphabetical order, before pagination. The demo mirrors that ranking. Compose clears selection
 on input changes and ignores responses for old input; suggestion replacement requires deliberate selection.
 Recipient pills expose the addr-spec rather than hiding it behind a sender-controlled name.
+
+Compose routes pre-populate client state without creating drafts. The compose view tracks in-app edits to gate
+autosave and navigate-away persistence. A forward retains its source message ID until the first draft creation,
+which copies attachments through the existing draft API; Send may also trigger that first creation.

@@ -49,7 +49,7 @@ interface QuillEditor {
     bindings: Record<string, KeyBinding[]>;
   };
   enable(enabled: boolean): void;
-  on(event: string, handler: () => void): void;
+  on(event: string, handler: (delta: unknown, old: unknown, source: string) => void): void;
 }
 interface QuillRange { index: number; length: number }
 interface KeyContext { format: Record<string, unknown> }
@@ -737,6 +737,7 @@ export function ComposeForm({ replyId, replyAllId, forwardId, draftId }: Compose
   const [existingAttachments, setExistingAttachments] = useState<AttachmentMeta[]>([]);
   const [saveStatus, setSaveStatus] = useState<'saving' | 'saved' | 'error' | null>(null);
   const [sendInFlight, setSendInFlight] = useState(false);
+  const sendInFlightRef = useRef(false);
   const [sendError, setSendError] = useState<string | null>(null);
 
   // Threading fields (set from pre-population)
@@ -751,6 +752,13 @@ export function ComposeForm({ replyId, replyAllId, forwardId, draftId }: Compose
   // Draft persistence
   const draftIdRef = useRef<number | null>(null);
   const discardedRef = useRef(false);
+  const editedRef = useRef(false);
+  const saveInFlightRef = useRef<Promise<void> | null>(null);
+  const uploadedFilesRef = useRef(new Set<File>());
+  const forwardSourceRef = useRef(mode === 'forward' ? sourceId : undefined);
+  const forwardAttachmentsRef = useRef<AttachmentMeta[]>([]);
+  const copiedAttachmentIdsRef = useRef(new Map<number, number>());
+  const attachmentOperationRef = useRef<Promise<void>>(Promise.resolve());
   // True from the moment the Discard question goes up until it is answered, and
   // for good once it is answered "delete". `window.confirm` blocked the event
   // loop, so the 30-second autosave could not run while the user was reading
@@ -790,6 +798,7 @@ export function ComposeForm({ replyId, replyAllId, forwardId, draftId }: Compose
   }
 
   function dropQuote() {
+    editedRef.current = true;
     quoteHtmlRef.current = '';
     quoteTextRef.current = '';
     setQuoteSize(0);
@@ -875,44 +884,65 @@ export function ComposeForm({ replyId, replyAllId, forwardId, draftId }: Compose
   }, [mode]);
 
   // ── Save draft ───────────────────────────────────────────────────────────
-  const performSave = useCallback(async (pendingFiles: File[]): Promise<void> => {
-    const body = buildDraftBody();
-    const hasFiles = pendingFiles.length > 0;
-
-    try {
-      if (draftIdRef.current === null) {
-        const res = hasFiles
-          ? await api.drafts.createWithAttachments(body, pendingFiles)
-          : await api.drafts.create(body);
-        draftIdRef.current = res.id;
-        persistLocalDraft(res.updated_at);
-      } else {
-        let res: { id: number; updated_at: string };
-        try {
-          res = hasFiles
-            ? await api.drafts.updateWithAttachments(draftIdRef.current, body, pendingFiles)
-            : await api.drafts.update(draftIdRef.current, body);
-        } catch (e) {
-          if (!(e instanceof NotFoundError)) throw e;
-          // Draft was deleted externally; recreate it transparently — unless we
-          // are the ones deleting it, in which case recreating it would undo
-          // the discard the user just confirmed.
-          if (discardPendingRef.current) return;
-          draftIdRef.current = null;
-          res = hasFiles
-            ? await api.drafts.createWithAttachments(body, pendingFiles)
-            : await api.drafts.create(body);
-          draftIdRef.current = res.id;
-        }
-        persistLocalDraft(res.updated_at);
-      }
-      setFiles([]);
-      setSaveStatus('saved');
-    } catch (e) {
-      setSaveStatus('error');
-      showToast(e instanceof Error ? e.message : 'Auto-save failed');
-      throw e;
+  const performSave = useCallback((pendingFiles: File[]): Promise<void> => {
+    if (discardedRef.current || discardPendingRef.current) return Promise.resolve();
+    // Serialize first creation with autosave, Send, attachment removal and leave.
+    // A waiter takes a fresh snapshot so an edit made during a save is not lost.
+    if (saveInFlightRef.current) {
+      return saveInFlightRef.current.then(() => performSave(pendingFiles));
     }
+    pendingFiles = pendingFiles.filter(file => !uploadedFilesRef.current.has(file));
+    const saving = (async () => {
+      const body = buildDraftBody();
+      const createBody = { ...body, source_message_id: forwardSourceRef.current };
+      const hasFiles = pendingFiles.length > 0;
+
+      try {
+        if (draftIdRef.current === null) {
+          const res = hasFiles
+            ? await api.drafts.createWithAttachments(createBody, pendingFiles)
+            : await api.drafts.create(createBody);
+          draftIdRef.current = res.id;
+          forwardSourceRef.current = undefined;
+          const draft = await api.messages.get(res.id);
+          // CreateDraftCopying copies in source-ID order, before new uploads.
+          forwardAttachmentsRef.current.forEach((attachment, index) => {
+            copiedAttachmentIdsRef.current.set(attachment.id, draft.attachments[index].id);
+          });
+          setExistingAttachments(draft.attachments);
+          persistLocalDraft(res.updated_at);
+        } else {
+          let res: { id: number; updated_at: string };
+          try {
+            res = hasFiles
+              ? await api.drafts.updateWithAttachments(draftIdRef.current, body, pendingFiles)
+              : await api.drafts.update(draftIdRef.current, body);
+          } catch (e) {
+            if (!(e instanceof NotFoundError)) throw e;
+            // Draft was deleted externally; recreate it transparently — unless we
+            // are the ones deleting it, in which case recreating it would undo
+            // the discard the user just confirmed.
+            if (discardPendingRef.current) return;
+            draftIdRef.current = null;
+            res = hasFiles
+              ? await api.drafts.createWithAttachments(createBody, pendingFiles)
+              : await api.drafts.create(createBody);
+            draftIdRef.current = res.id;
+          }
+          persistLocalDraft(res.updated_at);
+        }
+        pendingFiles.forEach(file => uploadedFilesRef.current.add(file));
+        setFiles(current => current.filter(file => !uploadedFilesRef.current.has(file)));
+        setSaveStatus('saved');
+      } catch (e) {
+        setSaveStatus('error');
+        showToast(e instanceof Error ? e.message : 'Auto-save failed');
+        throw e;
+      }
+    })();
+    saveInFlightRef.current = saving;
+    void saving.finally(() => { saveInFlightRef.current = null; }).catch(() => {});
+    return saving;
   }, [buildDraftBody, persistLocalDraft]);
 
   // ── Initialization and pre-population ────────────────────────────────────
@@ -1103,6 +1133,7 @@ export function ComposeForm({ replyId, replyAllId, forwardId, draftId }: Compose
 
         // Forward: attachments copied server-side via source_message_id in POST
         if (mode === 'forward') {
+          forwardAttachmentsRef.current = msg.attachments;
           setExistingAttachments(msg.attachments);
         }
       }
@@ -1119,23 +1150,6 @@ export function ComposeForm({ replyId, replyAllId, forwardId, draftId }: Compose
       }
 
       setLoading(false);
-
-      // For forward: immediately create draft (copies attachments server-side)
-      if (mode === 'forward' && msg) {
-        setSaveStatus('saving');
-        try {
-          const res = await api.drafts.create({
-            source_message_id: sourceId,
-            identity_id: selectedIdent?.id,
-            subject: mode === 'forward' ? `Fwd: ${stripSubjectPrefixes(msg.subject)}` : undefined,
-          });
-          draftIdRef.current = res.id;
-          setSaveStatus('saved');
-        } catch (e) {
-          setSaveStatus('error');
-          showToast(e instanceof Error ? e.message : 'Failed to create draft');
-        }
-      }
     }
 
     void init();
@@ -1188,7 +1202,8 @@ export function ComposeForm({ replyId, replyAllId, forwardId, draftId }: Compose
       }
     }
 
-    q.on('text-change', () => {
+    q.on('text-change', (_delta: unknown, _old: unknown, source: string) => {
+      if (source === 'user') editedRef.current = true;
       wrapNow();
       bodyHtmlRef.current = q.root.innerHTML;
       bodyTextRef.current = q.getText();
@@ -1214,7 +1229,7 @@ export function ComposeForm({ replyId, replyAllId, forwardId, draftId }: Compose
   // ── Auto-save every 30 seconds ────────────────────────────────────────────
   useEffect(() => {
     autoSaveTimerRef.current = setInterval(async () => {
-      if (sendInFlight || discardPendingRef.current) return;
+      if (loading || !editedRef.current || sendInFlight || discardPendingRef.current) return;
       setSaveStatus('saving');
       try {
         await performSave(files);
@@ -1224,26 +1239,17 @@ export function ComposeForm({ replyId, replyAllId, forwardId, draftId }: Compose
     return () => {
       if (autoSaveTimerRef.current) clearInterval(autoSaveTimerRef.current);
     };
-  }, [performSave, files, sendInFlight]);
+  }, [performSave, files, sendInFlight, loading]);
 
   // ── Navigate-away save ────────────────────────────────────────────────────
+  const saveOnLeaveRef = useRef(() => performSave(files));
+  saveOnLeaveRef.current = () => performSave(files);
   useEffect(() => {
     return () => {
-      if (discardedRef.current) return;
-      const body = buildDraftBody();
-      if (draftIdRef.current === null) {
-        api.drafts.create(body).catch(e => {
-          const el = document.createElement('div');
-          el.style.cssText = 'position:fixed;bottom:16px;right:16px;background:#ef4444;color:#fff;padding:10px 16px;border-radius:6px;font-size:13px;z-index:9999';
-          el.textContent = 'Warning: draft not saved — ' + (e instanceof Error ? e.message : 'unknown error');
-          document.body.appendChild(el);
-          setTimeout(() => el.remove(), 6000);
-        });
-      } else {
-        api.drafts.update(draftIdRef.current, body).catch(() => {/* ignore */});
-      }
+      if (discardedRef.current || discardPendingRef.current || sendInFlightRef.current || !editedRef.current) return;
+      void saveOnLeaveRef.current().catch(() => {/* performSave shows the error */});
     };
-  }, [buildDraftBody]);
+  }, []);
 
   // ── Identity change: swap signature ─────────────────────────────────────
   function handleIdentityChange(newId: number) {
@@ -1276,22 +1282,31 @@ export function ComposeForm({ replyId, replyAllId, forwardId, draftId }: Compose
   }
 
   function removeFile(idx: number) {
+    editedRef.current = true;
     setFiles(prev => prev.filter((_, i) => i !== idx));
   }
 
-  async function removeExistingAttachment(attachId: number) {
-    if (draftIdRef.current === null) return;
-    try {
-      await api.drafts.deleteAttachment(draftIdRef.current, attachId);
-      setExistingAttachments(prev => prev.filter(a => a.id !== attachId));
-    } catch (e) {
+  function removeExistingAttachment(attachId: number): Promise<void> {
+    editedRef.current = true;
+    const operation = attachmentOperationRef.current.then(async () => {
+      if (discardedRef.current || discardPendingRef.current) return;
+      if (draftIdRef.current === null) await performSave(files);
+      else await saveInFlightRef.current;
+      const copiedId = copiedAttachmentIdsRef.current.get(attachId) ?? attachId;
+      await api.drafts.deleteAttachment(draftIdRef.current!, copiedId);
+      const draft = await api.messages.get(draftIdRef.current!);
+      setExistingAttachments(draft.attachments);
+    }).catch(e => {
       showToast(e instanceof Error ? e.message : 'Failed to remove attachment');
-    }
+    });
+    attachmentOperationRef.current = operation;
+    return operation;
   }
 
   // ── Send ─────────────────────────────────────────────────────────────────
   async function handleSend() {
-    if (sendInFlight) return;
+    if (sendInFlightRef.current) return;
+    sendInFlightRef.current = true;
     setSendInFlight(true);
     setSendError(null);
 
@@ -1309,16 +1324,19 @@ export function ComposeForm({ replyId, replyAllId, forwardId, draftId }: Compose
 
     // Save first
     try {
+      await attachmentOperationRef.current;
       setSaveStatus('saving');
       await performSave(files);
     } catch (e) {
       setSendError(e instanceof Error ? e.message : 'Save failed before send');
+      sendInFlightRef.current = false;
       setSendInFlight(false);
       return;
     }
 
     if (draftIdRef.current === null) {
       setSendError('No draft to send');
+      sendInFlightRef.current = false;
       setSendInFlight(false);
       return;
     }
@@ -1334,6 +1352,7 @@ export function ComposeForm({ replyId, replyAllId, forwardId, draftId }: Compose
       }
     } catch (e) {
       setSendError(e instanceof Error ? e.message : 'Send failed');
+      sendInFlightRef.current = false;
       setSendInFlight(false);
     }
   }
@@ -1354,7 +1373,10 @@ export function ComposeForm({ replyId, replyAllId, forwardId, draftId }: Compose
     saveStatus === 'error' ? 'Save failed' : '';
 
   return (
-    <div class="compose-form">
+    <div class="compose-form"
+      onInputCapture={() => { if (!loading) editedRef.current = true; }}
+      onChangeCapture={() => { if (!loading) editedRef.current = true; }}
+    >
       {loading && <div class="compose-loading-overlay">Loading…</div>}
       {/* Header fields */}
       <div class="compose-fields" style={loading ? 'visibility:hidden' : ''}>
@@ -1381,7 +1403,7 @@ export function ComposeForm({ replyId, replyAllId, forwardId, draftId }: Compose
         <AddressField
           label="To"
           tags={to}
-          onTagsChange={setTo}
+          onTagsChange={tags => { editedRef.current = true; setTo(tags); }}
           input={toInput}
           onInputChange={setToInput}
           extra={
@@ -1400,12 +1422,12 @@ export function ComposeForm({ replyId, replyAllId, forwardId, draftId }: Compose
 
         {/* Cc */}
         {showCc && (
-          <AddressField label="Cc" tags={cc} onTagsChange={setCc} input={ccInput} onInputChange={setCcInput} />
+          <AddressField label="Cc" tags={cc} onTagsChange={tags => { editedRef.current = true; setCc(tags); }} input={ccInput} onInputChange={setCcInput} />
         )}
 
         {/* Bcc */}
         {showBcc && (
-          <AddressField label="Bcc" tags={bcc} onTagsChange={setBcc} input={bccInput} onInputChange={setBccInput} />
+          <AddressField label="Bcc" tags={bcc} onTagsChange={tags => { editedRef.current = true; setBcc(tags); }} input={bccInput} onInputChange={setBccInput} />
         )}
 
         {/* Subject */}
@@ -1476,7 +1498,7 @@ export function ComposeForm({ replyId, replyAllId, forwardId, draftId }: Compose
             value={sendAt}
             onInput={e => setSendAt((e.target as HTMLInputElement).value)}
           />
-          <button type="button" class="btn btn-ghost btn-sm" onClick={() => { setSendLater(false); setSendAt(''); }}>
+          <button type="button" class="btn btn-ghost btn-sm" onClick={() => { editedRef.current = true; setSendLater(false); setSendAt(''); }}>
             Cancel
           </button>
         </div>
@@ -1516,8 +1538,11 @@ export function ComposeForm({ replyId, replyAllId, forwardId, draftId }: Compose
         <button
           class="btn btn-ghost btn-sm ml-auto"
           onClick={async () => {
+            discardPendingRef.current = true;
+            // A first save may still be copying forward attachments.
+            await saveInFlightRef.current?.catch(() => {});
+            await attachmentOperationRef.current;
             if (draftIdRef.current !== null) {
-              discardPendingRef.current = true;
               if (await confirmDialog({
                 title: 'Discard draft',
                 body: 'Permanently delete this draft? This cannot be undone.',

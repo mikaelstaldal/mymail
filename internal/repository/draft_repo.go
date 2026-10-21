@@ -228,7 +228,7 @@ func (r *DraftRepository) CreateDraftCopying(ctx context.Context, msg model.DBMe
 
 		if _, err := tx.ExecContext(ctx,
 			`INSERT INTO attachments (message_id, filename, content_type, size, data)
-			 SELECT ?, filename, content_type, size, data FROM attachments WHERE message_id = ?`,
+			 SELECT ?, filename, content_type, size, data FROM attachments WHERE message_id = ? ORDER BY id`,
 			draftID, *sourceMessageID,
 		); err != nil {
 			return 0, err
