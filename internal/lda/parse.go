@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/jaytaylor/html2text"
+	"github.com/mikaelstaldal/mymail/internal/attachmentname"
 	"github.com/mikaelstaldal/mymail/internal/service"
 
 	"github.com/mikaelstaldal/mymail/internal/model"
@@ -242,6 +243,7 @@ func traversePart(rawCT, rawCTE string, headers headerGetter, rawBody []byte, st
 	if dispFilename != "" {
 		filename = dispFilename
 	}
+	filename = attachmentname.Normalize(filename)
 
 	contentID := ""
 	if rawCID := headers.Get("Content-Id"); rawCID != "" {

@@ -10,6 +10,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/mikaelstaldal/mymail/internal/api"
+	"github.com/mikaelstaldal/mymail/internal/attachmentname"
 	"github.com/mikaelstaldal/mymail/internal/phishing"
 	"github.com/mikaelstaldal/mymail/internal/repository"
 	"github.com/mikaelstaldal/mymail/internal/senderauth"
@@ -510,25 +511,10 @@ func toInt64IDs(ids []int) []int64 {
 	return out
 }
 
-// contentDispositionFilename builds a Content-Disposition header value.
-// CR, LF, NUL, and " are stripped in a single pass; non-ASCII triggers RFC 8187 encoding.
+// contentDispositionFilename uses the same normalization as phishing.AttachmentRisk.
+// Always use RFC 8187 so browsers cannot reinterpret quoted-pairs or encoded words.
 func contentDispositionFilename(name string) string {
-	var b strings.Builder
-	hasNonASCII := false
-	for _, r := range name {
-		if r == '\r' || r == '\n' || r == '\x00' || r == '"' {
-			continue
-		}
-		if r > 127 {
-			hasNonASCII = true
-		}
-		b.WriteRune(r)
-	}
-	clean := b.String()
-	if hasNonASCII {
-		return "attachment; filename*=UTF-8''" + rfc8187Encode(clean)
-	}
-	return fmt.Sprintf(`attachment; filename="%s"`, clean)
+	return "attachment; filename*=UTF-8''" + rfc8187Encode(attachmentname.Normalize(name))
 }
 
 // rfc8187Encode percent-encodes a string per RFC 8187 (attr-char set preserved).

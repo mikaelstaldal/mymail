@@ -15,6 +15,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/mikaelstaldal/mymail/internal/api"
+	"github.com/mikaelstaldal/mymail/internal/attachmentname"
 	"github.com/mikaelstaldal/mymail/internal/model"
 	"github.com/mikaelstaldal/mymail/internal/sanitize"
 	"github.com/mikaelstaldal/mymail/internal/senderauth"
@@ -505,6 +506,7 @@ func init() {
 	}
 }
 func AttachmentRisk(name, contentType string) string {
+	name = attachmentname.Normalize(name)
 	name = strings.ToLower(strings.TrimRight(strings.TrimSpace(name), ". "))
 	ext := filepath.Ext(name)
 	if prior := filepath.Ext(strings.TrimSuffix(name, ext)); ext != "" && prior != "" && prior != "." {

@@ -32,20 +32,9 @@ function noContentResponse(): Response {
   return new Response(null, { status: 204, headers: { 'Cache-Control': 'no-store' } });
 }
 
-/**
- * Mirrors handler.contentDispositionFilename: CR, LF, NUL and " are stripped in
- * a single pass, and a non-ASCII name switches to the RFC 8187 form.
- */
+/** Mirrors handler.contentDispositionFilename, including existing stored names. */
 function contentDisposition(filename: string): string {
-  let clean = '';
-  let hasNonASCII = false;
-  for (const ch of filename) {
-    if (ch === '\r' || ch === '\n' || ch === '\0' || ch === '"') continue;
-    if (ch.codePointAt(0)! > 127) hasNonASCII = true;
-    clean += ch;
-  }
-  if (hasNonASCII) return `attachment; filename*=UTF-8''${rfc8187Encode(clean)}`;
-  return `attachment; filename="${clean}"`;
+  return `attachment; filename*=UTF-8''${rfc8187Encode(normalizeAttachmentName(filename))}`;
 }
 
 /** Mirrors handler.rfc8187Encode: percent-encode everything outside attr-char. */

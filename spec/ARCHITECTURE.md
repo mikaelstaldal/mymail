@@ -283,6 +283,11 @@ requests open an equivalent read snapshot for metadata and warnings. `ComputeWit
 produces the API warning list without changing stored mail, routing or downloads.
 CLI and MCP forward that message JSON unchanged; no new operation is added.
 
+`internal/attachmentname.Normalize` supplies the common filename interpretation for MIME ingestion,
+phishing attachment risk checks and RFC 8187 download headers. Applying it again at use time protects
+legacy database rows without rewriting stored mail. Warning filenames still identify the original
+attachment metadata, so the UI associates the confirmation with the correct attachment.
+
 Migration v10 introduces `sent_recipients`, independent of contacts, with generated
 IDNA registrable-domain and Unicode-skeleton columns and a skeleton index. Deterministic SQLite
 functions parse each To/Cc/Bcc list and casefold addr-specs. Insert-into-Sent and

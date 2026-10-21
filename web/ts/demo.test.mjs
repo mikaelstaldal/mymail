@@ -1466,3 +1466,28 @@ test('subject fallback bounds Unicode subjects before stripping prefixes', async
     assert.equal(res.body.items.length, expected);
   }
 });
+
+test('attachment risk matches normalized download names, including legacy rows', () => {
+  const { demoAttachmentRisk, contentDisposition } = vm.runInThisContext('({ demoAttachmentRisk, contentDisposition })');
+  for (const name of ['invoice.e\nxe', 'invoice.exe\0', 'invoice.exe"', 'invoice.e"xe', 'invoice.e\\xe', '=?utf-8?b?aW52b2ljZS5leGU=?=', 'invoice.e\u202exe', 'invoice.=?utf-8?q?ex?= =?utf-8?q?e?=']) {
+    const header = contentDisposition(name);
+    const saved = decodeURIComponent(header.split("UTF-8''")[1]);
+    assert.equal(saved, 'invoice.exe');
+    assert.equal(demoAttachmentRisk(name, 'application/octet-stream'), 'executable_extension');
+    assert.equal(demoAttachmentRisk(saved, 'application/octet-stream'), 'executable_extension');
+  }
+});
+
+ test('legacy filename decoder rejects malformed words like Go', () => {
+   const { normalizeAttachmentName } = vm.runInThisContext('({ normalizeAttachmentName })');
+   for (const name of ['=?utf-8?q?bad=xx?=', '=?utf-8?b?Z Xhl?=', '=?utf-8?b?ZXhlLg?=']) assert.equal(normalizeAttachmentName(name), name);
+   assert.equal(normalizeAttachmentName('=?us-ascii?q?=FF?='), '\ufffd');
+   assert.equal(normalizeAttachmentName('\0\u202e\\/"'), '');
+ });
+
+test('nested encoded filename words finish decoding before separator removal', () => {
+  const { normalizeAttachmentName } = vm.runInThisContext('({ normalizeAttachmentName })');
+  let name = 'invoice.exe';
+  for (let i = 0; i < 10; i++) name = '=?utf-8?b?' + Buffer.from(name).toString('base64') + '?=';
+  assert.equal(normalizeAttachmentName(name), 'invoice.exe');
+});

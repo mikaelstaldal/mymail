@@ -95,8 +95,64 @@ function warningMixed(host: string): boolean {
   return decodeWarningDomain(host).split('.').some(label => warningScriptPatterns.filter(p => p.test(label)).length > 1);
 }
 const warningExtensions = new Set('exe com bat cmd scr pif msi msp dll cpl ocx sys drv ps1 ps2 psm1 psd1 vbs vbe js jse wsf wsh hta sh bash zsh ksh fish py pyw rb pl php jar apk app dmg pkg deb rpm run desktop lnk reg vb vba iso img chm xll scpt scptd command url website gadget inf html htm xhtml shtml svg docm dotm xlsm xltm xlam pptm potm ppam ppsm sldm'.split(' '));
+/** Mirrors mime.WordDecoder.DecodeHeader for legacy attachment names. */
+function decodeAttachmentWords(header: string): string {
+  const original = header;
+  let out = '', betweenWords = false;
+  for (;;) {
+    const start = header.indexOf('=?');
+    if (start < 0) break;
+    const charsetEnd = header.indexOf('?', start + 2);
+    if (charsetEnd < 0 || header.length < charsetEnd + 5 || header[charsetEnd + 2] !== '?') break;
+    const end = header.indexOf('?=', charsetEnd + 3);
+    if (end < 0) break;
+    const kind = header[charsetEnd + 1].toLowerCase();
+    const text = header.slice(charsetEnd + 3, end);
+    let raw: string;
+    try {
+      if (kind === 'b') {
+        const compact = text.replace(/[\r\n]/g, '');
+        if (!/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(compact)) throw new Error('invalid base64');
+        raw = atob(compact);
+      } else if (kind === 'q') {
+        if (/[^\x20-\x7e\r\n\t]|=(?![0-9a-f]{2})/i.test(text)) throw new Error('invalid Q word');
+        raw = text.replace(/_/g, ' ').replace(/=([0-9a-f]{2})/gi, (_: string, hex: string) => String.fromCharCode(parseInt(hex, 16)));
+      } else throw new Error('invalid encoding');
+    } catch {
+      out += header.slice(0, end + 2);
+      header = header.slice(end + 2);
+      betweenWords = false;
+      continue;
+    }
+    const prefix = header.slice(0, start);
+    if (!betweenWords || /[^ \t\r\n]/.test(prefix)) out += prefix;
+    const charset = header.slice(start + 2, charsetEnd).toLowerCase();
+    try {
+      if (charset === 'iso-8859-1') out += raw;
+      else if (charset === 'us-ascii') out += raw.replace(/[\x80-\xff]/g, '\ufffd');
+      else out += new TextDecoder(charset).decode(Uint8Array.from(raw, ch => ch.charCodeAt(0)));
+    } catch { return original; }
+    header = header.slice(end + 2);
+    betweenWords = true;
+  }
+  return out + header;
+}
+
+/** Mirrors attachmentname.Normalize, including legacy RFC 2047 filenames. */
+function normalizeAttachmentName(name: string): string {
+  for (;;) {
+    const previous = name;
+    for (;;) {
+      const decoded = decodeAttachmentWords(name);
+      if (decoded === name) break;
+      name = decoded;
+    }
+    name = name.replace(/[\p{Cc}\p{Cf}"\\/]/gu, '');
+    if (name === previous) return name;
+  }
+}
 function demoAttachmentRisk(name: string, type: string): string {
-  name = name.trim().replace(/[. ]+$/, '').toLowerCase(); const parts = name.split('.');
+  name = normalizeAttachmentName(name).trim().replace(/[. ]+$/, '').toLowerCase(); const parts = name.split('.');
   if (parts.length > 2 && parts[parts.length - 1] && parts[parts.length - 2]) return 'double_extension';
   if (parts.length > 1 && warningExtensions.has(parts[parts.length - 1])) return 'executable_extension';
   type = type.split(';')[0].trim().toLowerCase();

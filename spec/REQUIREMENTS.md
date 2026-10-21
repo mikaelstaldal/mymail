@@ -1754,6 +1754,10 @@ forwards retain their original links. The browser demo follows the same rules.
 - **REQ-PHISH-10:** Reply and Reply All show a note by To naming the server-reported
   mismatched Reply-To address. Risky attachments are labelled with their reason, and
   downloading one requires explicit confirmation; cancelling makes no download request.
+  Attachment names are decoded from legacy MIME encoded words and stripped of control,
+  Unicode format, quote and path-separator characters before storage. Risk checks and download
+  headers apply the same normalization at use time, including for previously stored attachments;
+  download headers use RFC 8187 encoding to prevent filename reinterpretation.
   Ordinary attachments retain direct downloads. Browser demo uses the same UI and its
   intentionally suspicious sample exercises every warning kind but `malformed_sender`.
   When the server reports `malformed_sender`, the "Add sender to contacts" shortcut is

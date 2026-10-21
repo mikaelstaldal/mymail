@@ -323,7 +323,7 @@ func TestBearerReadUsesAuthorizationSnapshot(t *testing.T) {
 			switch tc.name {
 			case "attachment move":
 				assert.Equal(t, "before", w.Body.String())
-				assert.Equal(t, `attachment; filename="before.txt"`, w.Header().Get("Content-Disposition"))
+				assert.Equal(t, `attachment; filename*=UTF-8''before.txt`, w.Header().Get("Content-Disposition"))
 			case "raw", "headers", "body":
 				assert.Contains(t, w.Body.String(), "before")
 				assert.NotContains(t, w.Body.String(), "later")
