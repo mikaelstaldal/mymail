@@ -12,6 +12,8 @@ import (
 	"net/textproto"
 	"strings"
 	"time"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/jaytaylor/html2text"
 	"github.com/mikaelstaldal/mymail/internal/attachmentname"
@@ -68,9 +70,10 @@ func ParseMessage(raw []byte) (*model.ParsedMessage, error) {
 	}
 
 	var messageID *string
-	if mid := msg.Header.Get("Message-Id"); mid != "" {
-		if fields := strings.Fields(mid); len(fields) > 0 {
-			s := stripAngles(fields[0])
+	if mid := strings.TrimSpace(msg.Header.Get("Message-Id")); mid != "" {
+		balanced := strings.HasPrefix(mid, "<") == strings.HasSuffix(mid, ">")
+		s := stripAngles(mid)
+		if balanced && validMessageID(s) {
 			messageID = &s
 		}
 	}
@@ -484,4 +487,18 @@ func truncateRefs(refs []string) []string {
 		total += length
 	}
 	return refs
+}
+
+// Reject empty and structurally invalid IDs rather than sharing a
+// database identity between unrelated malformed messages.
+func validMessageID(id string) bool {
+	if !utf8.ValidString(id) || strings.Count(id, "@") != 1 || strings.HasPrefix(id, "@") || strings.HasSuffix(id, "@") {
+		return false
+	}
+	for _, c := range id {
+		if unicode.IsControl(c) || unicode.IsSpace(c) || strings.ContainsRune("<>(),;:\"", c) {
+			return false
+		}
+	}
+	return true
 }

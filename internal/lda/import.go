@@ -204,8 +204,19 @@ func commitBatch(ctx context.Context, db *sql.DB, batch []batchEntry, folderID i
 	}
 	var insertedRows []insertedEntry
 
+	// Serialize the content-aware duplicate checks with all competing inserts.
+	if _, err := tx.ExecContext(ctx, `UPDATE messages SET id = id WHERE 0`); err != nil {
+		return 0, err
+	}
 	for _, e := range batch {
 		pm := e.pm
+		duplicate, err := isDuplicate(ctx, tx, pm.MessageID, e.raw, false)
+		if err != nil {
+			return 0, err
+		}
+		if duplicate {
+			continue
+		}
 		var inReplyTo, refs any
 		if pm.InReplyTo != nil {
 			inReplyTo = *pm.InReplyTo
@@ -213,19 +224,20 @@ func commitBatch(ctx context.Context, db *sql.DB, batch []batchEntry, folderID i
 		if len(pm.References) > 0 {
 			refs = strings.Join(pm.References, "\n")
 		}
+		fingerprint := deliveryFingerprint(e.raw)
 		res, err := tx.ExecContext(ctx, `
 			INSERT OR IGNORE INTO messages (
 				folder_id, message_id, in_reply_to, "references",
 				from_addr, to_addr, cc_addr, bcc_addr, reply_to_addr, subject,
 				date, body_text, body_html, raw, read, flagged,
 				has_attachments, has_external_images,
-				send_failure_count, created_at, updated_at, outgoing
-			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?)`,
+				send_failure_count, created_at, updated_at, outgoing, content_fingerprint
+			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?)`,
 			folderID, pm.MessageID, inReplyTo, refs,
 			pm.FromAddr, pm.ToAddr, pm.CcAddr, pm.BccAddr, pm.ReplyToAddr, pm.Subject,
 			e.date, pm.BodyText, pm.BodyHTML, e.raw, e.read, e.flagged,
 			boolInt(len(pm.Attachments) > 0), boolInt(pm.HasExternalImages),
-			now, now, boolInt(folderID == 2),
+			now, now, boolInt(folderID == 2), fingerprint[:],
 		)
 		if err != nil {
 			return 0, err
@@ -377,9 +389,7 @@ func importMaildir(dir string, folderID int64, db *sql.DB) (imported, skipped in
 		// Duplicate check.
 		if pm.MessageID != nil {
 			var exists bool
-			if err := db.QueryRowContext(ctx,
-				`SELECT EXISTS(SELECT 1 FROM messages WHERE message_id = ?)`, *pm.MessageID,
-			).Scan(&exists); err != nil {
+			if exists, err = isDuplicate(ctx, db, pm.MessageID, raw, false); err != nil {
 				log.Printf("import maildir: duplicate check %s: %v", msg.filename, err)
 			} else if exists {
 				skipped++
@@ -519,9 +529,7 @@ func importMbox(path string, folderID int64, db *sql.DB) (imported, skipped int,
 		// Duplicate check.
 		if pm.MessageID != nil {
 			var exists bool
-			if err := db.QueryRowContext(ctx,
-				`SELECT EXISTS(SELECT 1 FROM messages WHERE message_id = ?)`, *pm.MessageID,
-			).Scan(&exists); err != nil {
+			if exists, err = isDuplicate(ctx, db, pm.MessageID, raw, false); err != nil {
 				log.Printf("import mbox %s[%d]: duplicate check: %v", path, msgIdx, err)
 			} else if exists {
 				skipped++
@@ -760,9 +768,7 @@ func importMbx(path string, folderID int64, db *sql.DB) (imported, skipped int, 
 		// Duplicate check.
 		if pm.MessageID != nil {
 			var exists bool
-			if err := db.QueryRowContext(ctx,
-				`SELECT EXISTS(SELECT 1 FROM messages WHERE message_id = ?)`, *pm.MessageID,
-			).Scan(&exists); err != nil {
+			if exists, err = isDuplicate(ctx, db, pm.MessageID, raw, false); err != nil {
 				log.Printf("import mbx %s[%d]: duplicate check: %v", path, msgIdx, err)
 			} else if exists {
 				skipped++

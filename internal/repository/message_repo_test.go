@@ -950,3 +950,32 @@ func TestThreadSubjectDeadlineInterruptsSQLite(t *testing.T) {
 	require.NoError(t, db.QueryRowContext(ctx, `SELECT COUNT(*) FROM messages`).Scan(&count))
 	assert.Equal(t, 20000, count)
 }
+
+func TestThreadPrefersOrdinaryCopyOfCollidingID(t *testing.T) {
+	for _, folder := range []int{4, 7} {
+		t.Run(fmt.Sprint(folder), func(t *testing.T) {
+			db := openTestDB(t)
+			r := NewMessageRepository(db)
+			plant := makeMsg(folder, "plant")
+			plant.MessageID = sql.NullString{String: "collision@example.com", Valid: true}
+			plantedID, err := r.InsertMessage(t.Context(), plant)
+			require.NoError(t, err)
+			genuine := makeMsg(1, "genuine")
+			genuine.MessageID = plant.MessageID
+			genuineID, err := r.InsertMessage(t.Context(), genuine)
+			require.NoError(t, err)
+			reply := makeMsg(1, "reply")
+			reply.InReplyTo = plant.MessageID
+			replyID, err := r.InsertMessage(t.Context(), reply)
+			require.NoError(t, err)
+			messages, _, err := r.GetMessageThread(t.Context(), replyID)
+			require.NoError(t, err)
+			var ids []int64
+			for _, message := range messages {
+				ids = append(ids, int64(message.ID))
+			}
+			assert.ElementsMatch(t, []int64{genuineID, replyID}, ids)
+			assert.NotContains(t, ids, plantedID)
+		})
+	}
+}

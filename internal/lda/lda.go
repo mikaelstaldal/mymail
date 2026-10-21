@@ -52,10 +52,9 @@ func runCore(db *sql.DB, rawBytes []byte) int {
 	if pm.MessageID != nil {
 		var exists bool
 		if err := withRetry(func() error {
-			return db.QueryRowContext(ctx,
-				`SELECT EXISTS(SELECT 1 FROM messages WHERE message_id = ? AND outgoing = 0)`,
-				*pm.MessageID,
-			).Scan(&exists)
+			var err error
+			exists, err = isDuplicate(ctx, db, pm.MessageID, rawBytes, true)
+			return err
 		}); err != nil {
 			log.Printf("lda: duplicate check: %v", err)
 			return 75
@@ -159,6 +158,20 @@ func runCore(db *sql.DB, rawBytes []byte) int {
 		}
 		defer tx.Rollback() //nolint:errcheck
 
+		// Acquire the writer lock before checking, including concurrent deliveries
+		// whose transport headers differ but whose content is identical.
+		if _, err := tx.ExecContext(ctx, `UPDATE messages SET id = id WHERE 0`); err != nil {
+			return err
+		}
+		duplicate, err := isDuplicate(ctx, tx, pm.MessageID, rawBytes, true)
+		if err != nil {
+			return err
+		}
+		if duplicate {
+			newID = 0
+			return nil
+		}
+
 		// Read the authentication host and generation in the same transaction
 		// as insertion, so a concurrent settings change cannot bless stale results.
 		var authHost string
@@ -179,19 +192,20 @@ func runCore(db *sql.DB, rawBytes []byte) int {
 			refsVal = strings.Join(pm.References, "\n")
 		}
 
+		fingerprint := deliveryFingerprint(rawBytes)
 		res, err := tx.ExecContext(ctx, `
 			INSERT OR IGNORE INTO messages (
 				folder_id, message_id, in_reply_to, "references",
 				from_addr, to_addr, cc_addr, bcc_addr, reply_to_addr, subject,
 				date, body_text, body_html, raw, read, flagged,
 				has_attachments, has_external_images,
-				send_failure_count, created_at, updated_at, sender_authentication, auth_generation
-			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, 0, ?, ?, ?, ?)`,
+				send_failure_count, created_at, updated_at, sender_authentication, auth_generation, content_fingerprint
+			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, 0, ?, ?, ?, ?, ?)`,
 			folderID, *pm.MessageID, inReplyToVal, refsVal,
 			pm.FromAddr, pm.ToAddr, pm.CcAddr, pm.BccAddr, pm.ReplyToAddr, pm.Subject,
 			dateStr, pm.BodyText, pm.BodyHTML, rawBytes, boolInt(markRead),
 			boolInt(len(pm.Attachments) > 0), boolInt(pm.HasExternalImages),
-			now, now, senderauth.Encode(senderauth.Parse(rawBytes, authHost)), authGeneration,
+			now, now, senderauth.Encode(senderauth.Parse(rawBytes, authHost)), authGeneration, fingerprint[:],
 		)
 		if err != nil {
 			return err

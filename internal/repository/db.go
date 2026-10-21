@@ -35,6 +35,7 @@ var migrations = [][]string{
 	// such rows were stored as "10000-…" or "-0001-…", which time.Parse rejects
 	// and so failed every listing containing them. Fall back to delivery time.
 	{`UPDATE messages SET date = created_at WHERE date NOT GLOB '[0-9][0-9][0-9][0-9]-*'`},
+	schemaV14(),
 }
 
 // OpenDB opens the SQLite database at path, enables foreign keys, sets the

@@ -1507,3 +1507,15 @@ test('contact search ranks exact addresses, saved contacts and sent history befo
   const prefix = await call(state, 'GET', '/contacts?q=bob');
   assert.deepEqual(prefix.body.items.map(c => c.id), [3, 2, 1]);
 });
+
+test('thread lookup prefers ordinary copies over colliding Junk or Trash mail', async () => {
+  for (const folderId of [4, 7]) {
+    const state = newState([
+      message({ id: 1, messageId: 'collision@x', subject: 'Plant', folderId }),
+      message({ id: 2, messageId: 'collision@x', subject: 'Genuine' }),
+      message({ id: 3, messageId: 'reply@x', inReplyTo: 'collision@x', subject: 'Reply' }),
+    ]);
+    const res = await call(state, 'GET', '/messages/3/thread');
+    assert.deepEqual(res.body.items.map((m) => m.id), [2, 3]);
+  }
+});

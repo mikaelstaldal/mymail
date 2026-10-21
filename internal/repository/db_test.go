@@ -71,7 +71,7 @@ func TestOpenDBAndInitSchema(t *testing.T) {
 	// Schema version must match the latest migration.
 	var v int
 	db.QueryRow("PRAGMA user_version").Scan(&v)
-	assert.Equal(t, 13, v, "user_version")
+	assert.Equal(t, 14, v, "user_version")
 
 	// All tables must exist.
 	tables := []string{
@@ -121,7 +121,7 @@ func TestOpenDBAndInitSchema(t *testing.T) {
 	err = InitSchema(db)
 	assert.NoError(t, err, "second InitSchema")
 	db.QueryRow("PRAGMA user_version").Scan(&v)
-	assert.Equal(t, 13, v, "user_version after second run")
+	assert.Equal(t, 14, v, "user_version after second run")
 
 	// Basic FK cascade: insert a message row then delete it; attachment should cascade.
 	_, err = db.Exec(`INSERT INTO folders(id,name,slug,position) VALUES(1,'Inbox','inbox',0)`)
@@ -358,4 +358,43 @@ func TestOutOfRangeDateMigrationRepairsListings(t *testing.T) {
 		2: "2024-02-01T00:00:00Z",
 		3: "2024-03-01T00:00:00Z",
 	}, dates, "only unparseable dates fall back to delivery time")
+}
+
+func TestContentCollisionMigrationPreservesMovedProvenance(t *testing.T) {
+	db, err := sqlite.Open(filepath.Join(t.TempDir(), "collision-upgrade.sqlite"), 0, migrations[:13])
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, db.Close()) })
+	require.NoError(t, SeedBuiltinFolders(db))
+	_, err = db.Exec(`INSERT INTO messages(id,folder_id,message_id,subject,date,created_at,updated_at,raw,outgoing)
+ VALUES(10,4,'collision@example.com','movedsent','2026-01-01','2026-01-01','2026-01-01',x'0102',1),
+ (11,2,'received@example.com','movedreceived','2026-01-01','2026-01-01','2026-01-01',x'0304',0);
+ INSERT INTO attachments(id,message_id,filename,content_type,size,data) VALUES(12,10,'a','text/plain',2,x'0304');
+ INSERT INTO message_references VALUES(10,'parent@example.com');
+ UPDATE sqlite_sequence SET seq=100 WHERE name IN ('messages','attachments')`)
+	require.NoError(t, err)
+	require.NoError(t, InitSchema(db))
+	var outgoing, count, sequence int
+	require.NoError(t, db.QueryRow(`SELECT outgoing FROM messages WHERE id=10 AND raw=x'0102'`).Scan(&outgoing))
+	assert.Equal(t, 1, outgoing)
+	require.NoError(t, db.QueryRow(`SELECT outgoing FROM messages WHERE id=11`).Scan(&outgoing))
+	assert.Zero(t, outgoing)
+	require.NoError(t, db.QueryRow(`SELECT count(*) FROM attachments WHERE id=12 AND message_id=10`).Scan(&count))
+	assert.Equal(t, 1, count)
+	require.NoError(t, db.QueryRow(`SELECT count(*) FROM message_references WHERE message_id=10`).Scan(&count))
+	assert.Equal(t, 1, count)
+	require.NoError(t, db.QueryRow(`SELECT count(*) FROM messages_fts WHERE messages_fts MATCH 'movedsent'`).Scan(&count))
+	assert.Equal(t, 1, count)
+	require.NoError(t, db.QueryRow(`SELECT seq FROM sqlite_sequence WHERE name='messages'`).Scan(&sequence))
+	assert.Equal(t, 100, sequence)
+	_, err = db.Exec(`INSERT INTO messages(folder_id,message_id,date,created_at,updated_at,raw,outgoing)
+ VALUES(1,'collision@example.com','2026-01-01','2026-01-01','2026-01-01',x'0506',1)`)
+	require.NoError(t, err, "distinct raw content must survive colliding IDs")
+	_, err = db.Exec(`INSERT INTO messages(folder_id,message_id,date,created_at,updated_at,raw,outgoing)
+ VALUES(1,'received@example.com','2026-01-01','2026-01-01','2026-01-01',x'0708',0)`)
+	require.NoError(t, err, "a received collision must coexist with a v13 received copy")
+	rows, err := db.Query(`PRAGMA foreign_key_check`)
+	require.NoError(t, err)
+	defer rows.Close()
+	assert.False(t, rows.Next())
+	require.NoError(t, rows.Err())
 }

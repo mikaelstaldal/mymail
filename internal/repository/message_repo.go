@@ -1146,6 +1146,10 @@ func (r *MessageRepository) threadBackwardQuery(
 
 	sb.WriteString(`SELECT id, message_id, in_reply_to, "references" FROM messages WHERE message_id IN (` + placeholders(len(refIDs)) + `)`)
 	args = append(args, stringArgs(refIDs)...)
+	// A quarantined colliding ID must not displace an ordinary copy.
+	sb.WriteString(` AND (folder_id NOT IN (4, 7) OR NOT EXISTS (
+      SELECT 1 FROM messages AS ordinary WHERE ordinary.message_id = messages.message_id
+      AND ordinary.folder_id NOT IN (4, 7)))`)
 
 	if len(excluded) > 0 {
 		sb.WriteString(` AND id NOT IN (` + placeholders(len(excluded)) + `)`)

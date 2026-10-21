@@ -1,6 +1,6 @@
 -- Application-owned DDL from a freshly migrated database; see AGENTS.md.
 -- This omits seed rows and is not a replacement for mymail -init.
-PRAGMA user_version = 13;
+PRAGMA user_version = 14;
 
 CREATE INDEX idx_attachments_message_id ON attachments(message_id);
 
@@ -145,7 +145,8 @@ CREATE TABLE "messages" (
 		sender_authentication TEXT NOT NULL DEFAULT '{"dmarc":"unknown","dkim_aligned":false,"spf":"unknown"}',
 		auth_generation INTEGER NOT NULL DEFAULT 0,
 		outgoing INTEGER NOT NULL DEFAULT 0 CHECK (outgoing IN (0, 1)),
-		UNIQUE (message_id, outgoing)
+		content_fingerprint BLOB,
+		UNIQUE (message_id, content_fingerprint, outgoing)
 	);
 
 CREATE VIRTUAL TABLE messages_fts USING fts5(

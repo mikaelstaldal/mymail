@@ -371,11 +371,8 @@ func TestRunCore_FilterMoveToDeletedFolder(t *testing.T) {
 }
 
 func TestRunCore_ConcurrentDuplicateGuard(t *testing.T) {
-	// Exercises the code path where INSERT OR IGNORE returns RowsAffected=0
-	// because another process stored the same message_id between the SELECT EXISTS
-	// check and the INSERT. We simulate this by pre-inserting the row directly,
-	// then calling runCore — SELECT EXISTS catches it before INSERT fires, but the
-	// observable outcome (exit 0, one row) is identical to the INSERT OR IGNORE n=0 path.
+	// A placeholder with the same ID but no raw content cannot suppress delivery.
+
 	db := openLDATestDB(t)
 	now := "2024-01-01T00:00:00Z"
 	_, err := db.Exec(
@@ -393,7 +390,7 @@ func TestRunCore_ConcurrentDuplicateGuard(t *testing.T) {
 
 	var count int
 	db.QueryRow(`SELECT COUNT(*) FROM messages WHERE message_id = 'race001@example.com'`).Scan(&count)
-	assert.Equal(t, 1, count)
+	assert.Equal(t, 2, count)
 }
 
 func TestRunCore_NoMessageID_Generated(t *testing.T) {

@@ -1187,6 +1187,9 @@ function getThread(state: DemoState, id: number): Response {
     for (const msg of state.messages) {
       if (found.has(msg.id)) continue;
       if (msg.messageId === null || !referenced.has(msg.messageId)) continue;
+      // Mirrors threadBackwardQuery's preference for ordinary colliding copies.
+      if ([4, 7].includes(msg.folderId) && state.messages.some((other) =>
+        other.messageId === msg.messageId && ![4, 7].includes(other.folderId))) continue;
       if (found.size >= THREAD_CAP) { truncated = true; break; }
       add(msg);
     }

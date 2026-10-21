@@ -185,10 +185,14 @@ mymail -import -data /var/lib/mymail \
 Behaviour:
 
 - Messages are imported in source order (oldest first within each file/directory).
-- Duplicate detection: if a message with the same `Message-ID` already exists anywhere in the database, it is skipped.
-  Matching is a case-sensitive byte comparison of the full Message-ID string. Messages without a `Message-ID` are always
-  imported (null Message-IDs are never treated as duplicates of each other). Skipped duplicates are included in the
-  per-folder count as `skipped`.
+- Duplicate detection: a message is skipped only if both its `Message-ID` and content fingerprint match a stored copy.
+  Matching uses a case-sensitive Message-ID and SHA-256 of length-prefixed From, To, Cc, Bcc, Date, Subject,
+  Reply-To, Sender, DKIM-Signature, MIME-Version, Content-Type, Content-Transfer-Encoding, In-Reply-To, References,
+  List-ID, List-Post, List-Unsubscribe, List-Unsubscribe-Post, List-Help, List-Subscribe, List-Owner and List-Archive
+  header values followed by raw body bytes.
+  Transport headers such as Received and Authentication-Results do not affect the fingerprint.
+  Messages without a `Message-ID` are always imported (null Message-IDs are never treated as duplicates of each other).
+  Skipped duplicates are included in the per-folder count as `skipped`.
 - Messages imported into Sent are marked as outgoing, so a later self-delivery can create a received copy.
 - Filters are **not** applied during import — messages go directly to the specified target folder.
 - A running count is printed to stdout as each folder completes: `inbox: 1042 imported, 3 skipped`.
@@ -201,7 +205,8 @@ Behaviour:
   using the same logic as LDA (update name only when the stored name is currently empty).
 - **Concurrency:** Running import (`-import`) concurrently with a running server against the same data directory is not
   supported. Concurrent LDA (`-lda`) processes alongside a running server are safe — SQLite WAL mode and the LDA's busy
-  timeout serialize access, and `INSERT OR IGNORE` guards against duplicate inserts from concurrent LDA processes.
+  timeout serialize access. A content-aware duplicate check and insertion run under the same transaction writer lock
+  to guard against duplicate inserts from concurrent LDA processes.
 
 ## Data Model
 
@@ -401,11 +406,16 @@ When invoked as `mymail -lda`:
     - Falls back to current time if no `Date` header (import mode uses format-specific metadata instead; see Batch
       Import); generates a `Message-ID` if absent (LDA mode generates `<uuid@domain>` where `domain` is taken from the
       first address in the `To` header, falling back to `localhost` if absent or unparseable).
-4. Skips duplicate received messages (same `Message-ID` already stored as a received/imported copy).
+4. Skips duplicate received messages (same `Message-ID` and content fingerprint already stored as a
+   received/imported copy).
    A sent copy does not suppress receipt: self-send stores both a Sent and an Inbox copy with the same ID.
    Sent/received provenance survives folder moves; repeated deliveries are still skipped.
    Existing Sent rows and messages with raw source associated with a sending identity outside Drafts/Scheduled are
-   classified as outgoing during upgrade. Imported mail retains its existing database-wide duplicate policy.
+   classified as outgoing during upgrade. Import compares fingerprints across all stored copies.
+   Distinct content sharing a Message-ID is preserved, including direct and mailing-list copies where the list
+   changes fingerprinted headers or adds a footer. Invalid IDs (including empty IDs or IDs without a domain)
+   are treated as absent. When following thread references, Junk/Trash copies of a colliding ID are excluded
+   if a copy outside those folders exists.
 5. Applies spam detection and user-defined filters to determine the destination folder and read state.
 6. Stores the message and attachments.
 7. Upserts the sender into the contacts table.

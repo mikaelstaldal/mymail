@@ -62,3 +62,18 @@ func schemaV12() []string {
 	}
 	return statements
 }
+
+// schemaV14 preserves content-colliding Message-IDs. Ingest serializes its
+// content-aware duplicate check and insertion under the transaction writer lock.
+func schemaV14() []string {
+	statements := schemaV12()
+	for i, statement := range statements {
+		statement = strings.ReplaceAll(statement, "UNIQUE (message_id, outgoing)", "content_fingerprint BLOB,\n\t\tUNIQUE (message_id, content_fingerprint, outgoing)")
+		if strings.HasPrefix(statement, "INSERT INTO messages_new SELECT") {
+			start := strings.Index(statement, "CASE WHEN folder_id")
+			statement = statement[:start] + "outgoing, NULL FROM messages"
+		}
+		statements[i] = statement
+	}
+	return statements
+}

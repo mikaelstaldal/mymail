@@ -61,7 +61,8 @@ the batch command: `repository.OpenDB` and normal server startup never vacuum af
 The command performs no application seeding or server, sendmail, scheduler, or socket setup.
 
 Schema version 12 stores immutable sent/received provenance in `messages.outgoing`.
-The unique key is `(message_id, outgoing)`, allowing a self-sent message to have both copies.
+Its original unique key was `(message_id, outgoing)`, allowing a self-sent message to have both copies;
+version 14 replaces it with `(message_id, content_fingerprint, outgoing)` to preserve Message-ID collisions.
 LDA duplicate checks only consider received copies, independent of their current folder.
 Send paths set outgoing provenance on successful immediate and scheduled sends.
 The migration rebuilds messages and its dependent tables, preserving IDs, attachments, references,
@@ -71,6 +72,15 @@ Schema version 13 changes no DDL: it resets `messages.date` to `created_at` wher
 four-digit-year RFC 3339 string. Ingest (`lda.storableDate`, also applied to import
 fallbacks: mbx internal date, `From ` line, file mtime) now discards dates whose UTC year is outside 1–9999, which
 were previously stored as `10000-…` or `-0001-…` and failed `time.Parse` on every read that touched the row.
+
+Schema v14 permits colliding Message-IDs, retaining outgoing provenance.
+New received/imported rows store an indexed SHA-256 `content_fingerprint` of stable headers and raw bodies.
+LDA and import probe that index under a transaction writer lock before insertion. Only legacy rows have a NULL
+fingerprint and require comparing raw mail; at most two legacy rows can share one ID due to the prior constraint.
+Transport-only header changes do not defeat deduplication. Distinct mailing-list and direct copies are retained
+when the list changes fingerprinted headers or the body.
+Thread backward lookup excludes Junk/Trash copies
+of an ID when an ordinary copy exists; distinct ordinary copies remain visible because IDs are sender-controlled.
 
 ## Web UI
 
