@@ -882,3 +882,71 @@ func TestBulkLimitExceeded(t *testing.T) {
 	_, err = r.MoveMessages(ctx, ids, 1)
 	assert.Error(t, err, "expected error for MoveMessages with >1000 ids")
 }
+
+func TestThreadSubjectLengthLimit(t *testing.T) {
+	for _, tc := range []struct {
+		name, subject string
+		want          int
+	}{
+		{"boundary", strings.Repeat("é", 500), 2},
+		{"raw header bytes", "hello \xff world", 2},
+		{"over boundary", strings.Repeat("é", 501), 1},
+		{"repeated words", strings.Repeat("the ", 4000), 1},
+		{"prefixes count toward limit", strings.Repeat("Re: ", 1000) + "hello", 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			db := openTestDB(t)
+			r := NewMessageRepository(db)
+			ctx := context.Background()
+			id, err := r.InsertMessage(ctx, makeMsg(1, tc.subject))
+			require.NoError(t, err)
+			_, err = r.InsertMessage(ctx, makeMsg(1, tc.subject))
+			require.NoError(t, err)
+			got, _, err := r.GetMessageThread(ctx, id)
+			require.NoError(t, err)
+			assert.Len(t, got, tc.want)
+		})
+	}
+}
+
+func TestThreadSubjectDeadline(t *testing.T) {
+	db := openTestDB(t)
+	db.SetMaxOpenConns(1)
+	r := NewMessageRepository(db)
+	ctx := context.Background()
+	conn, err := db.Conn(ctx)
+	require.NoError(t, err)
+	// Occupying the only connection makes the optional lookup exhaust its own
+	// budget deterministically, without a timing-sensitive large-mailbox fixture.
+	matches, err := r.threadSubjectQuery(ctx, threadSeedRow{subject: "hello", id: 1, folderID: 1})
+	require.NoError(t, err)
+	assert.Empty(t, matches)
+	require.NoError(t, conn.Close())
+	cancelled, cancel := context.WithCancel(ctx)
+	cancel()
+	_, err = r.threadSubjectQuery(cancelled, threadSeedRow{subject: "hello"})
+	require.ErrorIs(t, err, context.Canceled)
+}
+
+func TestThreadSubjectDeadlineInterruptsSQLite(t *testing.T) {
+	db := openTestDB(t)
+	r := NewMessageRepository(db)
+	ctx := context.Background()
+	// Enough common-token doclists to keep the real FTS query running beyond
+	// its deadline. Call the helper directly with an oversized phrase to test
+	// the independent deadline defense rather than the seed length guard.
+	_, err := db.Exec(`WITH RECURSIVE n(x) AS (VALUES(1) UNION ALL SELECT x+1 FROM n WHERE x<20000)
+ INSERT INTO messages(folder_id, from_addr, to_addr, subject, date, body_text, created_at, updated_at)
+ SELECT 2, 'a@example.com', 'b@example.com', 'background', '2026-01-01T00:00:00Z',
+ 'the report about the plan', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z' FROM n`)
+	require.NoError(t, err)
+	started := time.Now()
+	matches, err := r.threadSubjectQuery(ctx, threadSeedRow{subject: strings.Repeat("the ", 4000), id: 1, folderID: 1})
+	require.NoError(t, err)
+	assert.Empty(t, matches)
+	assert.Less(t, time.Since(started), 2*time.Second, "SQLite must interrupt active FTS work")
+	// A deadline must release the connection and leave it usable.
+	var count int
+	require.NoError(t, db.QueryRowContext(ctx, `SELECT COUNT(*) FROM messages`).Scan(&count))
+	assert.Equal(t, 20000, count)
+}

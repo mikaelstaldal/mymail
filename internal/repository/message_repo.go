@@ -3,6 +3,8 @@ package repository
 import (
 	"context"
 	"database/sql"
+	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"html"
@@ -10,6 +12,7 @@ import (
 	"strings"
 	"time"
 	"unicode"
+	"unicode/utf8"
 
 	oas "github.com/mikaelstaldal/mymail/internal/api"
 	"github.com/mikaelstaldal/mymail/internal/model"
@@ -874,7 +877,7 @@ type threadSeedRow struct {
 	messageID sql.NullString
 	inReplyTo sql.NullString
 	refs      sql.NullString
-	subject   string // only populated for the seed row and subject-fallback candidates
+	subject   string // only populated for the seed row
 	folderID  int64  // only populated for the seed row
 }
 
@@ -1017,40 +1020,14 @@ func (r *MessageRepository) GetMessageThread(ctx context.Context, id int64) ([]o
 		truncated = true
 	}
 
-	// Subject-based fallback when only the seed was found.
-	// Uses FTS5 on the subject column for indexed lookup instead of a full table scan.
-	if len(foundIDs) == 1 {
-		normSubject := normalizeSubject(seed.subject)
-
-		if normSubject != "" {
-			ftsTerm := `subject : ` + sanitizeFTSQuery(normSubject)
-			rows, err := r.db.QueryContext(ctx,
-				`SELECT m.id, m.message_id, m.in_reply_to, m."references", m.subject
-				 FROM messages_fts JOIN messages m ON messages_fts.rowid = m.id
-				 WHERE messages_fts MATCH ? AND m.id != ? AND m.folder_id = ?
-				 LIMIT 999`,
-				ftsTerm, id, seed.folderID,
-			)
-			if err != nil {
-				return nil, false, err
-			}
-			defer rows.Close()
-			for rows.Next() {
-				var row threadSeedRow
-				if err := rows.Scan(&row.id, &row.messageID, &row.inReplyTo, &row.refs, &row.subject); err != nil {
-					return nil, false, err
-				}
-				if strings.EqualFold(normalizeSubject(row.subject), normSubject) {
-					if len(foundIDs) >= 1000 {
-						truncated = true
-						break
-					}
-					foundIDs[row.id] = true
-				}
-			}
-			if err := rows.Err(); err != nil {
-				return nil, false, err
-			}
+	// Bound attacker-controlled subjects before normalization as well as FTS tokenization.
+	if len(foundIDs) == 1 && utf8.RuneCountInString(seed.subject) <= threadSubjectMaxRunes {
+		matches, err := r.threadSubjectQuery(ctx, seed)
+		if err != nil {
+			return nil, false, err
+		}
+		for _, match := range matches {
+			foundIDs[match] = true
 		}
 	}
 
@@ -1062,6 +1039,61 @@ func (r *MessageRepository) GetMessageThread(ctx context.Context, id int64) ([]o
 		summaries = []oas.MessageSummary{}
 	}
 	return summaries, truncated, nil
+}
+
+// Subject fallback is optional: expensive matches must not hold up opening mail.
+const threadSubjectMaxRunes = 500
+const threadSubjectTimeout = 500 * time.Millisecond
+
+func (r *MessageRepository) threadSubjectQuery(ctx context.Context, seed threadSeedRow) ([]int64, error) {
+	normSubject := normalizeSubject(seed.subject)
+	if normSubject == "" {
+		return nil, nil
+	}
+	queryCtx, cancel := context.WithTimeout(ctx, threadSubjectTimeout)
+	defer cancel()
+	// Aggregate candidates into one row: modernc can interrupt the initial
+	// SQLite step, but not a subsequent rows.Next step. Keep all FTS work in
+	// that initial step so the deadline covers the whole candidate lookup.
+	var raw string
+	err := r.db.QueryRowContext(queryCtx,
+		`SELECT json_group_array(json_object('id', id, 'subject', hex(subject))) FROM (
+   SELECT m.id, m.subject
+   FROM messages_fts JOIN messages m ON messages_fts.rowid = m.id
+   WHERE messages_fts MATCH ? AND m.id != ? AND m.folder_id = ? AND length(CAST(m.subject AS BLOB)) <= ?
+   LIMIT 999
+  )`, `subject : `+sanitizeFTSQuery(normSubject), seed.id, seed.folderID, threadSubjectMaxRunes*utf8.UTFMax).Scan(&raw)
+	// Discard partial results on our own deadline, but preserve caller cancellation.
+	if ctx.Err() != nil {
+		return nil, ctx.Err()
+	}
+	if errors.Is(queryCtx.Err(), context.DeadlineExceeded) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	var candidates []struct {
+		ID      int64
+		Subject string
+	}
+	if err := json.Unmarshal([]byte(raw), &candidates); err != nil {
+		return nil, err
+	}
+	var matches []int64
+	for _, candidate := range candidates {
+		// Preserve raw header bytes: JSON text would replace invalid UTF-8.
+		subjectBytes, err := hex.DecodeString(candidate.Subject)
+		if err != nil {
+			return nil, err
+		}
+		subject := string(subjectBytes)
+		if utf8.RuneCountInString(subject) <= threadSubjectMaxRunes &&
+			strings.EqualFold(normalizeSubject(subject), normSubject) {
+			matches = append(matches, candidate.ID)
+		}
+	}
+	return matches, nil
 }
 
 // threadForwardQuery returns rows that link to any of the given knownMsgIDs

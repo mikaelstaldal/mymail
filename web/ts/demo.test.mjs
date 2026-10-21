@@ -1450,3 +1450,19 @@ test('scheduled self-delivery copies attachments and uses the delivery timestamp
   await call(state, 'DELETE', '/messages/1');
   assert.deepEqual(globalThis.__demoBlobs.get(attachment.id), data, 'received attachment survives deleting Sent');
 });
+
+test('subject fallback bounds Unicode subjects before stripping prefixes', async () => {
+  for (const [subject, expected] of [
+    ['😀'.repeat(500), 2],
+    ['😀'.repeat(501), 1],
+    ['the '.repeat(4000), 1],
+    ['Re: '.repeat(1000) + 'hello', 1],
+  ]) {
+    const state = newState([
+      message({ id: 1, messageId: 'a@x', subject }),
+      message({ id: 2, messageId: 'b@x', subject }),
+    ]);
+    const res = await call(state, 'GET', '/messages/1/thread');
+    assert.equal(res.body.items.length, expected);
+  }
+});

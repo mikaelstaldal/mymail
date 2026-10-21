@@ -1062,6 +1062,11 @@ Hovering a folder in the sidebar shows a tooltip with its slug and numeric id, e
    The **Reply-To** compose field is not pre-populated for Reply, Reply-All, or Forward; it starts empty and is editable
    by the user.
 
+   Subject-based thread fallback only considers subjects of at most 500 Unicode code points, before prefix
+   stripping, in both the server and demo. Header-based threading still applies to longer subjects. On the server,
+   the optional subject lookup has a 500 ms deadline; expiry discards its matches and returns the seed message.
+   Caller cancellation still cancels the request.
+
    **Subject prefix stripping** (used both for "no double Re:" / "no double Fwd:" in compose and for subject-based
    thread fallback):
 

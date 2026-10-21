@@ -1207,11 +1207,11 @@ function getThread(state: DemoState, id: number): Response {
   }
   if (found.size >= THREAD_CAP) truncated = true;
 
-  if (found.size === 1) {
+  if (found.size === 1 && [...seed.subject].length <= 500) {
     const normalized = normalizeSubject(seed.subject);
     if (normalized !== '') {
       for (const msg of state.messages) {
-        if (msg.id === seed.id || msg.folderId !== seed.folderId) continue;
+        if (msg.id === seed.id || msg.folderId !== seed.folderId || [...msg.subject].length > 500) continue;
         if (normalizeSubject(msg.subject).toLowerCase() !== normalized.toLowerCase()) continue;
         if (found.size >= THREAD_CAP) { truncated = true; break; }
         found.add(msg.id);
