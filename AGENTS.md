@@ -9,7 +9,7 @@ End-to-end test instructions — running one spec, and what a hand-started serve
 ## Specification
 
 Adhere to the functional requirements in `spec/REQUIREMENTS.md` and the architecture in `spec/ARCHITECTURE.md`.
-Update those when functionality is added or changed.
+Update `spec/REQUIREMENTS.md` when functionality is added or changed.
 
 Some UI is **not MyMail's to define**. MyMail is one of three sibling apps — MyCal, MyMail, MyNotes — that must
 look like one product, and the elements required to be identical across them are specified in the `mysuite`
