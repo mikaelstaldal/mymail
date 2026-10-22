@@ -890,18 +890,22 @@ resources; folder search as the `search_messages` tool; and mark-read as the
 `mark_message_read` tool. A draft's raw resource is an error. Responses over 1 MiB are
 refused. The shared contract is `../mysuite/spec/mcp-server.md`.
 
-The separate `mymail-cli` binary provides the token-accessible REST operations for scripts and agents:
-`folders list`; `messages list FOLDER_ID`, `search`, `get ID`, `text ID`, `raw ID`, `headers ID`, `body ID`,
-and `read ID`; and `attachments get ID`. Search requires an explicit folder ID. `messages read`
-uses the idempotent `PUT` route. `messages text ID` writes only the stored `body_text`
-to stdout, preserving whitespace without JSON quoting or an added newline (an empty body produces no output). The client accepts at most one of `-token-file PATH` and
-`-token-stdin`. `MYMAIL_TOKEN_FILE` supplies the default token file path; either explicit
-token option overrides it. An explicitly empty `-token-file` is rejected. Without either
-option or a nonempty `MYMAIL_TOKEN_FILE`, it sends no Authorization header and does not read stdin. It does not accept Basic credentials or token arguments. Its built-in `help`
-lists commands and flags. JSON and downloaded bytes are written unchanged to stdout; errors
-go to stderr and cause a nonzero exit. HTTP is allowed only for literal loopback IP addresses;
-remote URLs require HTTPS. The client rejects URL credentials, queries, and fragments,
-does not follow redirects, and ignores environment HTTP proxies.
+The separate `mymail-cli` binary provides the token-accessible REST operations for scripts and agents: `folders
+list`; `messages list FOLDER_ID`, `search`, `get ID`, `text ID`, `raw ID`, `headers ID`, `body ID`, and `read ID`;
+and `attachments get ID`. Search requires an explicit folder ID. `messages read` uses the idempotent `PUT` route.
+`messages text ID` writes only the stored `body_text` to stdout without JSON quoting or an added newline (an empty
+body produces no output). The client accepts at most one of `-token-file PATH` and `-token-stdin`.
+`MYMAIL_TOKEN_FILE` supplies the default token file path; either explicit token option overrides it. An explicitly
+empty `-token-file` is rejected. Without either option or a nonempty `MYMAIL_TOKEN_FILE`, it sends no Authorization
+header and does not read stdin. It does not accept Basic credentials or token arguments. Its built-in `help` lists
+commands and flags. When stdout is a pipe or file, JSON and downloaded bytes are written unchanged, and plain text
+preserves all whitespace. When stdout is a terminal, all response commands visibly escape C0 controls except tab and
+newline, DEL, C1 controls, Unicode bidi marks, overrides and isolates, and invalid UTF-8 bytes. CR is preserved only
+in CRLF pairs. Unicode escapes in JSON preserve the original field values. This also applies to raw messages, HTML
+bodies and attachment downloads; redirect them to a file for exact bytes. Errors go to stderr and cause a nonzero
+exit; terminal stderr uses the same escaping. HTTP is allowed only for literal loopback IP addresses; remote URLs
+require HTTPS. The client rejects URL credentials, queries, and fragments, does not follow redirects, and ignores
+environment HTTP proxies.
 Both CLI binaries use `MYMAIL_URL` as the default server base URL when set; an explicit `-url` overrides it.
 Both support the global `-help` flag (also `-h`) to print commands and flags to stdout and exit
 successfully without reading credentials or contacting the server. Help requested through a

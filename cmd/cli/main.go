@@ -16,6 +16,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/mikaelstaldal/mymail/internal/clihttp"
+	"golang.org/x/term"
 )
 
 const usage = `Usage: mymail-cli [global flags] <command> [command flags]
@@ -43,8 +44,10 @@ Commands:
   messages read ID
   attachments get ID
 
-JSON responses and downloaded bytes go to stdout unchanged; messages text writes
-only the stored plain-text body, without adding a newline. Errors go to stderr.
+JSON responses and downloaded bytes go to stdout unchanged in pipes and files.
+Terminal output escapes control and bidi formatting characters visibly.
+messages text writes only the stored plain-text body, without adding a newline.
+Errors go to stderr.
 Only token-accessible API routes are exposed. Search always requires a folder.
 HTTP is allowed only for literal loopback addresses; remote servers require HTTPS.
 Redirects and environment HTTP proxies are disabled.
@@ -52,12 +55,20 @@ Redirects and environment HTTP proxies are disabled.
 
 func main() {
 	if err := run(os.Args[1:], os.Stdin, os.Stdout); err != nil {
-		fmt.Fprintln(os.Stderr, "mymail-cli:", err)
+		_ = writeCLIError(os.Stderr, err, term.IsTerminal(int(os.Stderr.Fd())))
 		os.Exit(1)
 	}
 }
 
 func run(args []string, stdin io.Reader, stdout io.Writer) error {
+	terminal := false
+	if file, ok := stdout.(*os.File); ok {
+		terminal = term.IsTerminal(int(file.Fd()))
+	}
+	return runWithTerminal(args, stdin, stdout, terminal)
+}
+
+func runWithTerminal(args []string, stdin io.Reader, stdout io.Writer, terminal bool) error {
 	flags := flag.NewFlagSet("mymail-cli", flag.ContinueOnError)
 	flags.SetOutput(io.Discard)
 	base := flags.String("url", clihttp.URLDefault(), "server base URL")
@@ -150,8 +161,14 @@ func run(args []string, stdin io.Reader, stdout io.Writer) error {
 		if err := json.NewDecoder(response.Body).Decode(&message); err != nil {
 			return fmt.Errorf("decode message: %w", err)
 		}
+		if terminal {
+			return copyTerminal(stdout, strings.NewReader(message.BodyText))
+		}
 		_, err = io.WriteString(stdout, message.BodyText)
 		return err
+	}
+	if terminal {
+		return copyTerminal(stdout, response.Body)
 	}
 	_, err = io.Copy(stdout, response.Body)
 	return err
