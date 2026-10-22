@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/mikaelstaldal/mymail/internal/ldaprotocol"
 	"github.com/mikaelstaldal/mymail/internal/senderauth"
 	sqlite "modernc.org/sqlite"
 
@@ -31,7 +32,7 @@ const sqliteBusy = 5
 // in the messages.raw BLOB, so an unbounded read would let a hostile or
 // misconfigured MTA exhaust memory / bloat the database. Messages exceeding this
 // limit are rejected as a permanent parse failure (no point retrying).
-const MaxMessageBytes = 64 << 20 // 64 MiB
+const MaxMessageBytes = ldaprotocol.MaxMessageBytes
 
 var errBusyTimeout = errors.New("SQLITE_BUSY timed out after 30s")
 

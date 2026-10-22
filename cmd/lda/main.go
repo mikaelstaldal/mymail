@@ -23,6 +23,8 @@ import (
 	"os"
 	"runtime/debug"
 	"time"
+
+	"github.com/mikaelstaldal/mymail/internal/ldaprotocol"
 )
 
 func main() {
@@ -46,7 +48,15 @@ func main() {
 	}
 	defer conn.Close() //nolint:errcheck
 
-	if _, err := io.Copy(conn, os.Stdin); err != nil {
+	input := &io.LimitedReader{R: os.Stdin, N: ldaprotocol.MaxMessageBytes + 1}
+	_, err = io.Copy(conn, input)
+	// Count bytes read, even if the peer rejected the final write. Once the
+	// input exceeds the limit, retrying cannot make delivery succeed.
+	if input.N == 0 {
+		log.Printf("lda: message exceeds %d bytes, rejecting", ldaprotocol.MaxMessageBytes)
+		os.Exit(1)
+	}
+	if err != nil {
 		log.Printf("lda: send message: %v", err)
 		os.Exit(75)
 	}

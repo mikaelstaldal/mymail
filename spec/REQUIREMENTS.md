@@ -411,6 +411,8 @@ When invoked as `mymail -lda`:
     - Rejects messages larger than 64 MiB and MIME structures deeper than 30 levels, with more than 1,000 parts,
       more than 256 MiB of cumulative multipart-body reads, or more than 64 MiB of cumulative decoded leaf data.
       A limit violation is a permanent parse failure, including for delivery over the LDA socket.
+      The thin LDA client stops reading and exits 1 once stdin exceeds 64 MiB, without waiting for a server response.
+      The socket server drains rejected oversized input for at most two seconds before replying `parse_error`.
     - Falls back to current time if no `Date` header (import mode uses format-specific metadata instead; see Batch
       Import); generates a `Message-ID` if absent (LDA mode generates `<uuid@domain>` where `domain` is taken from the
       first address in the `To` header, falling back to `localhost` if absent or unparseable).

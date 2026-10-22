@@ -7,6 +7,7 @@ import (
 	"log"
 	"net"
 	"os"
+	"time"
 )
 
 // BindSocket creates a UNIX socket listener at socketPath.
@@ -53,6 +54,14 @@ func handleLDAConn(conn net.Conn, db *sql.DB) {
 	}
 	if int64(len(raw)) > MaxMessageBytes {
 		log.Printf("lda socket: message exceeds %d bytes, rejecting", MaxMessageBytes)
+		// Closing a UNIX socket with unread input can reset the peer, hiding
+		// parse_error. Drain without allocating, but bound the time a client
+		// can keep this rejected delivery alive.
+		if err := conn.SetDeadline(time.Now().Add(2 * time.Second)); err != nil {
+			return
+		}
+		_, _ = io.Copy(io.Discard, conn)
+		_ = conn.SetWriteDeadline(time.Now().Add(time.Second))
 		_, _ = conn.Write([]byte("parse_error"))
 		return
 	}
