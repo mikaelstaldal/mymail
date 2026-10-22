@@ -1793,9 +1793,11 @@ forwards retain their original links. The browser demo follows the same rules.
   first-time-sender warning, which is shown beside the From address instead (in the main
   header and in expanded thread entries). Authentication failure and lookalike-domain lines
   have stronger visual emphasis than other warnings.
-  Link warnings stay on one line by ellipsizing long link text, destination URLs and
+  Multiple deceptive links are summarized in one warning showing the number of links,
+  while each link retains its confirmation page. A single
+  link warning stays on one line by ellipsizing long link text, destination URLs and
   decoded hosts to fit the available width; link text and destination share the
-  remaining width equally. Hovering or focusing a link warning opens a tooltip
+  remaining width equally. Hovering or focusing a single-link warning opens a tooltip
   with the full link text, URL and decoded host. Long tooltip values wrap and
   scroll, and Escape dismisses the tooltip. Warnings
   and the selected body scroll above the thread strip, and dragging its divider

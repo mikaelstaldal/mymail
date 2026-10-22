@@ -133,11 +133,16 @@ function FirstTimeSenderNote({ warnings }: { warnings: MessageWarning[] }) {
 }
 
 function WarningBanner({ warnings: all }: { warnings: MessageWarning[] }) {
-  const warnings = all.filter(w => w.kind !== 'first_time_sender');
+  const linkCount = all.filter(w => w.kind === 'deceptive_link').length;
+  const firstLink = all.find(w => w.kind === 'deceptive_link');
+  const warnings = all.filter(w => w.kind !== 'first_time_sender'
+    && (w.kind !== 'deceptive_link' || w === firstLink));
   if (!warnings.length) return null;
   return <div class="phishing-warnings" role="note" aria-label="Message warnings">
     <ul>{warnings.map((warning, i) => <li key={i} class={warning.kind === 'auth_fail' || warning.kind === 'malformed_sender' || warning.kind === 'lookalike_domain' ? 'phishing-warning-strong' : ''}>
-      {warning.kind === 'deceptive_link' ? <LinkWarning warning={warning} /> : warningText(warning)}
+      {warning.kind === 'deceptive_link'
+        ? linkCount > 1 ? `Message contains ${linkCount} deceptive links` : <LinkWarning warning={warning} />
+        : warningText(warning)}
     </li>)}</ul>
   </div>;
 }

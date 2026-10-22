@@ -178,6 +178,34 @@ test('long link warnings fit one line and body resizing stays above the thread',
   }
 });
 
+test('multiple deceptive links share one counted warning in both body views', async ({ page, request }) => {
+  const response = await request.post('/api/v1/messages/send', {
+    data: {
+      to_addr: 'e2e@example.com', subject: 'Multiple deceptive links',
+      body_text: 'Two links',
+      body_html: '<a href="https://unrelated.example/one">example.com</a>'
+        + '<a href="https://unrelated.example/two">example.org</a>',
+    },
+  });
+  expect(response.status()).toBe(201);
+  const { id } = await response.json();
+  try {
+    expect((await request.patch(`/api/v1/messages/${id}`, { data: { folder_id: 1 } })).status()).toBe(200);
+    const detail = await (await request.get(`/api/v1/messages/${id}`)).json();
+    expect(detail.warnings.filter((w: { kind: string }) => w.kind === 'deceptive_link')).toHaveLength(2);
+    await page.goto(`/#/message/${id}`);
+    const banner = page.getByRole('note', { name: 'Message warnings' });
+    await expect(banner.locator('li')).toHaveCount(1);
+    await expect(banner).toHaveText('Message contains 2 deceptive links');
+    await page.getByRole('button', { name: 'Plain', exact: true }).click();
+    await expect(banner.locator('li')).toHaveCount(1);
+    await expect(banner).toContainText('Check these 2 links');
+  } finally {
+    await request.patch(`/api/v1/messages/${id}`, { data: { folder_id: 4 } });
+    await request.delete(`/api/v1/messages/${id}`);
+  }
+});
+
 test('warnings explain the server signals and sender address stays visible', async ({ page, request }) => {
   const message = await sample(request);
   expect(message.warnings).toHaveLength(6);
