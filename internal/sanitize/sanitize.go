@@ -120,6 +120,12 @@ var (
 // an explicit set of color functions, blocking url(), expression(), and the
 // like regardless of how they are spelled.
 func cssValueAllowed(val string) bool {
+	// bluemonday passes an empty value when decoding a non-BMP, surrogate,
+	// or out-of-range hex escape fails, but emits the original declaration
+	// if we accept it. Fail closed rather than approve an unvalidated value.
+	if strings.TrimSpace(val) == "" {
+		return false
+	}
 	if strings.ContainsRune(val, '\\') {
 		return false
 	}

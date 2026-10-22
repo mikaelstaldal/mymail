@@ -81,6 +81,9 @@ func TestCSSValueAllowed(t *testing.T) {
 		"100%",
 	}
 	forbidden := []string{
+		// Empty also signals a failed escape decode in bluemonday.
+		"",
+		" \t\n",
 		// Disallowed functions, however spelled.
 		"url(http://evil.com/x)",
 		"expression(alert(1))",
@@ -282,6 +285,12 @@ func TestOutgoingKeepsEverySecurityGate(t *testing.T) {
 		{"css url()", `<p style="background: url(http://evil.com/x.png)">x</p>`, "url("},
 		{"css url() on new property", `<p style="list-style-image: url(http://evil.com/x.png)">x</p>`, "url("},
 		{"css escape bypass", `<p style="background: u\72 l(http://evil.com/x.png)">x</p>`, "l("},
+		{"css non-BMP url bypass", `<p style="list-style: url(http://evil.com/x.png) \10000">x</p>`, "url("},
+		{"css non-BMP expression bypass", `<p style="width: expression(alert(1)) \10000">x</p>`, "expression("},
+		{"css surrogate url bypass", `<p style="list-style: url(http://evil.com/x.png) \d800">x</p>`, "url("},
+		{"css surrogate expression bypass", `<p style="width: expression(alert(1)) \d800">x</p>`, "expression("},
+		{"css out-of-range url bypass", `<p style="list-style: url(http://evil.com/x.png) \110000">x</p>`, "url("},
+		{"css out-of-range expression bypass", `<p style="width: expression(alert(1)) \110000">x</p>`, "expression("},
 		{"css comment bypass", `<p style="border-left: 1px/*x*/solid red">x</p>`, "/*"},
 		{"expression()", `<p style="border-radius: expression(alert(1))">x</p>`, "expression("},
 		{"svg data URI", `<img src="data:image/svg+xml;base64,PHN2Zy8+" alt="x">`, "svg+xml"},

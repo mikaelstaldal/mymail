@@ -717,7 +717,8 @@ plain one, so dropping them would be more than cosmetic.
 blocklist. A value is stripped if it contains a backslash CSS escape (e.g. `u\72l(`), a CSS comment (`/*`, `*/`), or any
 functional notation other than the color functions `rgb()`/`rgba()`/`hsl()`/`hsla()`. This blocks `url()`,
 `expression()`, `image-set()`, `-moz-binding`, and similar — including escape- and comment-obfuscated spellings — and
-also rejects stray/unbalanced parentheses.
+also rejects stray/unbalanced parentheses. Empty or whitespace-only decoded values are rejected too, including
+when the CSS decoder signals failure for non-BMP, surrogate, or out-of-range escapes by returning an empty value.
 
 **Not allowed:** `background` (shorthand), `position`, `display`, `overflow`, `content`, `z-index`, `opacity`, and all
 vendor-prefixed properties.
