@@ -80,6 +80,15 @@ sw.addEventListener('message', (event) => {
 sw.addEventListener('fetch', (event) => {
   const path = apiPath(event.request.url);
   if (path !== null) {
+    // Forms from another site can navigate through this worker, even without
+    // a referrer. The UI only changes state through fetch(), never navigation.
+    if (event.request.mode === 'navigate' && !['GET', 'HEAD'].includes(event.request.method)) {
+      event.respondWith(new Response(JSON.stringify({ error: 'state-changing API navigation forbidden' }), {
+        status: 403,
+        headers: { 'Content-Type': 'application/json' },
+      }));
+      return;
+    }
     event.respondWith(handleApiRequest(path, event.request));
   }
   // Anything else — the shell, scripts, styles, vendor bundles — goes to the

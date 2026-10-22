@@ -1522,3 +1522,64 @@ test('thread lookup prefers ordinary copies over colliding Junk or Trash mail', 
     assert.deepEqual(res.body.items.map((m) => m.id), [2, 3]);
   }
 });
+
+// Exercise the real fetch listener; Node cannot construct mode:navigate
+// Requests, so only the browser-owned request fields are represented here.
+test('demo worker refuses mutating API navigations before dispatch', async () => {
+  let listener;
+  const calls = [];
+  const context = vm.createContext({
+    importScripts: () => {}, URL, Response,
+    handleApiRequest: (path, request) => { calls.push([path, request]); return Promise.resolve(new Response('ok')); },
+    self: {
+      registration: { scope: 'https://demo.example/mail/' },
+      addEventListener: (name, fn) => { if (name === 'fetch') listener = fn; },
+    },
+  });
+  vm.runInContext(readFileSync(path.resolve(__dirname, '../static/demo-sw.js'), 'utf8'), context);
+  const dispatch = request => {
+    let response;
+    listener({ request, respondWith: value => { response = Promise.resolve(value); } });
+    return response;
+  };
+  for (const method of ['POST', 'PUT', 'PATCH', 'DELETE']) {
+    for (const contentType of ['text/plain', 'multipart/form-data', 'application/json']) {
+      const response = await dispatch({ url: 'https://demo.example/mail/api/v1/contacts', method,
+        mode: 'navigate', referrer: '', headers: new Headers({ 'Content-Type': contentType }) });
+      assert.equal(response.status, 403);
+      assert.equal(response.headers.get('Content-Type'), 'application/json');
+      assert.equal(typeof (await response.json()).error, 'string');
+    }
+  }
+  assert.equal(calls.length, 0, 'rejected requests never reach storage or the scheduler');
+  for (const method of ['GET', 'HEAD']) {
+    assert.equal((await dispatch({ url: 'https://demo.example/mail/api/v1/contacts', method, mode: 'navigate' })).status, 200);
+  }
+  for (const contentType of ['application/json', 'multipart/form-data']) {
+    assert.equal((await dispatch({ url: 'https://demo.example/mail/api/v1/drafts', method: 'POST',
+      mode: 'cors', headers: new Headers({ 'Content-Type': contentType }) })).status, 200);
+  }
+  assert.equal(calls.length, 4);
+  assert.equal(dispatch({ url: 'https://demo.example/mail/', method: 'POST', mode: 'navigate' }), undefined);
+  assert.equal(dispatch({ url: 'https://other.example/mail/api/v1/contacts', method: 'POST', mode: 'navigate' }), undefined);
+});
+
+test('demo JSON endpoints require a JSON media type', async () => {
+  const state = newState([]);
+  globalThis.__demoState = state;
+  for (const contentType of [null, 'text/plain', 'application/jsonp', 'application/x-www-form-urlencoded']) {
+    const response = await handleApiRequest('/contacts', new Request('https://demo.example/api/v1/contacts', {
+      method: 'POST', headers: contentType ? { 'Content-Type': contentType } : {},
+      body: JSON.stringify({ address: 'attacker@evil.example', name: 'Attacker' }),
+    }));
+    assert.equal(response.status, 400);
+  }
+  assert.equal(state.contacts.length, 0);
+  for (const contentType of ['application/json', 'Application/JSON; charset=utf-8']) {
+    const response = await handleApiRequest('/contacts', new Request('https://demo.example/api/v1/contacts', {
+      method: 'POST', headers: { 'Content-Type': contentType },
+      body: JSON.stringify({ address: contentType === 'application/json' ? 'friend@example.com' : 'other@example.com', name: 'Friend' }),
+    }));
+    assert.equal(response.status, 201);
+  }
+});

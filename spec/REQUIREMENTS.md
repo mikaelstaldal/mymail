@@ -1510,6 +1510,11 @@ neither accepts `-data` or `-lda-socket`. The store starts out holding the same
 content `-demo` seeds into SQLite, and clearing the site's data resets it to
 that. A one-time modal on first visit says so.
 
+The worker must reject state-changing API navigations with `403`, including
+cross-site form submissions with no referrer. JSON endpoints require
+`Content-Type: application/json` (optionally with parameters); the UI uses
+fetch requests for mutations, including multipart uploads.
+
 The demo must behave as the real server does. `web/ts/demo/` re-implements
 `internal/handler` and `internal/repository`, and every function names the Go
 original it mirrors. The following divergences are accepted; anything else is a

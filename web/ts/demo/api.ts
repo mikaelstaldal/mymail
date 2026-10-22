@@ -219,6 +219,8 @@ function pathId(segment: string): number {
 }
 
 async function readJSON(request: Request): Promise<Record<string, unknown>> {
+  const mediaType = request.headers.get('Content-Type')?.split(';', 1)[0].trim().toLowerCase();
+  if (mediaType !== 'application/json') throw validationError('Content-Type must be application/json');
   try {
     const body = (await request.json()) as unknown;
     if (body === null || typeof body !== 'object') return {};
