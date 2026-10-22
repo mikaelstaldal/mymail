@@ -1621,3 +1621,41 @@ test('body Fetch Metadata guard mirrors the server', async () => {
     }
   }
 });
+
+test('demo flags oversized link hosts before Unicode analysis', async () => {
+  for (const host of ['a'.repeat(64) + '.com', ('a'.repeat(63) + '.').repeat(3) + 'b'.repeat(62), 'a'.repeat(10000) + '.com']) {
+    const state = newState([message({ id: 1, bodyHtml: '<a href="https://' + host + '">click</a>' })]);
+    const warnings = (await call(state, 'GET', '/messages/1')).body.warnings;
+    const lookalike = warnings.find(w => w.kind === 'lookalike_domain');
+    assert.equal(lookalike?.domain, host);
+    assert.equal(lookalike?.resembles, undefined);
+    assert.equal(warnings.find(w => w.kind === 'deceptive_link')?.link_index, 0);
+  }
+});
+
+test('demo bounds oversized header domains and preserves prose link text', async () => {
+  const host = Array.from({ length: 30000 }, (_, i) => String.fromCodePoint(0x4e00 + i % 20000)).join('') + '.com';
+  for (const [fields, kind] of [
+    [{ replyToAddr: 'y@' + host }, 'reply_to_mismatch'],
+    [{ fromAddr: '"' + host + '" <x@example.com>' }, 'display_name_address'],
+    [{ fromAddr: 'x@' + host, replyToAddr: 'y@example.com' }, 'lookalike_domain'],
+  ]) {
+    const state = newState([message({ id: 1, ...fields })]);
+    const warnings = (await call(state, 'GET', '/messages/1')).body.warnings;
+    assert.ok(warnings.some(w => w.kind === kind), kind);
+  }
+  for (const text of ['A'.repeat(70), 'Quarterly_Report_2026_Final_Version_Approved_by_Board_of_Directors.pdf']) {
+    const state = newState([message({ id: 1, bodyHtml: '<a href="https://example.com/doc">' + text + '</a>' })]);
+    const warnings = (await call(state, 'GET', '/messages/1')).body.warnings;
+    assert.ok(!warnings.some(w => w.kind === 'deceptive_link'), text);
+  }
+});
+
+test('demo oversized Unicode hosts retain raw spelling and deduplicate case', async () => {
+  const host = 'É'.repeat(1000) + '.COM';
+  const state = newState([message({ id: 1, bodyHtml: '<a href="https://' + host + '">click</a><a href="https://' + host.toLowerCase() + '">click</a>' })]);
+  const warnings = (await call(state, 'GET', '/messages/1')).body.warnings;
+  const lookalikes = warnings.filter(w => w.kind === 'lookalike_domain');
+  assert.equal(lookalikes.length, 1);
+  assert.equal(lookalikes[0].domain, host.toLowerCase());
+});

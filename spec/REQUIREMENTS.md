@@ -1765,6 +1765,10 @@ Basic authentication or tokens configured. Both discovery resources return
   href. Text includes descendant text nodes, excluding script/style. Work walks
   the parsed tree once, with no repeated descendant scans; it is linear in body
   size. Correspondent lookups use an indexed skeleton set, not a scan per link.
+  Hosts exceeding 253 ASCII bytes or 63 bytes per label are flagged as suspicious
+  without Unicode script, skeleton, or correspondent-domain analysis. Raw IDNA input
+  is capped at 1016 UTF-8 bytes before conversion, including compatibility characters
+  that mapping would remove. IP literals retain their existing treatment.
   Links after the cap are not assessed. A link with ordinary prose text alone
   does not imply deception. Bare domain text requires a recognized ICANN TLD
   (including domains under private suffixes); filenames/versions such as

@@ -87,7 +87,7 @@ func (r *MessageRepository) WarningContext(ctx context.Context, from string, lin
 	keys := []string{}
 	seenKeys := map[string]bool{}
 	for _, host := range linkHosts {
-		if host != "" {
+		if host != "" && !phishing.OversizedHost(host) {
 			for _, candidate := range []string{host, phishing.Registrable(host)} {
 				key := phishing.Skeleton(candidate)
 				if !seenKeys[key] {

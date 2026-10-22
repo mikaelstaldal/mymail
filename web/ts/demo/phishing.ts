@@ -8,6 +8,12 @@ function warningDomain(s: string): string {
   s = s.toLowerCase().replace(/\.$/, '');
   try { return new URL('https://' + s).hostname.replace(/^\[|\]$/g, ''); } catch { return s; }
 }
+// Mirrors phishing.OversizedHost, including the pre-IDNA UTF-8 work cap.
+function warningOversizedHost(raw: string): boolean {
+  if (raw.length > 1016 || new TextEncoder().encode(raw).length > 1016) return true;
+  const host = warningDomain(raw);
+  return !warningIP(host) && (host.length > 253 || host.split('.').some(label => label.length > 63));
+}
 // RFC 3492 decoder. URL supplies the validated ASCII IDNA form first.
 function decodeWarningDomain(host: string): string {
   return host.split('.').map(label => {
@@ -47,6 +53,7 @@ const suffixRules = new Set(phishingSuffixRules.map(rule => {
   return prefix + warningDomain(rule.slice(prefix.length));
 }));
 function warningRegistrable(host: string): string {
+  if (warningOversizedHost(host)) return host.toLowerCase();
   host = warningDomain(host); if (warningIP(host)) return host;
   const labels = host.split('.'); let suffix = 1;
   for (let i = 0; i < labels.length; i++) {
@@ -68,15 +75,27 @@ function warningMapsToASCII(host: string): boolean {
 }
 function warningIP(host: string): boolean { return host.includes(':') || /^\d+\.\d+\.\d+\.\d+$/.test(host); }
 function warningHost(href: string): string {
+  // Bound raw authority analysis before URL performs IDNA conversion. Mirrors
+  // Go url.Parse/Hostname, which leaves Unicode hosts undecoded.
+  const authority = /^\s*(?:https?:)?\/\/([^/?#]*)/i.exec(href)?.[1];
+  if (authority !== undefined) {
+    const raw = authority.slice(authority.lastIndexOf('@') + 1).replace(/:\d*$/, '');
+    if (!raw.startsWith('[') && !/\s/.test(raw) && warningOversizedHost(raw)) return raw.toLowerCase();
+  }
   try {
     const url = new URL(href.startsWith('//') ? 'https:' + href : href);
-    return ['http:', 'https:'].includes(url.protocol) ? warningDomain(url.hostname) : '';
+    return ['http:', 'https:'].includes(url.protocol) ? (warningOversizedHost(url.hostname) ? url.hostname : warningDomain(url.hostname)) : '';
   } catch { return ''; }
 }
 const warningTLDs = new Set(phishingICANNTLDs);
 function warningTextHost(text: string): string {
   if (/\s/.test(text)) return '';
   const explicit = text.includes('://');
+  const bounded = warningHost(explicit ? text : 'https://' + text);
+  if (warningOversizedHost(bounded)) {
+    if (text.includes('@')) return '';
+    return explicit || warningTLDs.has(bounded.split('.').pop()!) ? bounded : '';
+  }
   try {
     const url = new URL(explicit ? text : 'https://' + text);
     if (url.username || url.password) return '';
@@ -187,7 +206,8 @@ async function demoWarnings(state: DemoState, msg: DemoMessage, atts: DemoAttach
   if (!from) { from = { address: '', name: '' }; out.push({ kind: 'malformed_sender' }); }
   // Mirrors phishing.HasFormatChar: parses, but need not display as what it is.
   else if (/[\p{Cf}\p{Zl}\p{Zp}]/u.test(from.address)) out.push({ kind: 'malformed_sender' });
-  const domain = warningDomain(from.address.split('@')[1] ?? '');
+  const rawDomain = from.address.split('@')[1] ?? '';
+  const domain = warningOversizedHost(rawDomain) ? rawDomain.toLowerCase() : warningDomain(rawDomain);
   if (auth.dmarc === 'fail') {
     const failed = ['dmarc']; if (!auth.dkim_aligned) failed.push('dkim_alignment'); if (['fail', 'softfail'].includes(auth.spf)) failed.push('spf');
     out.push({ kind: 'auth_fail', failed_checks: failed });
@@ -201,7 +221,9 @@ async function demoWarnings(state: DemoState, msg: DemoMessage, atts: DemoAttach
   const known = new Map<string,string>();
   const exact = new Set<string>();
   for (const a of [...state.identities.map(i => i.address), ...demoSentTo(state), ...state.contacts.filter(c => c.explicit).map(c => c.address)]) {
-    const d = warningDomain(a.split('@')[1] ?? '');
+    const raw = a.split('@')[1] ?? '';
+    if (warningOversizedHost(raw)) continue;
+    const d = warningDomain(raw);
     for (const candidate of [d, warningRegistrable(d)]) {
       const key = warningSkeleton(candidate); exact.add(candidate);
       if (!known.has(key) || candidate < known.get(key)!) known.set(key, candidate);
@@ -211,6 +233,11 @@ async function demoWarnings(state: DemoState, msg: DemoMessage, atts: DemoAttach
   // Mirrors the Go closure: raw is the host as received, since compatibility
   // characters map to plain ASCII under IDNA.
   const lookalike = (raw: string) => {
+    if (warningOversizedHost(raw)) {
+      raw = raw.toLowerCase();
+      if (!seen.has(raw)) { seen.add(raw); out.push({ kind: 'lookalike_domain', domain: raw, punycode: raw }); }
+      return;
+    }
     const host = warningDomain(raw), compat = warningMapsToASCII(raw), key = compat ? raw : host;
     if (!host || warningIP(host) || seen.has(key)) return; seen.add(key);
     const resembles = !compat && (exact.has(host) || exact.has(warningRegistrable(host))) ? undefined : known.get(warningSkeleton(host)) ?? known.get(warningSkeleton(warningRegistrable(host)));
@@ -227,7 +254,7 @@ async function demoWarnings(state: DemoState, msg: DemoMessage, atts: DemoAttach
   for (const link of await parseDemoLinks(msg.bodyHtml)) {
     const host = warningHost(link.Href); if (!host) continue; lookalike(host);
     const textHost = warningTextHost(link.Text.trim());
-    if (warningIP(host) || /(^|\.)xn--/.test(host) || (textHost && warningRegistrable(textHost) !== warningRegistrable(host))) out.push({ kind: 'deceptive_link', link_index: link.Index, text: link.Text, href: link.Href, decoded_host: decodeWarningDomain(host) });
+    if (warningOversizedHost(host) || warningOversizedHost(textHost) || warningIP(host) || /(^|\.)xn--/.test(host) || (textHost && warningRegistrable(textHost) !== warningRegistrable(host))) out.push({ kind: 'deceptive_link', link_index: link.Index, text: link.Text, href: link.Href, decoded_host: warningOversizedHost(host) ? host : decodeWarningDomain(host) });
   }
   for (const a of atts) { const reason = demoAttachmentRisk(a.filename, a.contentType); if (reason) out.push({ kind: 'risky_attachment', filename: a.filename, reason }); }
   return out;

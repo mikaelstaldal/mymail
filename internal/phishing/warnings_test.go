@@ -3,6 +3,7 @@ package phishing
 import (
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/mikaelstaldal/mymail/internal/api"
 	"github.com/mikaelstaldal/mymail/internal/model"
@@ -272,4 +273,101 @@ func TestCompatibilityCharacterSenderDomain(t *testing.T) {
 	got := Compute(model.DBMessage{FolderID: 1, FromAddr: "bob@müller.de"}, nil, Context{SentTo: true, KnownDomains: []string{"müller.de"}})
 	require.Len(t, got, 1)
 	assert.False(t, got[0].Resembles.Set)
+}
+
+func TestOversizedHost(t *testing.T) {
+	for _, tt := range []struct {
+		name, host string
+		oversized  bool
+	}{
+		{"label boundary", strings.Repeat("a", 63) + ".com", false},
+		{"long label", strings.Repeat("a", 64) + ".com", true},
+		{"domain boundary", strings.Repeat(strings.Repeat("a", 63)+".", 3) + strings.Repeat("b", 61), false},
+		{"trailing root dot", strings.Repeat(strings.Repeat("a", 63)+".", 3) + strings.Repeat("b", 61) + ".", false},
+		{"long domain", strings.Repeat(strings.Repeat("a", 63)+".", 3) + strings.Repeat("b", 62), true},
+		{"unicode", "bücher.de", false},
+		{"IDNA expanded label", strings.Repeat("é", 58) + ".com", true},
+		{"removed compatibility input", strings.Repeat("\u00ad", 1000) + "example.com", true},
+		{"ipv6", "2001:db8::1", false},
+		{"ipv4", "127.1", false},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.oversized, OversizedHost(tt.host))
+		})
+	}
+}
+
+func TestOversizedHostsWarnWithoutSkeletonMatching(t *testing.T) {
+	host := strings.Repeat("a", 10_000) + ".com"
+	m := model.DBMessage{FolderID: 1, FromAddr: "sender@" + host}
+	warnings := ComputeWithLinks(m, nil, Context{KnownDomains: []string{host}},
+		[]Link{{Index: 7, Text: "example.com", Href: "https://" + host}})
+	var lookalikes, deceptive int
+	for _, w := range warnings {
+		switch w.Kind {
+		case api.MessageWarningKindLookalikeDomain:
+			lookalikes++
+			assert.Equal(t, host, w.Domain.Value)
+			assert.False(t, w.Resembles.Set)
+		case api.MessageWarningKindDeceptiveLink:
+			deceptive++
+			assert.Equal(t, 7, w.LinkIndex.Value)
+			assert.Equal(t, host, w.DecodedHost.Value)
+		}
+	}
+	assert.Equal(t, 1, lookalikes)
+	assert.Equal(t, 1, deceptive)
+}
+
+func TestOversizedHeaderDomainsBoundWork(t *testing.T) {
+	var host strings.Builder
+	for i := 0; i < 30000; i++ {
+		host.WriteRune(rune(0x4e00 + i%20000))
+	}
+	domain := host.String() + ".com"
+	for _, tt := range []struct {
+		name, from, reply string
+		kind              api.MessageWarningKind
+	}{
+		{"reply", "x@example.com", "y@" + domain, api.MessageWarningKindReplyToMismatch},
+		{"display", "\"" + domain + "\" <x@example.com>", "", api.MessageWarningKindDisplayNameAddress},
+		{"from", "x@" + domain, "y@example.com", api.MessageWarningKindLookalikeDomain},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			start := time.Now()
+			warnings := Compute(model.DBMessage{FolderID: 1, FromAddr: tt.from, ReplyToAddr: tt.reply}, nil, Context{})
+			assert.Less(t, time.Since(start), 2*time.Second)
+			kinds := []api.MessageWarningKind{}
+			for _, w := range warnings {
+				kinds = append(kinds, w.Kind)
+			}
+			assert.Contains(t, kinds, tt.kind)
+		})
+	}
+}
+
+func TestLongProseAndFilenameLinkTextIsNotDomain(t *testing.T) {
+	for _, text := range []string{
+		strings.Repeat("A", 70),
+		"Quarterly_Report_2026_Final_Version_Approved_by_Board_of_Directors.pdf",
+	} {
+		m := model.DBMessage{FolderID: 1, FromAddr: "x@example.com"}
+		warnings := ComputeWithLinks(m, nil, Context{SentTo: true},
+			[]Link{{Href: "https://example.com/doc", Text: text}})
+		assert.Empty(t, warnings, text)
+	}
+}
+
+func TestOversizedHostCaseDeduplication(t *testing.T) {
+	host := strings.Repeat("A", 64) + ".COM"
+	warnings := ComputeWithLinks(model.DBMessage{FolderID: 1, FromAddr: "x@example.com"}, nil, Context{SentTo: true},
+		[]Link{{Href: "https://" + host}, {Href: "https://" + strings.ToLower(host)}})
+	count := 0
+	for _, w := range warnings {
+		if w.Kind == api.MessageWarningKindLookalikeDomain {
+			count++
+			assert.Equal(t, strings.ToLower(host), w.Domain.Value)
+		}
+	}
+	assert.Equal(t, 1, count)
 }

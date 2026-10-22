@@ -42,6 +42,29 @@ var confusables = func() map[string]string {
 
 const MaxLinks = 1000
 
+// OversizedHost bounds IDNA input before conversion, then enforces DNS wire
+// limits on its ASCII result. The raw allowance accommodates UTF-8 U-labels;
+// even compatibility characters that IDNA removes cannot bypass the work cap.
+// IP literals are not DNS names and retain their existing treatment.
+func OversizedHost(raw string) bool {
+	if len(raw) > 4*254 {
+		return true
+	}
+	host := Domain(raw)
+	if net.ParseIP(host) != nil {
+		return false
+	}
+	if len(host) > 253 {
+		return true
+	}
+	for _, label := range strings.Split(host, ".") {
+		if len(label) > 63 {
+			return true
+		}
+	}
+	return false
+}
+
 // Domain canonicalizes both U-labels and A-labels. Equality always uses ASCII.
 func Domain(s string) string {
 	s = strings.TrimSuffix(strings.ToLower(s), ".")
@@ -95,7 +118,16 @@ func HasFormatChar(s string) bool {
 	})
 }
 
-func addressDomain(addr string) string { _, d, _ := strings.Cut(addr, "@"); return Domain(d) }
+func addressDomain(addr string) string { _, d, _ := strings.Cut(addr, "@"); return d }
+
+// warningRegistrable is for untrusted comparison inputs, not persisted SQLite
+// normalization. Oversized domains stay distinct without IDNA conversion.
+func warningRegistrable(host string) string {
+	if OversizedHost(host) {
+		return strings.ToLower(host)
+	}
+	return Registrable(host)
+}
 
 // FoldAddress is the one address normalization for identities, contacts and
 // sent-to history: Unicode full case folding, except that a non-ASCII rune
@@ -164,6 +196,10 @@ func mixedScript(host string) bool {
 		scripts := map[string]bool{}
 		for _, r := range label {
 			if !unicode.IsLetter(r) {
+				continue
+			}
+			if r < utf8.RuneSelf {
+				scripts["Latin"] = true
 				continue
 			}
 			for name, table := range unicode.Scripts {
@@ -248,7 +284,7 @@ func ComputeWithLinks(m model.DBMessage, atts []api.AttachmentMeta, c Context, l
 				add(api.MessageWarningKindDisplayNameAddress).Address = api.NewOptString(token)
 				break
 			}
-		} else if host := textHost(token); host != "" && Registrable(host) != Registrable(addressDomain(from.Address)) {
+		} else if host := textHost(token); host != "" && warningRegistrable(host) != warningRegistrable(addressDomain(from.Address)) {
 			add(api.MessageWarningKindDisplayNameAddress).Address = api.NewOptString(token)
 			break
 		}
@@ -257,6 +293,9 @@ func ComputeWithLinks(m model.DBMessage, atts []api.AttachmentMeta, c Context, l
 	known := map[string]string{}
 	exact := map[string]bool{}
 	for _, d := range c.KnownDomains {
+		if OversizedHost(d) {
+			continue
+		}
 		d = Domain(d)
 		for _, candidate := range []string{d, Registrable(d)} {
 			exact[candidate] = true
@@ -270,6 +309,16 @@ func ComputeWithLinks(m model.DBMessage, atts []api.AttachmentMeta, c Context, l
 	// raw is the host as received. Whether it is an IDN is decided from that,
 	// not from Domain(raw): compatibility characters map to plain ASCII.
 	lookalike := func(raw string) {
+		if OversizedHost(raw) {
+			raw = strings.ToLower(raw)
+			if !seen[raw] {
+				seen[raw] = true
+				w := add(api.MessageWarningKindLookalikeDomain)
+				w.Domain = api.NewOptString(strings.ToLower(raw))
+				w.Punycode = api.NewOptString(strings.ToLower(raw))
+			}
+			return
+		}
 		host := Domain(raw)
 		compat := mapsToASCII(raw)
 		key := host
@@ -306,7 +355,7 @@ func ComputeWithLinks(m model.DBMessage, atts []api.AttachmentMeta, c Context, l
 	lookalike(fromDomain)
 	if replies, err := mail.ParseAddressList(m.ReplyToAddr); err == nil {
 		for _, reply := range replies {
-			if Registrable(addressDomain(reply.Address)) != Registrable(addressDomain(from.Address)) {
+			if warningRegistrable(addressDomain(reply.Address)) != warningRegistrable(addressDomain(from.Address)) {
 				add(api.MessageWarningKindReplyToMismatch).Address = api.NewOptString(reply.Address)
 			}
 		}
@@ -321,12 +370,16 @@ func ComputeWithLinks(m model.DBMessage, atts []api.AttachmentMeta, c Context, l
 		}
 		lookalike(host)
 		text := textHost(strings.TrimSpace(link.Text))
-		if net.ParseIP(host) != nil || punycode(Domain(host)) || (text != "" && Registrable(text) != Registrable(host)) {
+		if OversizedHost(host) || OversizedHost(text) || net.ParseIP(host) != nil || punycode(Domain(host)) || (text != "" && Registrable(text) != Registrable(host)) {
 			w := add(api.MessageWarningKindDeceptiveLink)
 			w.LinkIndex = api.NewOptInt(link.Index)
 			w.Text = api.NewOptString(link.Text)
 			w.Href = api.NewOptString(link.Href)
-			w.DecodedHost = api.NewOptString(decoded(host))
+			if OversizedHost(host) {
+				w.DecodedHost = api.NewOptString(host)
+			} else {
+				w.DecodedHost = api.NewOptString(decoded(host))
+			}
 		}
 	}
 	for _, a := range atts {
@@ -344,7 +397,11 @@ func LinkHost(s string) string {
 	if err != nil || (u.Scheme != "http" && u.Scheme != "https" && (u.Scheme != "" || u.Host == "")) {
 		return ""
 	}
-	return Domain(u.Hostname())
+	host := u.Hostname()
+	if OversizedHost(host) {
+		return strings.ToLower(host)
+	}
+	return Domain(host)
 }
 func textHost(s string) string {
 	if strings.ContainsAny(s, " \t\r\n") {
@@ -360,6 +417,20 @@ func textHost(s string) string {
 	}
 	h := LinkHost(s)
 	if h == "" {
+		return ""
+	}
+	if OversizedHost(h) {
+		if explicit {
+			return h
+		}
+		// Only the final label is needed to recognize bare domain text.
+		// Do not turn long filenames or tracking tokens into URL claims.
+		tld := h[strings.LastIndexByte(h, '.')+1:]
+		if len(tld) <= 63 {
+			if _, icann := publicsuffix.PublicSuffix(tld); icann {
+				return h
+			}
+		}
 		return ""
 	}
 	if !explicit {
