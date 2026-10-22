@@ -131,7 +131,7 @@ function filterMatches(
   msg: { fromAddr: string; toAddr: string; ccAddr: string; subject: string },
   filter: DemoFilter,
 ): boolean {
-  if (filter.matchFrom !== '' && !containsFold(msg.fromAddr, filter.matchFrom)) return false;
+  if (filter.matchFrom !== '' && !senderMatches(msg.fromAddr, filter.matchFrom)) return false;
   if (filter.matchTo !== '' &&
       !containsFold(msg.toAddr, filter.matchTo) &&
       !containsFold(msg.ccAddr, filter.matchTo)) {
@@ -187,4 +187,27 @@ function applyFilters(
     if (filter.stop) break;
   }
   return { folderId, markRead };
+}
+
+/** Mirrors lda.senderMatches; demo arrivals are generated from structured addresses. */
+function senderMatches(from: string, criterion: string): boolean {
+  let addresses: ParsedAddress[];
+  try { addresses = parseAddressList(from); } catch { return false; }
+  if (addresses.length !== 1) return false;
+  const wanted = senderASCIILower(criterion);
+  return addresses.some(({ address }) => {
+    address = senderASCIILower(address);
+    if (address.split('@').length !== 2) return false;
+    const domain = address.split('@')[1];
+    if (wanted.startsWith('@') || (!wanted.includes('@') && wanted.includes('.'))) {
+      const suffix = wanted.startsWith('@') ? wanted.slice(1) : wanted;
+      return suffix !== '' && (domain === suffix || domain.endsWith('.' + suffix));
+    }
+    return wanted.includes('@') ? address === wanted : address.includes(wanted);
+  });
+}
+
+/** Mirrors lda.senderASCIILower; Unicode look-alikes must not become ASCII. */
+function senderASCIILower(value: string): string {
+  return value.replace(/[A-Z]/g, c => c.toLowerCase());
 }

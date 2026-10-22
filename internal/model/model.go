@@ -149,6 +149,8 @@ func (a *DBAttachment) ToOASAttachmentMeta() *oas.AttachmentMeta {
 // pipeline. It is never serialised to JSON. Attachments carry zero ID and MessageID
 // values until the database insertion assigns them.
 type ParsedMessage struct {
+	// FromAddresses retains parsed addr-specs, never the display-string fallback.
+	FromAddresses     []string
 	FromAddr          string
 	ToAddr            string
 	CcAddr            string

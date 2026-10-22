@@ -563,10 +563,11 @@ func TestDetectSpam(t *testing.T) {
 
 func TestFilterMatches(t *testing.T) {
 	pm := &model.ParsedMessage{
-		FromAddr: "Alice <alice@example.com>",
-		ToAddr:   "bob@example.com",
-		CcAddr:   "charlie@example.com",
-		Subject:  "Hello World",
+		FromAddr:      "Alice <alice@example.com>",
+		FromAddresses: []string{"alice@example.com"},
+		ToAddr:        "bob@example.com",
+		CcAddr:        "charlie@example.com",
+		Subject:       "Hello World",
 	}
 
 	tests := []struct {

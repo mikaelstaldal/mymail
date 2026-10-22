@@ -341,10 +341,19 @@ Each filter has:
 - Human-readable name
 - Match criteria: `match_from`, `match_to`, `match_subject` (all ANDed; at least one must be non-empty)
     - `match_to` matches against both the `To` and `Cc` headers
-    - Matching is case-insensitive substring search
+    - `match_from` uses parsed sender addresses only, never display names; malformed or repeated From fields do not
+      match; exactly one mailbox is required. A full address matches exactly (ASCII case-insensitively);
+      a domain (bare or prefixed with `@`) matches that domain or its dot-delimited subdomains. Parsed local parts containing `@` do not match.
+      Simple text without `@` or a dot is an ASCII case-insensitive substring of the address only.
+    - `match_to` and `match_subject` use case-insensitive substring search
 - Action: `move` (to a specific folder), `trash`, `mark_read`, or `drop`
 - Stop flag: when true, evaluation halts after this filter matches; no further filters are evaluated for that message,
   regardless of whether prior matching filters had `stop=false`
+
+Sender filters do not authenticate the From address. A forged full address can still match; authentication
+must be enforced upstream if these filters are used to route trusted senders out of Junk.
+Existing filters that relied on display names or partial addresses must be updated. A dotted value such as
+`john.doe` is now a domain criterion; use a full address to match that mailbox.
 
 **Actions:**
 
@@ -1310,7 +1319,7 @@ Hovering a folder in the sidebar shows a tooltip with its slug and numeric id, e
    user's local timezone, the To date as the start of the day after). Two text fields (From, To) allow refining results
    by sender and recipient address; when non-blank they are trimmed and passed as `from_addr` and `to_addr`. `from_addr`
    matches the `From` header, `to_addr` matches the `To` **or** the `Cc` header, both as a case-insensitive substring —
-   the same rule as a filter's `match_from`/`match_to`, and with `%` and `_` treated as literals rather than wildcards.
+   unlike sender routing filters, and with `%` and `_` treated as literals rather than wildcards.
    All refinements are ANDed with each other and with the full-text query. The search bar, folder selector, address
    fields, and date pickers are shown together in the search view; the refinements reset whenever a new query arrives
    from the toolbar, and pagination re-runs the last submitted set rather than the current form contents.

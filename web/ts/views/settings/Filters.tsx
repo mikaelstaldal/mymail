@@ -70,8 +70,11 @@ function FilterForm({ form, onChange, folders, error, saving, onSave, onCancel }
           type="text"
           value={form.match_from}
           onInput={e => onChange({ ...form, match_from: (e.target as HTMLInputElement).value })}
-          placeholder="Match sender address or domain"
+          placeholder="Address, @domain, or address text"
+          title="Full addresses match exactly; domains include subdomains. Simple text matches addresses only, never display names."
         />
+        <small>Sender filters now match addresses only. Update older display-name or partial-address rules.
+          Dotted values match domains. Sender filters do not authenticate the sender.</small>
       </div>
       <div class="settings-field">
         <label>To / Cc</label>

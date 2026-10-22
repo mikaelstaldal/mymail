@@ -506,6 +506,11 @@ components:
         name:
           type: string
         match_from:
+          description: |
+            Match parsed sender addresses only, never display names. Full addresses match exactly,
+            ASCII case-insensitively. Domains (bare or prefixed with @) match that domain or its subdomains.
+            Text without @ or a dot is an ASCII case-insensitive address substring. Exactly one mailbox
+            in one valid From field is required; parsed local parts containing @ do not match.
           type: string
         match_to:
           type: string
@@ -536,6 +541,11 @@ components:
           type: string
           maxLength: 200
         match_from:
+          description: |
+            Match parsed sender addresses only, never display names. Full addresses match exactly,
+            ASCII case-insensitively. Domains (bare or prefixed with @) match that domain or its subdomains.
+            Text without @ or a dot is an ASCII case-insensitive address substring. Exactly one mailbox
+            in one valid From field is required; parsed local parts containing @ do not match.
           type: string
           maxLength: 1000
         match_to:
@@ -1215,8 +1225,8 @@ paths:
           in: query
           description: |
             Case-insensitive substring match against the message's `From` header (display name
-            included, exactly as stored in `from_addr`), narrowing the full-text result set. Uses
-            the same matching rule as a filter's `match_from`; `%` and `_` are literals, not
+            included, exactly as stored in `from_addr`), narrowing the full-text result set. Unlike
+            sender routing filters, this includes display names. `%` and `_` are literals, not
             wildcards. Whitespace-only values are ignored, as is an empty value (`from_addr=`).
           schema:
             type: string

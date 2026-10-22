@@ -1583,3 +1583,22 @@ test('demo JSON endpoints require a JSON media type', async () => {
     assert.equal(response.status, 201);
   }
 });
+
+test('sender filters ignore display names and enforce mailbox and domain boundaries', () => {
+  for (const [fromAddr, matchFrom, want] of [
+    ['Boss <boss@trusted.com>', 'BOSS@TRUSTED.COM', true],
+    ['attacker@evil.com, boss@trusted.com', 'boss@trusted.com', false],
+    ['boss@Key.com', 'boss@key.com', false],
+    ['boss@İ.com', 'boss@i.com', false],
+    ['"boss@trusted.com" <attacker@evil.com>', 'boss@trusted.com', false],
+    ['boss@trusted.com.evil.com', 'boss@trusted.com', false],
+    ['"boss@trusted.com"@evil.com', 'boss@trusted.com', false],
+    ['user@sub.trusted.com', '@trusted.com', true],
+    ['user@trusted.com.evil.com', 'trusted.com', false],
+    ['user@nottrusted.com', 'trusted.com', false],
+    ['Other <user@evil.com>', 'Other', false],
+    ['"boss@trusted.com" <attacker x@evil.com>', 'boss@trusted.com', false],
+  ]) {
+    assert.equal(filterMatches({ ...INBOUND, fromAddr }, filter({ matchFrom })), want, fromAddr);
+  }
+});

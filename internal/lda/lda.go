@@ -298,7 +298,7 @@ func detectSpam(headers mail.Header, settings oas.SpamFilterSettings) bool {
 // match_to checks both ToAddr and CcAddr; all non-empty criteria are ANDed.
 func filterMatches(pm *model.ParsedMessage, f oas.Filter) bool {
 	if f.MatchFrom != "" {
-		if !strings.Contains(strings.ToLower(pm.FromAddr), strings.ToLower(f.MatchFrom)) {
+		if !senderMatches(pm.FromAddresses, f.MatchFrom) {
 			return false
 		}
 	}
@@ -369,4 +369,45 @@ func isASCIISpace(r rune) bool {
 
 func isASCIILetter(b byte) bool {
 	return (b >= 'a' && b <= 'z') || (b >= 'A' && b <= 'Z')
+}
+
+// senderMatches uses parsed mailboxes only: display names cannot authorize routing.
+func senderMatches(addresses []string, criterion string) bool {
+	criterion = senderASCIILower(criterion)
+	for _, address := range addresses {
+		address = senderASCIILower(address)
+		// net/mail unquotes local parts; reject embedded @ rather than treating
+		// a quoted local part as a domain boundary.
+		if strings.Count(address, "@") != 1 {
+			continue
+		}
+		_, domain, _ := strings.Cut(address, "@")
+		switch {
+		case strings.HasPrefix(criterion, "@") || !strings.Contains(criterion, "@") && strings.Contains(criterion, "."):
+			wanted := strings.TrimPrefix(criterion, "@")
+			if wanted != "" && (domain == wanted || strings.HasSuffix(domain, "."+wanted)) {
+				return true
+			}
+		case strings.Contains(criterion, "@"):
+			if address == criterion {
+				return true
+			}
+		default:
+			if strings.Contains(address, criterion) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// Preserve non-ASCII characters: Unicode folding must not equate look-alike
+// domain characters (such as the Kelvin sign) with an ASCII trusted domain.
+func senderASCIILower(s string) string {
+	return strings.Map(func(r rune) rune {
+		if r >= 'A' && r <= 'Z' {
+			return r + ('a' - 'A')
+		}
+		return r
+	}, s)
 }
