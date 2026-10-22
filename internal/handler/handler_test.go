@@ -44,7 +44,7 @@ func newServer(t *testing.T, db *sql.DB) http.Handler {
 		repository.NewSpamFilterRepository(db),
 		"",
 	)
-	srv, err := api.NewServer(h, api.WithErrorHandler(handler.WriteError))
+	srv, err := api.NewServer(h, api.WithMiddleware(handler.MessageBodyFetchMetadata), api.WithErrorHandler(handler.WriteError))
 	require.NoError(t, err, "NewServer")
 	return srv
 }

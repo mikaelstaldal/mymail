@@ -386,6 +386,7 @@ func runServer(dataDir, addr string, port int, publicURL, basicAuthFile, basicAu
 
 		ogenServer, err := api.NewServer(h,
 			api.WithPathPrefix("/api/v1"),
+			api.WithMiddleware(handler.MessageBodyFetchMetadata),
 			api.WithErrorHandler(handler.WriteError),
 		)
 		if err != nil {

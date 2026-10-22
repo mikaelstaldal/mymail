@@ -476,9 +476,9 @@ function newState(messages = []) {
 }
 
 /** Issues one API request against `state` and returns { status, body }. */
-async function call(state, method, path, body) {
+async function call(state, method, path, body, headers = {}) {
   globalThis.__demoState = state;
-  const init = { method };
+  const init = { method, headers };
   if (body !== undefined) {
     init.body = JSON.stringify(body);
     init.headers = { 'Content-Type': 'application/json' };
@@ -805,6 +805,7 @@ test('the message body is served as a document with its own CSP', async () => {
   assert.equal(res.status, 200);
   assert.ok(res.body.includes('<body><p>hi</p></body>'));
   assert.match(res.headers.get('Content-Security-Policy'), /img-src data:;/);
+  assert.match(res.headers.get('Content-Security-Policy'), /; sandbox allow-popups allow-popups-to-escape-sandbox allow-downloads$/);
   // The policy is repeated inside the document: the page has to hand this to
   // the iframe as srcdoc (a sandboxed iframe's navigation never reaches a
   // service worker), and the headers do not survive that.
@@ -1600,5 +1601,23 @@ test('sender filters ignore display names and enforce mailbox and domain boundar
     ['"boss@trusted.com" <attacker x@evil.com>', 'boss@trusted.com', false],
   ]) {
     assert.equal(filterMatches({ ...INBOUND, fromAddr }, filter({ matchFrom })), want, fromAddr);
+  }
+});
+
+
+test('body Fetch Metadata guard mirrors the server', async () => {
+  const state = newState([message({ id: 1, bodyHtml: '<p>private body</p>' })]);
+  for (const [site, dest, expected] of [
+    ['same-origin', 'iframe', 200], ['same-origin', 'empty', 200],
+    ['cross-site', 'document', 403], ['cross-site', 'iframe', 403],
+    ['cross-site', 'empty', 403], ['same-origin', 'document', 403],
+    ['same-site', 'document', 403], ['none', 'document', 403],
+  ]) {
+    for (const query of ['', '?external=1']) {
+      const response = await call(state, 'GET', '/messages/1/body' + query, undefined,
+        { 'Sec-Fetch-Site': site, 'Sec-Fetch-Dest': dest });
+      assert.equal(response.status, expected, `${site} ${dest} ${query}`);
+      if (expected === 403) assert.ok(!JSON.stringify(response.body).includes('private body'));
+    }
   }
 });

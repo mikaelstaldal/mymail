@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/ogen-go/ogen/middleware"
+
 	"github.com/mikaelstaldal/mymail/internal/api"
 	"github.com/mikaelstaldal/mymail/internal/phishing"
 	"github.com/mikaelstaldal/mymail/internal/repository"
@@ -38,6 +40,19 @@ func (h *Handler) MessagesIDHeadersGet(ctx context.Context, params api.MessagesI
 	return &api.MessagesIDHeadersGetOK{Data: bytes.NewReader(headerBlock)}, nil
 }
 
+// MessageBodyFetchMetadata blocks browser-driven access outside the app's body
+// iframe/subresource flow. Missing metadata remains supported for API clients
+// and older browsers; the response CSP sandbox applies to those requests too.
+func MessageBodyFetchMetadata(req middleware.Request, next middleware.Next) (middleware.Response, error) {
+	if req.OperationName == api.MessagesIDBodyGetOperation &&
+		(req.Raw.Header.Get("Sec-Fetch-Site") == "cross-site" || req.Raw.Header.Get("Sec-Fetch-Dest") == "document") {
+		return middleware.Response{}, &api.DefaultStatusCode{
+			StatusCode: 403, Response: api.Error{Error: "message bodies require an in-app request"},
+		}
+	}
+	return next(req)
+}
+
 func (h *Handler) MessagesIDBodyGet(ctx context.Context, params api.MessagesIDBodyGetParams) (api.MessagesIDBodyGetRes, error) {
 	ctx, release, err := h.messages.DetailReadSnapshot(ctx)
 	if err != nil {
@@ -63,7 +78,7 @@ func (h *Handler) MessagesIDBodyGet(ctx context.Context, params api.MessagesIDBo
 	if v, ok := params.External.Get(); ok && v == "1" {
 		imgSrc = "https: data:"
 	}
-	csp := fmt.Sprintf("default-src 'none'; img-src %s; style-src 'unsafe-inline'; frame-ancestors 'self'", imgSrc)
+	csp := fmt.Sprintf("default-src 'none'; img-src %s; style-src 'unsafe-inline'; frame-ancestors 'self'; sandbox allow-popups allow-popups-to-escape-sandbox allow-downloads", imgSrc)
 
 	body := fmt.Sprintf("<!DOCTYPE html>\n<html>\n<head><meta charset=\"utf-8\"><base target=\"_blank\"></head>\n<body>%s</body>\n</html>", servedHTML)
 	return &api.MessagesIDBodyGetOKHeaders{

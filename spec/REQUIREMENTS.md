@@ -687,8 +687,8 @@ only worth paying for where the excluded thing carries risk. Inert elements and
 CSS that cannot reference a resource are permitted; what stays out is what can
 execute, fetch, or spoof. The sanitizer is also not the only gate: message bodies
 are served by `GET /messages/{id}/body` with `default-src 'none'` and no
-`script-src`, inside an iframe sandboxed without `allow-scripts` or
-`allow-same-origin`.
+`script-src` and a CSP `sandbox` without `allow-scripts` or `allow-same-origin`,
+also enforced by the iframe attribute. The response sandbox applies even outside the iframe.
 
 **Allowed elements:** `a`, `abbr`, `b`, `blockquote`, `br`, `caption`, `cite`, `code`, `col`, `colgroup`, `dd`, `del`,
 `dfn`, `div`, `dl`, `dt`, `em`, `figcaption`, `figure`, `h1`–`h6`, `hr`, `i`, `img`, `ins`, `kbd`, `li`, `mark`, `ol`,
@@ -852,6 +852,9 @@ importmap and same-origin `.js` files while excluding `'unsafe-inline'`, preserv
 
 External images in email bodies are blocked by the CSP (no `https:` in `img-src`) to prevent tracking pixels. A
 per-message opt-in for external images is provided via `has_external_images` in the message detail response.
+The body endpoint rejects requests with `Sec-Fetch-Site: cross-site` or `Sec-Fetch-Dest: document` (403),
+including requests with `external=1`, to prevent cross-site navigation from bypassing this choice.
+Requests without Fetch Metadata remain supported for API clients and older browsers.
 
 ### Authentication
 

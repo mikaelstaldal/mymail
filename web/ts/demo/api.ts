@@ -1262,12 +1262,15 @@ function getMessageHeaders(state: DemoState, id: number): Response {
  * headers do not survive that trip. The header is still set, so the two
  * responses differ only by the meta the server has no need of.
  */
-async function getMessageBody(state: DemoState, id: number, url: URL): Promise<Response> {
+async function getMessageBody(state: DemoState, id: number, url: URL, request: Request): Promise<Response> {
+  if (request.headers.get('Sec-Fetch-Site') === 'cross-site' || request.headers.get('Sec-Fetch-Dest') === 'document') {
+    return jsonResponse(403, { error: 'message bodies require an in-app request' });
+  }
   const msg = findMessage(state, id);
   const warnings = await demoWarnings(state, msg, []);
   const servedHTML = await rewriteDemoLinks(msg.bodyHtml, id, warnings.filter(w => w.kind === 'deceptive_link').map(w => Number(w.link_index)), new URL('../../../../', url).href);
   const imgSrc = url.searchParams.get('external') === '1' ? 'https: data:' : 'data:';
-  // frame-ancestors is deliberately left out of the meta copy: browsers ignore
+  // sandbox and frame-ancestors are left out of the meta copy: browsers ignore
   // it there, and the iframe is same-document anyway.
   const csp = `default-src 'none'; img-src ${imgSrc}; style-src 'unsafe-inline'`;
   const body =
@@ -1279,7 +1282,7 @@ async function getMessageBody(state: DemoState, id: number, url: URL): Promise<R
     status: 200,
     headers: {
       'Content-Type': 'text/html; charset=utf-8',
-      'Content-Security-Policy': csp + "; frame-ancestors 'self'",
+      'Content-Security-Policy': csp + "; frame-ancestors 'self'; sandbox allow-popups allow-popups-to-escape-sandbox allow-downloads",
       'X-Frame-Options': 'SAMEORIGIN',
       'Referrer-Policy': 'no-referrer',
       'Cache-Control': 'no-store',
@@ -2076,7 +2079,7 @@ async function route(
         if (third === 'read' && method === 'PUT') return markMessageRead(state, id);
         if (third === 'raw' && method === 'GET') return getRawMessage(state, id);
         if (third === 'headers' && method === 'GET') return getMessageHeaders(state, id);
-        if (third === 'body' && method === 'GET') return getMessageBody(state, id, url);
+        if (third === 'body' && method === 'GET') return getMessageBody(state, id, url, request);
         if (third === 'thread' && method === 'GET') return getThread(state, id);
         if (third === 'snooze' && method === 'POST') return snoozeMessage(state, id, await readJSON(request));
         if (third === 'snooze' && method === 'DELETE') return cancelSnooze(state, id);

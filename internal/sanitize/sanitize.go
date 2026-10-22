@@ -186,7 +186,7 @@ func newPolicy(elements, cssProperties []string) *bluemonday.Policy {
 // is only worth paying for where the excluded thing carries risk. Inert
 // elements and CSS that cannot reference a resource are permitted; what stays
 // out is what can execute, fetch, or spoof. The sanitizer is also not the only
-// gate here — see MessagesIDBodyGet's CSP and iframe sandbox.
+// gate here — see MessagesIDBodyGet's CSP sandbox and the iframe sandbox.
 func NewEmailPolicy() *bluemonday.Policy {
 	return newPolicy(allAllowedElements, cssAllowlist)
 }
@@ -207,8 +207,8 @@ func NewEmailPolicy() *bluemonday.Policy {
 // Widening the outgoing side stays safe for the Sent/Scheduled folders, whose
 // bodies are displayed through the same gates as inbound mail:
 // MessagesIDBodyGet serves them with `default-src 'none'` and no script-src,
-// inside an iframe sandboxed without allow-scripts or allow-same-origin. Those
-// gates do not care which policy produced the stored HTML.
+// with a CSP sandbox without allow-scripts or allow-same-origin, also enforced
+// by the iframe attribute. Those gates do not care which policy produced the stored HTML.
 func NewOutgoingPolicy() *bluemonday.Policy {
 	return newPolicy(
 		slices.Concat(allAllowedElements, outgoingOnlyElements),
