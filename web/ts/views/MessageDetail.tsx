@@ -7,7 +7,7 @@ import { getMycalUrl, isDemo } from '../util/config.js';
 import { formatDateFull, formatDateAdaptive, defaultSnoozeDateTime } from '../util/date.js';
 import { hasValidRecipient, isValidAddress } from '../util/address.js';
 import { findIcsLinks } from '../util/icslinks.js';
-import { senderParts, warningText, attachmentReason, type MessageWarning } from '../util/phishing.js';
+import { senderParts, warningText, warningParts, revealFormatChars, attachmentReason, type MessageWarning } from '../util/phishing.js';
 import { foldContactAddress } from '../util/casefold.js';
 import { Icon } from '../components/Icon.js';
 import type { components } from '../api/types.js';
@@ -106,20 +106,20 @@ function LinkWarning({ warning }: { warning: MessageWarning }) {
     onBlur={() => setPosition(null)}
     onKeyDown={event => { if (event.key === 'Escape') setPosition(null); }}>
     <span>Check this link:</span>
-    <bdi class="phishing-warning-url">“{warning.text}”</bdi>
+    <bdi class="phishing-warning-url">“{revealFormatChars(warning.text ?? '')}”</bdi>
     <span>goes to</span>
-    <bdi class="phishing-warning-url">{warning.href}</bdi>
+    <bdi class="phishing-warning-url">{revealFormatChars(warning.href ?? '')}</bdi>
     {warning.decoded_host && <>
       <span>(host:</span>
-      <bdi class="phishing-warning-url phishing-warning-host">{warning.decoded_host}</bdi>
+      <bdi class="phishing-warning-url phishing-warning-host">{revealFormatChars(warning.decoded_host ?? '')}</bdi>
       <span>)</span>
     </>}
     {position && <span ref={tooltipRef} id={tooltipId} role="tooltip" class="phishing-link-tooltip"
       style={{ left: `${position.left}px`, top: position.top === undefined ? undefined : `${position.top}px`,
         bottom: position.bottom === undefined ? undefined : `${position.bottom}px`, maxHeight: `${position.maxHeight}px` }}>
-      <span>Link text: <bdi>{warning.text}</bdi></span>
-      <span>Destination: <bdi>{warning.href}</bdi></span>
-      {warning.decoded_host && <span>Host: <bdi>{warning.decoded_host}</bdi></span>}
+      <span>Link text: <bdi>{revealFormatChars(warning.text ?? '')}</bdi></span>
+      <span>Destination: <bdi>{revealFormatChars(warning.href ?? '')}</bdi></span>
+      {warning.decoded_host && <span>Host: <bdi>{revealFormatChars(warning.decoded_host ?? '')}</bdi></span>}
     </span>}
   </span>;
 }
@@ -132,6 +132,11 @@ function FirstTimeSenderNote({ warnings }: { warnings: MessageWarning[] }) {
   return <span class="sender-first-time" role="note" aria-label="Sender warning">{warningText(warning)}</span>;
 }
 
+/** Keep untrusted values separate from the application's warning sentence. */
+function WarningText({ warning: w }: { warning: MessageWarning }) {
+  return <>{warningParts(w)?.map(part => typeof part === 'string' ? part : <bdi>{part.value}</bdi>)}</>;
+}
+
 function WarningBanner({ warnings: all }: { warnings: MessageWarning[] }) {
   const linkCount = all.filter(w => w.kind === 'deceptive_link').length;
   const firstLink = all.find(w => w.kind === 'deceptive_link');
@@ -142,7 +147,7 @@ function WarningBanner({ warnings: all }: { warnings: MessageWarning[] }) {
     <ul>{warnings.map((warning, i) => <li key={i} class={warning.kind === 'auth_fail' || warning.kind === 'malformed_sender' || warning.kind === 'lookalike_domain' ? 'phishing-warning-strong' : ''}>
       {warning.kind === 'deceptive_link'
         ? linkCount > 1 ? `Message contains ${linkCount} deceptive links` : <LinkWarning warning={warning} />
-        : warningText(warning)}
+        : <WarningText warning={warning} />}
     </li>)}</ul>
   </div>;
 }
@@ -1024,7 +1029,7 @@ export function MessageDetail({ id, folders }: MessageDetailProps) {
                       onKeyDown={risk ? e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.currentTarget.click(); } } : undefined}
                       onClick={risk ? e => {
                         e.preventDefault();
-                        void confirmDialog({ title: 'Download risky attachment?', body: `“${a.filename}” ${attachmentReason(risk.reason)}. Download only if you trust its source.`, confirmLabel: 'Download', cancelLabel: 'Cancel' }).then(ok => {
+                        void confirmDialog({ title: 'Download risky attachment?', body: <>“<bdi>{revealFormatChars(a.filename)}</bdi>” {attachmentReason(risk.reason)}. Download only if you trust its source.</>, confirmLabel: 'Download', cancelLabel: 'Cancel' }).then(ok => {
                           if (ok) {
                             const link = document.createElement('a');
                             link.href = `api/v1/attachments/${a.id}`;
@@ -1039,7 +1044,7 @@ export function MessageDetail({ id, folders }: MessageDetailProps) {
                       class="attachment-link"
                     >
                       <Icon name="paperclip" size={14} />
-                      {a.filename}
+                      <bdi>{revealFormatChars(a.filename)}</bdi>
                       {risk && <span class="attachment-risk">Warning: {attachmentReason(risk.reason)}</span>}
                       <span class="attachment-size">({formatBytes(a.size)})</span>
                     </a>

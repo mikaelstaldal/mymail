@@ -1,3 +1,5 @@
+import type { ComponentChildren } from 'preact';
+
 // The confirmation dialogs that replaced `window.confirm`. Same shape as
 // util/toast.ts: a module-level store the view subscribes to, so a handler deep
 // in a view can ask a question without the answer having to be threaded back
@@ -13,7 +15,7 @@ export interface ConfirmOptions {
   // Short heading, e.g. "Delete message". No trailing question mark.
   title: string;
   // The question itself, in full.
-  body: string;
+  body: ComponentChildren;
   // The button that goes ahead, named after the action ("Delete", "Send") —
   // never "OK". This label is the last thing read before committing.
   confirmLabel: string;

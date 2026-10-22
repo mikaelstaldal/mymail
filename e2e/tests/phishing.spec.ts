@@ -199,7 +199,7 @@ test('multiple deceptive links share one counted warning in both body views', as
     await expect(banner).toHaveText('Message contains 2 deceptive links');
     await page.getByRole('button', { name: 'Plain', exact: true }).click();
     await expect(banner.locator('li')).toHaveCount(1);
-    await expect(banner).toContainText('Check these 2 links');
+    await expect(banner).toContainText('Message contains 2 deceptive links');
   } finally {
     await request.patch(`/api/v1/messages/${id}`, { data: { folder_id: 4 } });
     await request.delete(`/api/v1/messages/${id}`);
@@ -275,4 +275,38 @@ test('thread entries show the full sender address', async ({ page, request }) =>
     return;
   }
   throw new Error('Demo seed must include a thread');
+});
+
+// Renderer regression: the server's warning decisions are covered above; inject
+// hostile display values here to exercise every affected presentation surface.
+test('format controls are visible and isolated in warnings and download confirmation', async ({ page, request }) => {
+  const message = await sample(request);
+  const filename = 'invoice\u202Efdp.exe';
+  const address = 'x@\u202Emoc.lapyap';
+  message.attachments[0].filename = filename;
+  message.warnings = [
+    { kind: 'risky_attachment', filename, reason: 'executable_extension' },
+    { kind: 'reply_to_mismatch', address },
+    { kind: 'lookalike_domain', domain: 'עברית.example', punycode: 'xn--example', resembles: 'bank\u2066.example' },
+    { kind: 'deceptive_link', text: 'example.com\u202E', href: 'https://evil.example/\u2067', decoded_host: 'evil.example' },
+  ];
+  await page.route(`**/api/v1/messages/${message.id}`, route => route.fulfill({ json: message }));
+  await page.goto(`/#/message/${message.id}`);
+  const banner = page.getByRole('note', { name: 'Message warnings' });
+  await expect(banner.locator('bdi').filter({ hasText: 'invoice<U+202E>fdp.exe' })).toHaveCount(1);
+  await expect(banner.locator('bdi').filter({ hasText: 'x@<U+202E>moc.lapyap' })).toHaveCount(1);
+  await expect(banner).toContainText('on a different domain from the sender');
+  await expect(banner.locator('bdi').filter({ hasText: 'עברית.example' })).toHaveCount(1);
+  await expect(banner.locator('bdi').filter({ hasText: 'bank<U+2066>.example' })).toHaveCount(1);
+  await expect(banner.locator('bdi').filter({ hasText: 'example.com<U+202E>' })).toHaveCount(1);
+  await expect(banner.locator('bdi').filter({ hasText: 'https://evil.example/<U+2067>' })).toHaveCount(1);
+  const attachment = page.getByRole('button', { name: /invoice<U\+202E>fdp.exe/ });
+  await expect(attachment.locator('bdi')).toHaveText('invoice<U+202E>fdp.exe');
+  await attachment.click();
+  const dialog = page.getByRole('alertdialog');
+  await expect(dialog.locator('bdi')).toHaveText('invoice<U+202E>fdp.exe');
+  await expect(dialog).toContainText('Download only if you trust its source.');
+  await dialog.getByRole('button', { name: 'Cancel', exact: true }).click();
+  await page.getByRole('button', { name: 'Forward', exact: true }).click();
+  await expect(page.locator('.compose-attachments bdi')).toContainText(['invoice<U+202E>fdp.exe']);
 });

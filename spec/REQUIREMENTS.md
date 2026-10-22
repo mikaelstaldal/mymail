@@ -1760,6 +1760,11 @@ Basic authentication or tokens configured. Both discovery resources return
   `report.pdf`, `v1.2` and `3.14` are not treated as URLs. Explicit HTTP(S) URLs
   and conventional IP literals do not require a public suffix. Attachment checks are advisory and do not change
   the API download endpoint. The web UI asks for confirmation before risky downloads.
+  Warning values and attachment filenames (including download confirmations) are
+  bidirectionally isolated. Invisible Unicode format and paragraph/line separator
+  characters in these values are shown as visible code-point escapes such as
+  `<U+202E>`, so they cannot disguise extensions or reorder warning prose.
+  Stored values and downloaded filenames remain unchanged.
 - **REQ-PHISH-07:** Demo mode returns the same warning shape, keeps durable sent-to
   history in IndexedDB, and contains an intentionally suspicious sample with all
   seven kinds a well-formed sender can produce (an unparseable `From` excludes the

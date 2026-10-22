@@ -1,3 +1,4 @@
+import { revealFormatChars } from '../util/phishing.js';
 import { useState, useEffect, useRef, useCallback } from 'preact/hooks';
 import { api, NotFoundError } from '../api/client.js';
 import { navigate } from '../router.js';
@@ -1475,14 +1476,14 @@ export function ComposeForm({ replyId, replyAllId, forwardId, draftId }: Compose
         <div class="compose-attachments">
           {existingAttachments.map(a => (
             <span key={a.id} class="cf-attached-file">
-              {a.filename}
+              <bdi>{revealFormatChars(a.filename)}</bdi>
               <span class="cf-attach-size">({formatBytes(a.size)})</span>
               <button type="button" aria-label="Remove attachment" onClick={() => void removeExistingAttachment(a.id)}><Icon name="x" size={14} /></button>
             </span>
           ))}
           {files.map((f, i) => (
             <span key={i} class="cf-attached-file cf-new-attach">
-              {f.name}
+              <bdi>{revealFormatChars(f.name)}</bdi>
               <button type="button" aria-label="Remove attachment" onClick={() => removeFile(i)}><Icon name="x" size={14} /></button>
             </span>
           ))}

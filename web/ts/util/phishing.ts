@@ -14,19 +14,25 @@ export function revealFormatChars(s: string): string {
   return s.replace(FORMAT_CHARS, c => `<U+${c.codePointAt(0)!.toString(16).toUpperCase().padStart(4, '0')}>`);
 }
 
-/** Plain warning text; deceptive links use structured markup in MessageDetail.
- * Warning decisions belong to the server. */
-export function warningText(w: MessageWarning): string | null {
+/** Prose and isolated, visibly escaped values share one presentation source. */
+export type WarningPart = string | { value: string };
+export function warningParts(w: MessageWarning): WarningPart[] | null {
+  const value = (text: string | undefined): WarningPart => ({ value: revealFormatChars(text ?? '') });
   switch (w.kind) {
-    case 'malformed_sender': return 'The sender address is missing or malformed, so it cannot be checked';
-    case 'auth_fail': return `This sender failed authentication checks: ${(w.failed_checks ?? []).map(c => ({ dmarc: 'DMARC', dkim_alignment: 'DKIM alignment', spf: 'SPF' })[c] ?? c).join(', ')}`;
-    case 'display_name_address': return `The sender's name contains a different address or domain: ${revealFormatChars(w.address ?? '')}`;
-    case 'lookalike_domain': return `The sender's domain uses international characters: ${revealFormatChars(w.domain ?? '')} (${revealFormatChars(w.punycode ?? '')})${w.resembles ? `; it resembles ${w.resembles}` : ''}`;
-    case 'reply_to_mismatch': return `Replies will go to ${revealFormatChars(w.address ?? '')}, on a different domain from the sender`;
-    case 'first_time_sender': return 'You have never sent mail to this sender';
+    case 'malformed_sender': return ['The sender address is missing or malformed, so it cannot be checked'];
+    case 'auth_fail': return [`This sender failed authentication checks: ${(w.failed_checks ?? []).map(c => ({ dmarc: 'DMARC', dkim_alignment: 'DKIM alignment', spf: 'SPF' })[c] ?? c).join(', ')}`];
+    case 'display_name_address': return ["The sender's name contains a different address or domain: ", value(w.address)];
+    case 'lookalike_domain': return ["The sender's domain uses international characters: ", value(w.domain), ' (', value(w.punycode), ')', ...(w.resembles ? ['; it resembles ', value(w.resembles)] : [])];
+    case 'reply_to_mismatch': return ['Replies will go to ', value(w.address), ', on a different domain from the sender'];
+    case 'first_time_sender': return ['You have never sent mail to this sender'];
     case 'deceptive_link': return null;
-    case 'risky_attachment': return `Attachment “${w.filename}” ${attachmentReason(w.reason)}`;
+    case 'risky_attachment': return ['Attachment “', value(w.filename), `” ${attachmentReason(w.reason)}`];
   }
+}
+
+/** Plain equivalent for callers that do not render markup. */
+export function warningText(w: MessageWarning): string | null {
+  return warningParts(w)?.map(part => typeof part === 'string' ? part : part.value).join('') ?? null;
 }
 export function attachmentReason(reason: MessageWarning['reason']): string {
   switch (reason) {

@@ -2,7 +2,7 @@
 // link warnings, rendering, dialog cancellation and downloads are covered by phishing.spec.ts.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { senderParts, warningText, decodeWarningDomain, revealFormatChars } from '../static/util/phishing.js';
+import { senderParts, warningText, warningParts, decodeWarningDomain, revealFormatChars } from '../static/util/phishing.js';
 
 test('sender name cannot hide the actual address', () => {
   assert.deepEqual(senderParts('"support@paypal.com" <thief@evil.example>'), {
@@ -59,4 +59,17 @@ test('a bidi override cannot make the sender address display as another', () => 
   assert.equal(revealFormatChars('help@bücher.de'), 'help@bücher.de');
   assert.equal(warningText({ kind: 'reply_to_mismatch', address: 'x@\u202Emoc.lapyap' }),
     'Replies will go to x@<U+202E>moc.lapyap, on a different domain from the sender');
+});
+
+test('all bidi controls are revealed without changing ordinary filenames', () => {
+  for (const code of [0x061c, 0x200e, 0x200f, 0x202a, 0x202b, 0x202c, 0x202d, 0x202e, 0x2066, 0x2067, 0x2068, 0x2069]) {
+    const filename = `invoice${String.fromCodePoint(code)}fdp.exe`;
+    const visible = `invoice<U+${code.toString(16).toUpperCase().padStart(4, '0')}>fdp.exe`;
+    assert.equal(revealFormatChars(filename), visible);
+    assert.deepEqual(warningParts({ kind: 'risky_attachment', filename, reason: 'executable_extension' }),
+      ['Attachment “', { value: visible }, '” has a potentially executable extension']);
+    assert.equal(warningText({ kind: 'risky_attachment', filename, reason: 'executable_extension' }),
+      `Attachment “${visible}” has a potentially executable extension`);
+  }
+  assert.equal(revealFormatChars('חשבונית.pdf'), 'חשבונית.pdf');
 });
