@@ -627,6 +627,7 @@ For each message in the Snoozed folder whose `snoozed_until` is in the past:
 
 ## Batch Import
 
+Import bounds per-message reads before buffering, streaming past oversized messages to continue with later messages.
 Import uses the same RFC 5322 parser as LDA delivery. Messages over 64 MiB or exceeding the MIME resource limits above
 are skipped as parse failures.
 

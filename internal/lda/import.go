@@ -2,6 +2,7 @@ package lda
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"database/sql"
 	"fmt"
@@ -283,6 +284,23 @@ func commitBatch(ctx context.Context, db *sql.DB, batch []batchEntry, folderID i
 	return len(insertedRows), nil
 }
 
+// readImportFile bounds the read even if a Maildir file grows after Stat.
+func readImportFile(path string) ([]byte, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+	if fi, err := f.Stat(); err == nil && fi.Size() > MaxMessageBytes {
+		return nil, fmt.Errorf("message exceeds %d bytes", MaxMessageBytes)
+	}
+	raw, err := io.ReadAll(io.LimitReader(f, MaxMessageBytes+1))
+	if err == nil && len(raw) > MaxMessageBytes {
+		return nil, fmt.Errorf("message exceeds %d bytes", MaxMessageBytes)
+	}
+	return raw, err
+}
+
 // importMaildir imports all messages from a Maildir directory into folderID.
 func importMaildir(dir string, folderID int64, db *sql.DB) (imported, skipped int, _ error) {
 	type msgMeta struct {
@@ -357,7 +375,7 @@ func importMaildir(dir string, folderID int64, db *sql.DB) (imported, skipped in
 
 	for _, msg := range allMsgs {
 		fi, statErr := os.Stat(msg.filename)
-		raw, readErr := os.ReadFile(msg.filename)
+		raw, readErr := readImportFile(msg.filename)
 		if readErr != nil {
 			log.Printf("import maildir: read %s: %v", msg.filename, readErr)
 			skipped++
@@ -483,11 +501,21 @@ func importMbox(path string, folderID int64, db *sql.DB) (imported, skipped int,
 			msgIdx++
 			continue
 		}
-		raw, readErr := io.ReadAll(msgReader)
+		raw, readErr := io.ReadAll(io.LimitReader(msgReader, MaxMessageBytes+1))
 		if readErr != nil {
 			log.Printf("import mbox %s[%d]: read: %v", path, msgIdx, readErr)
 			skipped++
 			msgIdx++
+			continue
+		}
+		if len(raw) > MaxMessageBytes {
+			log.Printf("import mbox %s[%d]: message exceeds %d bytes", path, msgIdx, MaxMessageBytes)
+			skipped++
+			msgIdx++
+			if _, err := io.Copy(io.Discard, msgReader); err != nil {
+				flush()
+				return imported, skipped, fmt.Errorf("discard oversized message: %w", err)
+			}
 			continue
 		}
 		pm, parseErr := ParseMessage(raw)
@@ -567,21 +595,30 @@ func scanMboxSeparators(path string) ([]string, error) {
 	defer f.Close()
 
 	var ts []string
-	sc := bufio.NewScanner(f)
-	for sc.Scan() {
-		line := sc.Text()
-		if !strings.HasPrefix(line, "From ") || len(line) < 6 || line[5] == ' ' {
-			continue
+	br := bufio.NewReader(f)
+	for {
+		// Only a separator's first fragment can contain a useful timestamp.
+		// Discard continuation fragments without accumulating arbitrarily long lines.
+		line, err := br.ReadSlice('\n')
+		if bytes.HasPrefix(line, []byte("From ")) && len(line) >= 6 && line[5] != ' ' {
+			rest := string(line[5:])
+			_, after, found := strings.Cut(rest, " ")
+			if !found {
+				ts = append(ts, "")
+			} else {
+				ts = append(ts, strings.TrimSpace(after))
+			}
 		}
-		rest := line[5:]
-		_, after, found := strings.Cut(rest, " ")
-		if !found {
-			ts = append(ts, "")
-		} else {
-			ts = append(ts, strings.TrimSpace(after))
+		for err == bufio.ErrBufferFull {
+			_, err = br.ReadSlice('\n')
+		}
+		if err == io.EOF {
+			return ts, nil
+		}
+		if err != nil {
+			return nil, err
 		}
 	}
-	return ts, sc.Err()
 }
 
 // parseFromTimestamp tries the known layouts in order; returns nil on failure.
@@ -659,7 +696,8 @@ func importMbx(path string, folderID int64, db *sql.DB) (imported, skipped int, 
 	msgIdx := 0
 
 	for {
-		line, readErr := br.ReadString('\n')
+		headerLine, readErr := br.ReadSlice('\n')
+		line := string(headerLine)
 		if readErr == io.EOF && len(line) == 0 {
 			break
 		}
@@ -693,7 +731,7 @@ func importMbx(path string, folderID int64, db *sql.DB) (imported, skipped int, 
 			break
 		}
 
-		msgSize, parseErr := strconv.ParseUint(sizeStr, 10, 64)
+		msgSize, parseErr := strconv.ParseUint(sizeStr, 10, 63)
 		if parseErr != nil || msgSize == 0 {
 			log.Printf("import mbx %s[%d]: invalid message size %q", path, msgIdx, sizeStr)
 			if flushErr == nil {
@@ -719,10 +757,13 @@ func importMbx(path string, folderID int64, db *sql.DB) (imported, skipped int, 
 			break
 		}
 
-		// Skip messages marked as expunged without allocating a body buffer.
-		if sysFlags&fEXPUNGED != 0 {
+		// Skip expunged and oversized messages without allocating a body buffer.
+		if sysFlags&fEXPUNGED != 0 || msgSize > MaxMessageBytes {
+			if msgSize > MaxMessageBytes {
+				log.Printf("import mbx %s[%d]: message exceeds %d bytes", path, msgIdx, MaxMessageBytes)
+			}
 			if _, err := io.CopyN(io.Discard, br, int64(msgSize)); err != nil {
-				log.Printf("import mbx %s[%d]: discard expunged body: %v", path, msgIdx, err)
+				log.Printf("import mbx %s[%d]: discard skipped body: %v", path, msgIdx, err)
 				if flushErr == nil {
 					flushErr = err
 				}
