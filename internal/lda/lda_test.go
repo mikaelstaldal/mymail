@@ -515,6 +515,35 @@ func TestDetectSpam(t *testing.T) {
 			headers: map[string][]string{"X-Spam-Score": {"high"}},
 			want:    false,
 		},
+		// First-instance routing requires the upstream checker to strip incoming
+		// verdicts or prepend its own. See docs/OPERATIONS.md, Spam header integration.
+		{
+			name: "sender headers shadow appended checker verdicts",
+			headers: map[string][]string{
+				"X-Spam-Flag":   {"NO", "YES"},
+				"X-Spam-Status": {"No, score=0.0", "Yes, score=15.3"},
+				"X-Spam-Score":  {"0", "15.3"},
+			},
+			want: false,
+		},
+		{
+			name: "checker verdicts precede sender headers",
+			headers: map[string][]string{
+				"X-Spam-Flag":   {"YES", "NO"},
+				"X-Spam-Status": {"Yes, score=15.3", "No, score=0.0"},
+				"X-Spam-Score":  {"15.3", "0"},
+			},
+			want: true,
+		},
+		{
+			name: "authoritative spam status wins over non-spam flag and score",
+			headers: map[string][]string{
+				"X-Spam-Flag":   {"NO"},
+				"X-Spam-Status": {"Yes, score=15.3", "No, score=0.0"},
+				"X-Spam-Score":  {"0"},
+			},
+			want: true,
+		},
 		{
 			name:    "no spam headers",
 			headers: map[string][]string{},

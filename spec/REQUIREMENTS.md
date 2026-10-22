@@ -376,6 +376,13 @@ Spam detection triggers on any of:
 - The configured score header is present and its numeric value is ≥ the threshold. When the score header appears more
   than once, the **first** instance is evaluated; the others are ignored.
 
+The upstream trusted checker/MTA must remove sender-supplied `X-Spam-*` headers and any custom score header
+before adding its verdict, or place its authoritative values before all incoming instances of each evaluated
+header. Otherwise forged non-spam values can shadow the checker's verdict and leave spam in Inbox.
+`trusted_checker_host` does not authenticate these routing headers. Rspamd's default `X-Spam: Yes` is not a
+trigger; configure compatible output as described in
+[Spam header integration](../docs/OPERATIONS.md#spam-header-integration).
+
 If the configured score header is present but its value cannot be parsed as a floating-point number, it is treated as
 absent (the score trigger does not fire for that message).
 

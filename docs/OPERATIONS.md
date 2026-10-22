@@ -209,7 +209,39 @@ This requires no socket but uses ~14 MB RSS per invocation and opens SQLite dire
 
 ### Spam header integration
 
-MyMail reads spam verdict headers set by the MTA pipeline. If you use SpamAssassin or Rspamd, no extra configuration is needed — MyMail reads `X-Spam-Flag`, `X-Spam-Status`, and a configurable score header (`X-Spam-Score` by default) and routes detected spam to the Junk folder automatically.
+MyMail reads `X-Spam-Flag`, `X-Spam-Status`, and a configurable numeric score header (`X-Spam-Score` by default)
+from the MTA pipeline and routes detected spam to Junk. It evaluates only the **first instance of each header**;
+it cannot tell a sender's header from your checker's verdict.
+
+Configure the trusted checker or MTA to remove incoming `X-Spam-*` headers and any custom score header before
+adding its own results. Alternatively, it must place its authoritative verdict before every sender-supplied
+instance of each header MyMail reads. Removing incoming copies is preferred: simply appending a verdict lets a
+sender's `X-Spam-Flag: NO`, `X-Spam-Status: No, score=0.0`, and `X-Spam-Score: 0` hide a later spam verdict.
+This applies to SpamAssassin, Rspamd, and custom checkers, independently of `trusted_checker_host` (which governs
+sender authentication, not Junk routing). Ensure all inbound delivery paths pass through this boundary.
+
+For Rspamd, the proxy's default `X-Spam: Yes` output for the "add header" action is **not read by MyMail**.
+Enable a compatible [milter_headers routine](https://docs.rspamd.com/modules/milter_headers/), such as
+`x-spam-status` in the `use` list in `local.d/milter_headers.conf`, with removal of existing copies
+(`remove = 0` removes all copies). Alternatively, emit a numeric score header and set MyMail's score-header
+setting to that name. Preserve any other routines your installation needs. Enabling `extended_spam_headers`
+alone does not enable `x-spam-status`. Arrange removal of the other incoming verdict headers as above too;
+replacing only `X-Spam-Status` still lets a forged `YES` flag or high score send the sender's own mail to Junk.
+A genuine `X-Spam-Status: Yes` cannot be cancelled by a forged `NO` flag or low score: the triggers are ORed.
+Rspamd defaults to `skip_local = true` and `skip_authenticated = true`; these skip header routines for local
+IPs and authenticated senders. If these paths deliver inbound mail to MyMail, set these options to `false`
+or otherwise enforce the same header boundary there. Ensure reinjection preserves the original client IP.
+See Rspamd's
+[description of its default proxy header](https://docs.rspamd.com/getting-started/understanding-rspamd/).
+
+Verify the complete delivery pipeline from an external, unauthenticated sender with a test message carrying
+the three forged non-spam headers above
+(and a forged custom score header if configured), which your checker classifies as spam. Inspect the raw source
+of the delivered message: the injected headers must be absent, or the checker's authoritative values must precede
+them for every header MyMail reads. Confirm delivery to Junk with spam filtering enabled; also check a clean
+message still reaches Inbox. Account for user filters that can override the destination folder. Repeat this
+check after changing the checker, MTA integration, or score-header setting. Test local and authenticated
+delivery paths too if they can deliver inbound mail to MyMail.
 
 Spam filter settings (enabled/disabled, score header name, threshold) are managed in the web UI under Settings → Spam Filter.
 
