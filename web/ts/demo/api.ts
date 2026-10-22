@@ -256,7 +256,8 @@ function idList(body: Record<string, unknown>, label: string): number[] {
 
 /**
  * Mirrors ContactRepository.UpsertContact: insert the address, or fill in the
- * name if the stored one is still empty. An existing name is never overwritten.
+ * name if the stored one is still empty and the contact is not explicit.
+ * Explicit contacts and existing names are never changed.
  */
 function upsertContact(state: DemoState, address: string, name: string): void {
   const folded = foldAddress(address);
@@ -272,7 +273,7 @@ function upsertContact(state: DemoState, address: string, name: string): void {
     });
     return;
   }
-  if (existing.name === '') {
+  if (existing.name === '' && !existing.explicit) {
     existing.name = name;
     existing.updatedAt = now;
   }

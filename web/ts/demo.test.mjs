@@ -1350,15 +1350,18 @@ test('explicit contacts promote, preserve trust, and suppress only first-time wa
   assert.equal((await call(state, 'GET', '/messages/1')).body.warnings.find(w => w.kind === 'lookalike_domain').resembles, 'example.org');
 });
 
-test('demo automatic contact collection never changes provenance', () => {
+test('demo automatic contact collection protects explicit names and provenance', () => {
   const upsert = vm.runInThisContext('upsertContact');
   const state = newState();
   upsert(state, 'AUTO@example.org', '');
   assert.equal(state.contacts[0].explicit ?? false, false);
+  upsert(state, 'auto@example.org', 'Collected name');
+  assert.equal(state.contacts[0].name, 'Collected name');
+  state.contacts[0].name = '';
   state.contacts[0].explicit = true;
   upsert(state, 'auto@example.org', 'Receipt name');
   assert.equal(state.contacts[0].explicit, true);
-  assert.equal(state.contacts[0].name, 'Receipt name');
+  assert.equal(state.contacts[0].name, '');
   state.contacts = [];
   upsert(state, 'auto@example.org', 'Recollected');
   assert.equal(state.contacts[0].explicit ?? false, false);

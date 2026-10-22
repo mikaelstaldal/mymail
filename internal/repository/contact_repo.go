@@ -191,8 +191,8 @@ func (r *ContactRepository) DeleteContact(ctx context.Context, id int64) error {
 	return nil
 }
 
-// UpsertContact atomically inserts a contact or, if the address already exists with an empty name,
-// updates the name. The address is phishing.FoldAddress-folded before storage.
+// UpsertContact atomically inserts a contact or fills an empty name on an automatically collected contact.
+// Explicit contacts are never changed. The address is phishing.FoldAddress-folded before storage.
 func (r *ContactRepository) UpsertContact(ctx context.Context, address, name string) error {
 	address = phishing.FoldAddress(address)
 	_, err := r.db.ExecContext(ctx, `
@@ -201,7 +201,7 @@ func (r *ContactRepository) UpsertContact(ctx context.Context, address, name str
 		ON CONFLICT(address) DO UPDATE SET
 			name       = excluded.name,
 			updated_at = strftime('%Y-%m-%dT%H:%M:%SZ','now')
-		WHERE contacts.name = ''`,
+		WHERE contacts.name = '' AND contacts.explicit = 0`,
 		address, name,
 	)
 	return err

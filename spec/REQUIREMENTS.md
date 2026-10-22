@@ -202,7 +202,7 @@ Behaviour:
   fields (e.g. absent `Date`) are warnings, not failures. Exception: if a message has no `Date` header **and** no usable
   fallback timestamp (mtime or `From ` separator), a warning is logged and the message is skipped.
 - For each successfully imported message outside Junk, the `From` address is upserted into contacts
-  using the same logic as LDA (update name only when the stored name is currently empty).
+  using the same logic as LDA (update name only when the stored name is empty and the contact is not explicit).
 - **Concurrency:** Running import (`-import`) concurrently with a running server against the same data directory is not
   supported. Concurrent LDA (`-lda`) processes alongside a running server are safe — SQLite WAL mode and the LDA's busy
   timeout serialize access. A content-aware duplicate check and insertion run under the same transaction writer lock
@@ -316,15 +316,16 @@ Contacts are upserted automatically:
   is Junk. Junk delivery and imports into Junk neither create contacts nor update existing contact names or provenance.
   Existing contacts are retained when mail is classified or moved to Junk.
   The display name from `From` is stored as the contact name, but only when the currently stored name is empty
-  (a manually set name is never overwritten).
+  and the contact is not explicit (even an explicitly empty name is preserved).
 - On send: `To`, `Cc`, and `Bcc` addresses are upserted at **actual send time** — when `sendmail` is invoked, whether
   that is immediately or when the background scheduler fires for a deferred message. Contact upserts are never performed
   at schedule-creation time. This rule applies identically to `POST /messages/send`,
   `POST /messages/send-with-attachments`, and `POST /drafts/{id}/send`. The upsert uses the same Unicode simple
   casefolding normalization as incoming contacts; the display name from each address string is extracted and applied
-  with the same rule: it is stored only when the contact's current name is empty.
+  with the same rule: it is stored only when the contact's current name is empty and the contact is not explicit.
 
-Automatic upserts fill empty names only; provenance is independent of whether the name is empty.
+Automatic upserts fill empty names only on non-explicit contacts. Only the Contacts editor can change an explicit
+contact’s name, including an empty name; provenance is independent of whether the name is empty.
 
 Contact searches rank an exact case-folded address match first, then explicitly saved contacts, then
 previously sent-to addresses, before the normal name/address order. Unfiltered listings retain alphabetical order.
