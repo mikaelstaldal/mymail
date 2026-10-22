@@ -1161,6 +1161,20 @@ html, body {
   cursor: default;
 }
 
+/* Keep Junk/Trash visibly distinct without dimming their warning labels or bodies. */
+.thread-excluded-folder .thread-from {
+  font-weight: 400;
+  color: var(--text-secondary);
+}
+
+.thread-folder-label {
+  flex-shrink: 0;
+  padding: 1px 6px;
+  border: 1px solid currentColor;
+  border-radius: 4px;
+  font-weight: 600;
+}
+
 .thread-from {
   font-weight: 600;
   min-width: 140px;

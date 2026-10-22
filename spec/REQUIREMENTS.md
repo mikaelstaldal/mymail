@@ -1032,7 +1032,9 @@ Hovering a folder in the sidebar shows a tooltip with its slug and numeric id, e
    between HTML and plain text; the preference is stored. Thread display: if the message is part of a thread, a
    collapsed conversation strip is shown below the body; clicking an entry expands it inline. Each entry other than the
    currently displayed message also offers an **Open** button (revealed on hover or keyboard focus) that navigates to
-   that message, replacing the main view with it. The thread panel is resizable by dragging the divider between the body
+   that message, replacing the main view with it. Entries in Junk and Trash carry a visible folder label,
+   use subdued sender styling, and start collapsed; the label remains visible when expanded. This applies
+   to both real and demo mode. The thread panel is resizable by dragging the divider between the body
    and the thread strip. When the thread is truncated at the 1000-message cap (`truncated: true` in the API response),
    a "thread too long" indicator is shown in place of the missing entries.
 

@@ -223,8 +223,9 @@ interface ThreadEntryProps {
 
 function ThreadEntry({ entry, isCurrent, expanded, expandedMsg, expandedLoading, onToggle, onOpen }: ThreadEntryProps) {
   const { display: dateDisplay } = formatDateAdaptive(entry.date);
+  const folderLabel = entry.folder_id === JUNK_ID ? 'Junk' : entry.folder_id === TRASH_ID ? 'Trash' : null;
   return (
-    <li class={`thread-entry${isCurrent ? ' thread-current' : ''}`}>
+    <li class={`thread-entry${isCurrent ? ' thread-current' : ''}${folderLabel ? ' thread-excluded-folder' : ''}`}>
       {/* The two buttons are siblings: an Open button nested inside the
           expand button would be invalid markup and unreachable by click. */}
       <div class="thread-entry-row">
@@ -233,6 +234,7 @@ function ThreadEntry({ entry, isCurrent, expanded, expandedMsg, expandedLoading,
           onClick={() => !isCurrent && onToggle(entry.id)}
           disabled={isCurrent}
         >
+          {folderLabel && <span class="thread-folder-label">{folderLabel}</span>}
           <span class="thread-from"><Sender raw={entry.from_addr} /></span>
           <span class="thread-subject">{entry.subject || '(no subject)'}</span>
           <span class="thread-date" title={formatDateFull(entry.date)}>{dateDisplay}</span>
