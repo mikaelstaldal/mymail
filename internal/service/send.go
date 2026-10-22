@@ -100,8 +100,11 @@ func BuildMIMEMessage(fields SendFields, attachments []model.DBAttachment) ([]by
 
 	// Assemble the RFC 5322 message
 	var out bytes.Buffer
+	var headerErr error
 	wh := func(name, value string) {
-		fmt.Fprintf(&out, "%s: %s\r\n", name, value)
+		if headerErr == nil {
+			headerErr = writeFoldedHeader(&out, name, value)
+		}
 	}
 
 	wh("Date", date)
@@ -131,7 +134,7 @@ func BuildMIMEMessage(fields SendFields, attachments []model.DBAttachment) ([]by
 	if err := writeAddrList("Reply-To", fields.ReplyToAddr); err != nil {
 		return nil, false, "", err
 	}
-	wh("Subject", mime.QEncoding.Encode("utf-8", fields.Subject))
+	wh("Subject", encodeSubject(fields.Subject))
 	if fields.InReplyTo != "" {
 		wh("In-Reply-To", "<"+fields.InReplyTo+">")
 	}
@@ -146,6 +149,9 @@ func BuildMIMEMessage(fields SendFields, attachments []model.DBAttachment) ([]by
 	wh("Content-Type", topCT)
 	if topCTE != "" {
 		wh("Content-Transfer-Encoding", topCTE)
+	}
+	if headerErr != nil {
+		return nil, false, "", headerErr
 	}
 	out.WriteString("\r\n")
 	out.Write(bodyBuf.Bytes())
@@ -350,4 +356,76 @@ func writeBase64Wrapped(w io.Writer, data []byte) {
 	if len(encoded) > 0 {
 		fmt.Fprintf(w, "%s\r\n", encoded) //nolint:errcheck
 	}
+}
+
+// encodeSubject also encodes long ASCII subjects, whose unbroken words might
+// otherwise be impossible to fold. Encoded words decode without added spaces.
+func encodeSubject(subject string) string {
+	encoded := mime.QEncoding.Encode("utf-8", subject)
+	if encoded != subject || len(subject) <= 69 {
+		return encoded
+	}
+	var words []string
+	for len(subject) > 0 {
+		n := min(42, len(subject))
+		words = append(words, "=?utf-8?b?"+base64.StdEncoding.EncodeToString([]byte(subject[:n]))+"?=")
+		subject = subject[n:]
+	}
+	return strings.Join(words, " ")
+}
+
+// writeFoldedHeader folds only at existing whitespace outside quoted strings
+// and angle brackets. This preserves address names, MIME parameters and msg-ids.
+// An indivisible token that cannot fit is rejected rather than corrupted.
+func writeFoldedHeader(out *bytes.Buffer, name, value string) error {
+	line := name + ":"
+	start := 0
+	quoted, escaped, angle := false, false, false
+	var chunks []string
+	for i := 0; i < len(value); i++ {
+		c := value[i]
+		if escaped {
+			escaped = false
+			continue
+		}
+		if quoted && c == '\\' {
+			escaped = true
+			continue
+		}
+		if c == '"' {
+			quoted = !quoted
+		}
+		if !quoted {
+			if c == '<' {
+				angle = true
+			}
+			if c == '>' {
+				angle = false
+			}
+		}
+		if !quoted && !angle && (c == ' ' || c == '\t') {
+			chunks = append(chunks, value[start:i])
+			start = i
+			// Keep each original whitespace byte with the following chunk.
+			for i+1 < len(value) && (value[i+1] == ' ' || value[i+1] == '\t') {
+				i++
+			}
+		}
+	}
+	chunks = append(chunks, value[start:])
+	for i, chunk := range chunks {
+		if i == 0 {
+			chunk = " " + chunk
+		}
+		if len(line)+len(chunk) > 78 && len(line) > 0 && strings.TrimSpace(chunk) != "" {
+			out.WriteString(line + "\r\n")
+			line = ""
+		}
+		if len(line)+len(chunk) > 998 {
+			return fmt.Errorf("%s header contains an indivisible token exceeding 998 octets", name)
+		}
+		line += chunk
+	}
+	out.WriteString(line + "\r\n")
+	return nil
 }

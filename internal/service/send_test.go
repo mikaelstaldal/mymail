@@ -1,6 +1,8 @@
 package service
 
 import (
+	"bytes"
+	"fmt"
 	"io"
 	"mime"
 	"mime/multipart"
@@ -90,4 +92,93 @@ func TestBuildMIMEMessageRejectsMalformedAddressList(t *testing.T) {
 		BodyText: "hello",
 	}, nil)
 	require.ErrorContains(t, err, "invalid To address list")
+}
+
+func TestOutgoingHeadersFoldWithoutChangingValues(t *testing.T) {
+	for _, subject := range []string{strings.Repeat("räksmörgås ", 90), strings.Repeat("x", 998)} {
+		var refs, addresses []string
+		for i := 0; i < 400; i++ {
+			refs = append(refs, fmt.Sprintf("message-%d@example.com", i))
+		}
+		for i := 0; i < 80; i++ {
+			addresses = append(addresses, fmt.Sprintf("\"Person, %d\" <person%d@example.com>", i, i))
+		}
+		fields := SendFields{
+			FromAddr: "sender@example.com", FromName: "Sender, Sam",
+			ToAddr: strings.Join(addresses, ", "), CcAddr: strings.Join(addresses, ", "),
+			BccAddr: strings.Join(addresses, ", "), ReplyToAddr: strings.Join(addresses, ", "),
+			Subject: subject, References: refs, InReplyTo: refs[len(refs)-1], BodyText: "hello",
+		}
+		raw, _, _, err := BuildMIMEMessage(fields, nil)
+		require.NoError(t, err)
+		headers := strings.SplitN(string(raw), "\r\n\r\n", 2)[0]
+		for _, line := range strings.Split(headers, "\r\n") {
+			require.LessOrEqual(t, len(line), 998, line)
+		}
+		message, err := mail.ReadMessage(bytes.NewReader(raw))
+		require.NoError(t, err)
+		decoded, err := new(mime.WordDecoder).DecodeHeader(message.Header.Get("Subject"))
+		require.NoError(t, err)
+		require.Equal(t, subject, decoded)
+		require.Equal(t, "<"+strings.Join(refs, "> <")+">", message.Header.Get("References"))
+		require.Equal(t, "<"+fields.InReplyTo+">", message.Header.Get("In-Reply-To"))
+		for _, header := range []string{"To", "Cc", "Bcc", "Reply-To"} {
+			got, err := mail.ParseAddressList(message.Header.Get(header))
+			require.NoError(t, err)
+			want, err := mail.ParseAddressList(fields.ToAddr)
+			require.NoError(t, err)
+			require.Equal(t, want, got)
+		}
+	}
+}
+
+func TestOutgoingHeadersRejectIndivisibleOversizedTokens(t *testing.T) {
+	for _, field := range []string{"In-Reply-To", "References", "From"} {
+		t.Run(field, func(t *testing.T) {
+			fields := SendFields{FromAddr: "sender@example.com", ToAddr: "reader@example.com"}
+			switch field {
+			case "In-Reply-To":
+				fields.InReplyTo = strings.Repeat("x", 998)
+			case "References":
+				fields.References = []string{strings.Repeat("x", 998)}
+			case "From":
+				fields.FromName = strings.Repeat("x", 1000)
+			}
+			raw, _, _, err := BuildMIMEMessage(fields, nil)
+			require.ErrorContains(t, err, field+" header")
+			require.Nil(t, raw)
+		})
+	}
+}
+
+func TestHeaderFoldingPreservesWhitespaceWithoutEmptyContinuation(t *testing.T) {
+	for _, value := range []string{
+		strings.Repeat("word ", 30),
+		"quoted \"name with spaces and an escaped \\\" quote\" <someone@example.com>",
+	} {
+		var out bytes.Buffer
+		require.NoError(t, writeFoldedHeader(&out, "Test", value))
+		for _, line := range strings.Split(strings.TrimSuffix(out.String(), "\r\n"), "\r\n")[1:] {
+			require.NotEmpty(t, strings.TrimSpace(line))
+			require.Contains(t, " \t", line[:1])
+		}
+		unfolded := strings.ReplaceAll(strings.TrimSuffix(out.String(), "\r\n"), "\r\n", "")
+		require.Equal(t, "Test: "+value, unfolded)
+	}
+}
+
+func TestShortASCIISubjectWithSyntaxCharactersStaysWithinTarget(t *testing.T) {
+	subject := "<" + strings.Repeat("x", 76)
+	raw, _, _, err := BuildMIMEMessage(SendFields{
+		FromAddr: "sender@example.com", ToAddr: "reader@example.com", Subject: subject,
+	}, nil)
+	require.NoError(t, err)
+	for _, line := range strings.Split(strings.SplitN(string(raw), "\r\n\r\n", 2)[0], "\r\n") {
+		require.LessOrEqual(t, len(line), 78)
+	}
+	msg, err := mail.ReadMessage(bytes.NewReader(raw))
+	require.NoError(t, err)
+	got, err := new(mime.WordDecoder).DecodeHeader(msg.Header.Get("Subject"))
+	require.NoError(t, err)
+	require.Equal(t, subject, got)
 }

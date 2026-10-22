@@ -563,6 +563,10 @@ alone plus `mark_read`.
 
 ## Outgoing Mail
 
+Outgoing message headers fold at safe whitespace boundaries, targeting 78 octets per line and never exceeding
+998 octets. Long subjects use encoded words so they can fold losslessly. Indivisible header tokens that exceed
+the hard limit cause sending to fail before handoff to sendmail.
+
 At least one of `to_addr`, `cc_addr`, or `bcc_addr` must be non-empty; an empty `to_addr` is permitted when `cc_addr` or
 `bcc_addr` is non-empty.
 
