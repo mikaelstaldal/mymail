@@ -234,9 +234,9 @@ function ThreadEntry({ entry, isCurrent, expanded, expandedMsg, expandedLoading,
           onClick={() => !isCurrent && onToggle(entry.id)}
           disabled={isCurrent}
         >
-          {folderLabel && <span class="thread-folder-label">{folderLabel}</span>}
           <span class="thread-from"><Sender raw={entry.from_addr} /></span>
           <span class="thread-subject">{entry.subject || '(no subject)'}</span>
+          {folderLabel && <span class="thread-folder-label">{folderLabel}</span>}
           <span class="thread-date" title={formatDateFull(entry.date)}>{dateDisplay}</span>
           {!entry.read && <span class="thread-unread-dot" aria-label="Unread" />}
         </button>
