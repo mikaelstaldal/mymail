@@ -53,6 +53,16 @@ var (
 	// enable visual spoofing — overlaying or hiding content — which is the one
 	// CSS risk the value handler cannot address. They are also poorly supported
 	// by mail clients, so allowing them would cost more than it buys.
+	//
+	// The one exception is `display: none`, admitted by newPolicy with that
+	// value only. Senders use it to hide a preheader (the inbox preview text),
+	// typically alongside `max-height: 0; max-width: 0; overflow: hidden`.
+	// Dropping only the display declaration leaves a zero-sized box whose text
+	// overflows it, piling every word on top of the next. Inbound normalization
+	// removes each element it hides (removeHidden) rather than storing it. Not
+	// quite always: on markup bounded by BoundFormatting, a hidden formatting
+	// element beyond the bound is dropped as a tag and its content is shown,
+	// and the parser-depth fallback stores the declaration as it is.
 
 	// reAllowedCSSFunc matches a single, well-formed (non-nested) call to one
 	// of the only CSS functional notations permitted in style values — the
@@ -156,6 +166,7 @@ func newPolicy(elements, cssProperties []string) *bluemonday.Policy {
 	p.AllowAttrs("colspan", "rowspan").Matching(reNumeric).OnElements("td", "th")
 	p.AllowAttrs("align").Matching(reAlign).OnElements(alignElements...)
 	p.AllowStyles(cssProperties...).MatchingHandler(cssValueAllowed).OnElements(elements...)
+	p.AllowStyles("display").MatchingEnum("none").OnElements(elements...)
 
 	// AllowURLSchemes is required because AddTargetBlankToFullyQualifiedLinks
 	// enables requireParseableURLs, which rejects any scheme not in the allowlist.
@@ -477,11 +488,42 @@ func renderNormalized(h string, limit int) (string, bool) {
 	if err != nil {
 		return "", false
 	}
+	removeHidden(doc)
 	w := &limitedBuilder{limit: limit}
 	if !renderBodyFragment(w, doc) {
 		return "", false
 	}
 	return policy.Sanitize(w.String()), true
+}
+
+// removeHidden removes every element styled `display: none`, with its
+// content. Any display declaration that survived the policy means none: it
+// admits no other value. Only the property name is checked, because bluemonday
+// matches the decoded value but keeps the sender's spelling, such as `\6e one`.
+func removeHidden(n *html.Node) {
+	for c := n.FirstChild; c != nil; {
+		next := c.NextSibling
+		if c.Type == html.ElementNode && isHidden(c) {
+			n.RemoveChild(c)
+		} else {
+			removeHidden(c)
+		}
+		c = next
+	}
+}
+
+func isHidden(n *html.Node) bool {
+	i := attrIndex(n.Attr, "style")
+	if i < 0 {
+		return false
+	}
+	for _, decl := range strings.Split(n.Attr[i].Val, ";") {
+		prop, _, ok := strings.Cut(decl, ":")
+		if ok && strings.EqualFold(strings.TrimSpace(prop), "display") {
+			return true
+		}
+	}
+	return false
 }
 
 var errOutputLimit = errors.New("output limit exceeded")

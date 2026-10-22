@@ -732,8 +732,16 @@ functional notation other than the color functions `rgb()`/`rgba()`/`hsl()`/`hsl
 also rejects stray/unbalanced parentheses. Empty or whitespace-only decoded values are rejected too, including
 when the CSS decoder signals failure for non-BMP, surrogate, or out-of-range escapes by returning an empty value.
 
-**Not allowed:** `background` (shorthand), `position`, `display`, `overflow`, `content`, `z-index`, `opacity`, and all
-vendor-prefixed properties.
+**Not allowed:** `background` (shorthand), `position`, `display` (except `display: none`, below), `overflow`,
+`content`, `z-index`, `opacity`, and all vendor-prefixed properties.
+
+**Hidden elements:** `display: none` is the one `display` value kept, so that content a sender hides (typically a
+preheader, the inbox preview text) stays hidden. Without it, a preheader also styled `max-height: 0; max-width: 0`
+renders as a zero-sized box whose words overflow it and pile up on top of each other. Bounded normalization removes
+every element it applies to, together with its content, so inbound bodies do not store it; outgoing bodies keep it,
+which renders the same. The exception is markup that normalization has to bound: a hidden formatting element beyond
+the active-formatting bound is dropped as a tag, so its content is shown, and markup nested beyond the parser's depth
+limit keeps the declaration as it is.
 
 Links inside email bodies have `target="_blank"` and `rel="noopener noreferrer"` added by the sanitizer.
 

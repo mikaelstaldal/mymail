@@ -198,7 +198,10 @@ Adding a CSS property does *not* reintroduce `url()`: bluemonday binds
 `MatchingHandler` (our `cssValueAllowed`) to every property uniformly, replacing
 per-property defaults. The residual CSS risk is layout/positioning spoofing,
 which is why `position`, `z-index`, `display`, `opacity`, `visibility`, `float`
-and `transform` stay out. `<style>` must never be allowed: bluemonday does not
+and `transform` stay out — except `display: none` (that value only), which keeps
+preheaders hidden; inbound normalization (`removeHidden`) deletes the elements
+it hides rather than storing it (see the comment in `sanitize.go` for the
+bounding fallbacks it does not reach). `<style>` must never be allowed: bluemonday does not
 validate stylesheet text, so `@import url(…)` would bypass the value handler
 entirely.
 

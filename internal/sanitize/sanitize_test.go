@@ -261,7 +261,7 @@ func TestPerSideAndDecorativeCSSAllowedBothDirections(t *testing.T) {
 // The spoofing-capable properties stay out of both policies.
 func TestOutgoingStillRejectsLayoutCSS(t *testing.T) {
 	for _, decl := range []string{
-		"position:fixed", "z-index:9999", "display:none",
+		"position:fixed", "z-index:9999", "display:block", "display:flex",
 		"visibility:hidden", "opacity:0", "float:left", "transform:scale(2)",
 	} {
 		in := `<p style="` + decl + `">x</p>`
@@ -343,6 +343,33 @@ func TestDeclarationOrderPreserved(t *testing.T) {
 // outgoingOnly* gains an entry, which is intentional: adding one is a decision
 // to accept exactly this degradation, and it should not be possible to make it
 // by accident.
+// A preheader hidden the usual way must stay hidden. With display dropped and
+// max-height/max-width kept, its words overflow a zero-sized box and pile up
+// on top of each other in the top-left corner of the message.
+func TestResolveCIDRemovesHiddenElements(t *testing.T) {
+	for _, tc := range []struct{ name, in, want string }{
+		{"preheader",
+			`<div style="display:none;overflow:hidden;line-height:1px;opacity:0;max-height:0;max-width:0">Preview text<div> &zwnj; </div></div><p>Visible</p>`,
+			`<p>Visible</p>`},
+		{"case and !important", `<span style="DISPLAY: None !important">x</span><p>y</p>`, `<p>y</p>`},
+		{"escaped value", `<span style="display:\6e one">x</span><p>y</p>`, `<p>y</p>`},
+		{"nested in table", `<table><tr><td>a<span style="display: none">b</span></td></tr></table>`,
+			`<table><tbody><tr><td>a</td></tr></tbody></table>`},
+		{"other display values are dropped, not hidden", `<div style="display:block;color:red">x</div>`,
+			`<div style="color: red">x</div>`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got, _ := ResolveCID(tc.in, nil, nil)
+			assert.Equal(t, tc.want, got)
+		})
+	}
+}
+
+// Outgoing keeps the declaration, which renders the same as inbound removal.
+func TestOutgoingKeepsDisplayNone(t *testing.T) {
+	assert.Contains(t, normalizeDecls(OutgoingHTML(`<div style="display: none">x</div>`)), "display:none")
+}
+
 func TestSentHTMLSurvivesBeingReceived(t *testing.T) {
 	for _, name := range []string{
 		"callout", "task list", "plain quote", "rule", "tag pill", "code", "rich text",
