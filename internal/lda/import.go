@@ -585,7 +585,7 @@ func importMbox(path string, folderID int64, db *sql.DB) (imported, skipped int,
 }
 
 // scanMboxSeparators scans an mbox file once with bufio and collects the
-// timestamp suffix of every "From <addr> <timestamp>" separator line.
+// timestamp suffix of every line beginning with "From ", matching go-mbox.
 // The separator count equals len of the returned slice.
 func scanMboxSeparators(path string) ([]string, error) {
 	f, err := os.Open(path)
@@ -600,7 +600,7 @@ func scanMboxSeparators(path string) ([]string, error) {
 		// Only a separator's first fragment can contain a useful timestamp.
 		// Discard continuation fragments without accumulating arbitrarily long lines.
 		line, err := br.ReadSlice('\n')
-		if bytes.HasPrefix(line, []byte("From ")) && len(line) >= 6 && line[5] != ' ' {
+		if bytes.HasPrefix(line, []byte("From ")) {
 			rest := string(line[5:])
 			_, after, found := strings.Cut(rest, " ")
 			if !found {

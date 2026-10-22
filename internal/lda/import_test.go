@@ -175,17 +175,17 @@ func TestScanMboxSeparators(t *testing.T) {
 			want: []string{"Mon Jan  1 00:00:00 2000"},
 		},
 		{
-			name: "From with immediate space is not a separator",
+			name: "From with immediate space is a separator",
 			content: "From  user@example.com Mon Jan  1 00:00:00 2000\r\n" +
 				"Subject: test\r\n\r\nbody\r\n",
-			want: nil,
+			want: []string{"user@example.com Mon Jan  1 00:00:00 2000"},
 		},
 		{
-			name: "body line starting with From is not a separator",
+			name: "unescaped body From line is a separator",
 			content: "From user@example.com Mon Jan  1 00:00:00 2000\r\n" +
 				"Subject: test\r\n\r\n" +
 				"From a friend I trust\r\n",
-			// "From a friend I trust" — 'a' != ' ' so it matches HasPrefix("From ") AND line[5] != ' '
+			// go-mbox treats every unescaped "From " line as a separator.
 			// This IS counted as a separator (mboxo unescaped From line in body — expected behavior)
 			want: []string{"Mon Jan  1 00:00:00 2000", "friend I trust"},
 		},
@@ -925,4 +925,39 @@ func TestImportedSentAllowsSelfDelivery(t *testing.T) {
 	require.NoError(t, db.QueryRow(`SELECT COUNT(*) FROM messages WHERE outgoing=0`).Scan(&received))
 	assert.Equal(t, 1, sent)
 	assert.Equal(t, 1, received)
+}
+
+func TestImportMbox_SeparatorAlignment(t *testing.T) {
+	tests := []struct {
+		name    string
+		body    string
+		skipped int
+	}{
+		{"long line", strings.Repeat("x", 70*1024) + "\r\n", 0},
+		{"empty sender", "From  injected\r\nmalformed header\r\n", 1},
+		{"bare separator", "From \r\nmalformed header\r\n", 1},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			db := openImportTestDB(t)
+			var messages []string
+			for i := 0; i < 3; i++ {
+				msg := fmt.Sprintf("From: a@b.com\r\nSubject: message %d\r\nMessage-Id: <align%d@mbox>\r\n\r\nbody\r\n", i, i)
+				if i == 0 {
+					msg += tc.body
+				}
+				messages = append(messages, msg)
+			}
+			path := writeMboxFile(t, messages)
+			imported, skipped, err := importMbox(path, 1, db)
+			require.NoError(t, err)
+			assert.Equal(t, 3, imported)
+			assert.Equal(t, tc.skipped, skipped)
+			for i := 0; i < 3; i++ {
+				var date string
+				require.NoError(t, db.QueryRowContext(context.Background(), `SELECT date FROM messages WHERE message_id = ?`, fmt.Sprintf("align%d@mbox", i)).Scan(&date))
+				assert.Equal(t, fmt.Sprintf("2024-01-%02dT10:00:00Z", i+1), date)
+			}
+		})
+	}
 }

@@ -636,7 +636,9 @@ are skipped as parse failures.
 #### mbox
 
 A single file containing multiple RFC 5322 messages. Each message begins with a `From ` separator line. Supports mboxo
-and mboxrd variants.
+and mboxrd variants. Every unescaped line beginning with `From ` is a separator, including lines with an empty
+sender; malformed message fragments do not shift later messages' separator date fallbacks. Long body lines do
+not impose a separate mailbox scanning limit; the per-message size limit still applies.
 
 #### Maildir
 
