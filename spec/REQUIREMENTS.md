@@ -1784,6 +1784,10 @@ Basic authentication or tokens configured. Both discovery resources return
   without Unicode script, skeleton, or correspondent-domain analysis. Raw IDNA input
   is capped at 1016 UTF-8 bytes before conversion, including compatibility characters
   that mapping would remove. IP literals retain their existing treatment.
+  Before detecting domain claims in link text or sender display names, remove
+  Unicode format characters (category Cf, including U+180E) and map U+3002,
+  U+FF0E, U+FF61, U+2024 and U+FE52 to ASCII dots. Apply this before display-name
+  tokenization; actual addresses, destinations and stored/displayed text stay unchanged.
   Links after the cap are not assessed. A link with ordinary prose text alone
   does not imply deception. Bare domain text requires a recognized ICANN TLD
   (including domains under private suffixes); filenames/versions such as

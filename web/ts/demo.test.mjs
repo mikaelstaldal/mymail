@@ -1659,3 +1659,29 @@ test('demo oversized Unicode hosts retain raw spelling and deduplicate case', as
   assert.equal(lookalikes.length, 1);
   assert.equal(lookalikes[0].domain, host.toLowerCase());
 });
+
+test('demo normalizes visible domain claims before link and display-name checks', async () => {
+  const claims = ['paypal.com'];
+  for (const c of ['\u200b', '\u200c', '\u200d', '\u200e', '\u200f', '\u202c', '\u2066', '\u061c', '\u180e', '\ufeff', '\u2060', '\u00ad']) {
+    claims.push('paypal.com' + c, 'pay' + c + 'pal.com', c + 'paypal.com');
+  }
+  for (const c of ['\u3002', '\uff0e', '\uff61', '\u2024', '\ufe52']) claims.push('paypal' + c + 'com');
+  for (const claim of claims) {
+    for (const text of [claim, 'https://' + claim + '/login']) {
+      const state = newState([message({ id: 1, fromAddr: 'x@evil.example',
+        bodyHtml: '<a href="https://evil.example/login">' + text + '</a>' })]);
+      const warnings = (await call(state, 'GET', '/messages/1')).body.warnings;
+      const deceptive = warnings.find(w => w.kind === 'deceptive_link');
+      assert.ok(deceptive, JSON.stringify(text));
+      assert.equal(deceptive.text, text);
+      assert.equal(deceptive.href, 'https://evil.example/login');
+      state.messages[0].bodyHtml = '<a href="https://login.paypal.com">' + text + '</a>';
+      assert.ok(!(await call(state, 'GET', '/messages/1')).body.warnings.some(w => w.kind === 'deceptive_link'));
+    }
+    for (const domain of ['evil.example', 'paypal.com']) {
+      const state = newState([message({ id: 1, fromAddr: '"' + claim + ' Support" <x@' + domain + '>' })]);
+      const warnings = (await call(state, 'GET', '/messages/1')).body.warnings;
+      assert.equal(warnings.some(w => w.kind === 'display_name_address'), domain === 'evil.example', JSON.stringify(claim));
+    }
+  }
+});

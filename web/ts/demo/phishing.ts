@@ -88,6 +88,10 @@ function warningHost(href: string): string {
   } catch { return ''; }
 }
 const warningTLDs = new Set(phishingICANNTLDs);
+// Mirrors phishing.normalizeDomainText; destinations are deliberately untouched.
+function normalizeWarningDomainText(text: string): string {
+  return text.replace(/\p{Cf}/gu, '').replace(/[\u3002\uff0e\uff61\u2024\ufe52]/g, '.');
+}
 function warningTextHost(text: string): string {
   if (/\s/.test(text)) return '';
   const explicit = text.includes('://');
@@ -212,7 +216,7 @@ async function demoWarnings(state: DemoState, msg: DemoMessage, atts: DemoAttach
     const failed = ['dmarc']; if (!auth.dkim_aligned) failed.push('dkim_alignment'); if (['fail', 'softfail'].includes(auth.spf)) failed.push('spf');
     out.push({ kind: 'auth_fail', failed_checks: failed });
   }
-  for (const token of from.name.split(/[^\p{L}\p{N}@._+\-]+/u).map(t => t.replace(/^\.+|\.+$/g, ''))) {
+  for (const token of normalizeWarningDomainText(from.name).split(/[^\p{L}\p{N}@._+\-]+/u).map(t => t.replace(/^\.+|\.+$/g, ''))) {
     if (token.includes('@')) {
       const embedded = firstAddress(token);
       if (embedded && foldAddress(embedded.address) !== foldAddress(from.address)) { out.push({ kind: 'display_name_address', address: token }); break; }
@@ -253,7 +257,7 @@ async function demoWarnings(state: DemoState, msg: DemoMessage, atts: DemoAttach
   if (from.address && !demoSentTo(state).includes(foldAddress(from.address)) && !state.contacts.some(c => c.explicit && c.address === foldAddress(from.address))) out.push({ kind: 'first_time_sender' });
   for (const link of await parseDemoLinks(msg.bodyHtml)) {
     const host = warningHost(link.Href); if (!host) continue; lookalike(host);
-    const textHost = warningTextHost(link.Text.trim());
+    const textHost = warningTextHost(normalizeWarningDomainText(link.Text).trim());
     if (warningOversizedHost(host) || warningOversizedHost(textHost) || warningIP(host) || /(^|\.)xn--/.test(host) || (textHost && warningRegistrable(textHost) !== warningRegistrable(host))) out.push({ kind: 'deceptive_link', link_index: link.Index, text: link.Text, href: link.Href, decoded_host: warningOversizedHost(host) ? host : decodeWarningDomain(host) });
   }
   for (const a of atts) { const reason = demoAttachmentRisk(a.filename, a.contentType); if (reason) out.push({ kind: 'risky_attachment', filename: a.filename, reason }); }

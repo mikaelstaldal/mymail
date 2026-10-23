@@ -274,7 +274,7 @@ func ComputeWithLinks(m model.DBMessage, atts []api.AttachmentMeta, c Context, l
 			w.FailedChecks = append(w.FailedChecks, "spf")
 		}
 	}
-	for _, token := range strings.FieldsFunc(from.Name, func(r rune) bool {
+	for _, token := range strings.FieldsFunc(normalizeDomainText(from.Name), func(r rune) bool {
 		return !unicode.IsLetter(r) && !unicode.IsDigit(r) && !strings.ContainsRune("@.-_+", r)
 	}) {
 		token = strings.Trim(token, ".")
@@ -369,7 +369,7 @@ func ComputeWithLinks(m model.DBMessage, atts []api.AttachmentMeta, c Context, l
 			continue
 		}
 		lookalike(host)
-		text := textHost(strings.TrimSpace(link.Text))
+		text := textHost(strings.TrimSpace(normalizeDomainText(link.Text)))
 		if OversizedHost(host) || OversizedHost(text) || net.ParseIP(host) != nil || punycode(Domain(host)) || (text != "" && Registrable(text) != Registrable(host)) {
 			w := add(api.MessageWarningKindDeceptiveLink)
 			w.LinkIndex = api.NewOptInt(link.Index)
@@ -403,6 +403,24 @@ func LinkHost(s string) string {
 	}
 	return Domain(host)
 }
+
+// normalizeDomainText models invisible format characters and visually dot-like
+// separators in displayed claims only. Never apply it to actual addresses or
+// hrefs: those must retain their real destination. This is a single linear pass
+// before the existing bounded host analysis.
+func normalizeDomainText(s string) string {
+	return strings.Map(func(r rune) rune {
+		if unicode.Is(unicode.Cf, r) {
+			return -1
+		}
+		switch r {
+		case '\u3002', '\uff0e', '\uff61', '\u2024', '\ufe52':
+			return '.'
+		}
+		return r
+	}, s)
+}
+
 func textHost(s string) string {
 	if strings.ContainsAny(s, " \t\r\n") {
 		return ""
