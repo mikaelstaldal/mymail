@@ -1,5 +1,6 @@
+import { mailtoHandlerUrl } from '../../util/mailto.js';
 import { useState, useEffect } from 'preact/hooks';
-import { getMycalUrl, getWrapColumn, WRAP_COLUMN_KEY } from '../../util/config.js';
+import { getMycalUrl, getWrapColumn, WRAP_COLUMN_KEY, isDemo } from '../../util/config.js';
 import { normalizeWrapColumn, WRAP_COLUMN, WRAP_OFF, MAX_WRAP_COLUMN } from '../../util/wrap.js';
 import { getTheme, onThemeChange, setTheme } from '../../util/theme.js';
 
@@ -13,6 +14,16 @@ function applyDensity(density: Density) {
 }
 
 export function Preferences() {
+  const [mailtoMessage, setMailtoMessage] = useState('');
+  const canRegisterMailto = window.isSecureContext && typeof navigator.registerProtocolHandler === 'function';
+  function registerMailto() {
+    try {
+      navigator.registerProtocolHandler('mailto', mailtoHandlerUrl(window.location.href));
+      setMailtoMessage('Registration requested. Approve MyMail in your browser if prompted.');
+    } catch {
+      setMailtoMessage('Your browser blocked registration. Check its protocol handler settings.');
+    }
+  }
   const [darkMode, setDarkMode] = useState(() => getTheme() === 'dark');
   const [density, setDensity] = useState<Density>(
     () => (localStorage.getItem('density') as Density | null) ?? 'normal',
@@ -112,6 +123,17 @@ export function Preferences() {
 
   return (
     <div>
+      {!isDemo() && <div class="pref-row">
+        <div class="pref-row-info">
+          <div class="pref-label">Email Links</div>
+          <div class="pref-description">
+            Open mailto: links from other tabs in MyMail. Your browser controls approval and the default mail handler.
+            {!canRegisterMailto && <span> Requires a supported browser and a secure connection.</span>}
+          </div>
+          <div role="status">{mailtoMessage}</div>
+        </div>
+        <button class="btn btn-secondary" disabled={!canRegisterMailto} onClick={registerMailto}>Handle email links</button>
+      </div>}
       {notifMessage && <div class="settings-error">{notifMessage}</div>}
 
       <div class="pref-row">

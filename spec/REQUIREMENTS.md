@@ -1379,6 +1379,21 @@ Hovering a folder in the sidebar shows a tooltip with its slug and numeric id, e
     default body view (HTML/Plain text), browser notifications toggle, compose line width (the column composing wraps
     at, or `0` to wrap nothing — see **Compose View → Line breaks**).
 
+### Browser email links
+
+Settings → Preferences offers **Handle email links**, requesting browser registration of MyMail as a `mailto:`
+handler. Registration requires browser support and a secure context; the browser owns approval and default-handler
+selection. The registration control is hidden in demo mode. Unsupported browsers disable the control, and rejected
+registration displays an explanation.
+
+The handler opens `#/compose?mailto=:uri` under the current deployment path. It starts a fresh composition instead
+of restoring an unrelated local draft, and leaves that draft’s resume entry intact even after editing, sending, or
+discarding the mailto composition. RFC 6068 To (path and query), Cc, Bcc, subject, and plain-text body fields
+are percent-decoded once; literal plus signs are preserved. Header names are case-insensitive, unsupported headers
+(including attachments and From) are ignored, and body markup is rendered as text. Header fields containing line
+breaks or NUL are ignored. Malformed percent encoding or a non-mailto scheme shows an invalid-link error.
+Opening a link alone neither saves a draft nor sends mail; the ordinary compose validation and send action apply.
+
 ### Settings Navigation
 
 The sidebar footer holds two controls: a light/dark mode button, and — to its right — a gear icon that opens

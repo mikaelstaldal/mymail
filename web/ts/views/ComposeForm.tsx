@@ -1,3 +1,4 @@
+import { parseMailto } from '../util/mailto.js';
 import { revealFormatChars } from '../util/phishing.js';
 import { useState, useEffect, useRef, useCallback } from 'preact/hooks';
 import { api, NotFoundError } from '../api/client.js';
@@ -709,9 +710,10 @@ export interface ComposeFormProps {
   replyAllId?: number;
   forwardId?: number;
   draftId?: number;
+  mailto?: string;
 }
 
-export function ComposeForm({ replyId, replyAllId, forwardId, draftId }: ComposeFormProps) {
+export function ComposeForm({ replyId, replyAllId, forwardId, draftId, mailto }: ComposeFormProps) {
   const sourceId = replyId ?? replyAllId ?? forwardId;
   const mode: 'new' | 'reply' | 'replyall' | 'forward' | 'edit' =
     draftId !== undefined ? 'edit' :
@@ -870,7 +872,7 @@ export function ComposeForm({ replyId, replyAllId, forwardId, draftId }: Compose
 
   // ── Persist draft to localStorage (new-compose only) ────────────────────
   const persistLocalDraft = useCallback((serverUpdatedAt: string) => {
-    if (mode !== 'new') return;
+    if (mode !== 'new' || mailto !== undefined) return;
     saveLocalDraft({
       id: draftIdRef.current,
       savedAt: serverUpdatedAt,
@@ -882,7 +884,7 @@ export function ComposeForm({ replyId, replyAllId, forwardId, draftId }: Compose
       bodyHtml: joinQuotedHtml(bodyHtmlRef.current, quoteHtmlRef.current),
       sendAt: stateRef.current.sendAt,
     });
-  }, [mode]);
+  }, [mode, mailto]);
 
   // ── Save draft ───────────────────────────────────────────────────────────
   const performSave = useCallback((pendingFiles: File[]): Promise<void> => {
@@ -999,6 +1001,30 @@ export function ComposeForm({ replyId, replyAllId, forwardId, draftId }: Compose
 
         loadStoredBody(fields.bodyHtml);
 
+        setLoading(false);
+        return;
+      }
+
+      if (!sourceId && mailto !== undefined) {
+        const fields = parseMailto(mailto);
+        setIdentityId(defaultIdent?.id);
+        currentIdentityRef.current = defaultIdent ?? null;
+        const parts = buildComposeParts('new', null, defaultIdent ?? null);
+        if (fields) {
+          setTo(fields.to);
+          setCc(fields.cc);
+          setBcc(fields.bcc);
+          setShowCc(fields.cc.length > 0);
+          setShowBcc(fields.bcc.length > 0);
+          setSubject(fields.subject);
+          if (fields.body) {
+            parts.editorHtml = fields.body.split('\n').map(line => `<p>${esc(line) || '<br>'}</p>`).join('')
+              + parts.editorHtml;
+          }
+        } else {
+          setSendError('This email link is invalid.');
+        }
+        initEditor(parts);
         setLoading(false);
         return;
       }
@@ -1345,7 +1371,7 @@ export function ComposeForm({ replyId, replyAllId, forwardId, draftId }: Compose
     try {
       const result = await api.drafts.send(draftIdRef.current);
       discardedRef.current = true;
-      clearLocalDraft();
+      if (mailto === undefined) clearLocalDraft();
       if (result.status === 202) {
         navigate('#/folder/scheduled');
       } else {
@@ -1554,14 +1580,14 @@ export function ComposeForm({ replyId, replyAllId, forwardId, draftId }: Compose
                 await api.drafts.delete(draftIdRef.current).catch(() => {/* ignore */});
                 draftIdRef.current = null;
                 discardedRef.current = true;
-                clearLocalDraft();
+                if (mailto === undefined) clearLocalDraft();
                 navigate('#/inbox');
               } else {
                 discardPendingRef.current = false;
               }
             } else {
               discardedRef.current = true;
-              clearLocalDraft();
+              if (mailto === undefined) clearLocalDraft();
               navigate('#/inbox');
             }
           }}

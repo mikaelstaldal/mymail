@@ -142,6 +142,8 @@ function App() {
     if (route.type === 'compose') {
       return (
         <ComposeForm
+          key={window.location.hash}
+          mailto={route.mailto}
           replyId={route.replyId}
           replyAllId={route.replyAllId}
           forwardId={route.forwardId}

@@ -3,7 +3,7 @@ export type Route =
   | { type: 'folder'; slug: string }
   | { type: 'message'; id: number }
   | { type: 'link'; id: number; index: number }
-  | { type: 'compose'; replyId?: number; replyAllId?: number; forwardId?: number; draftId?: number }
+  | { type: 'compose'; replyId?: number; replyAllId?: number; forwardId?: number; draftId?: number; mailto?: string }
   | { type: 'search'; query: string }
   | { type: 'settings'; tab?: string; senderMessageId?: number };
 
@@ -31,7 +31,7 @@ function parseRoute(hash: string): Route {
     const replyAllId = params.get('replyall') ? Number(params.get('replyall')) : undefined;
     const forwardId = params.get('forward') ? Number(params.get('forward')) : undefined;
     const draftId = params.get('draft') ? Number(params.get('draft')) : undefined;
-    return { type: 'compose', replyId, replyAllId, forwardId, draftId };
+    return { type: 'compose', replyId, replyAllId, forwardId, draftId, mailto: params.get('mailto') ?? undefined };
   }
 
   if (seg === 'search') return { type: 'search', query: params.get('q') ?? '' };
