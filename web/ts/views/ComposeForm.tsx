@@ -1,3 +1,4 @@
+import { addressDisplayName, addressSpec } from '../util/address.js';
 import { parseMailto } from '../util/mailto.js';
 import { revealFormatChars } from '../util/phishing.js';
 import { useState, useEffect, useRef, useCallback } from 'preact/hooks';
@@ -83,8 +84,7 @@ function stripSubjectPrefixes(subject: string): string {
 function parseAddrSpecs(header: string): string[] {
   if (!header.trim()) return [];
   return splitAddressList(header).map(a => {
-    const m = a.match(/<([^>]+)>/);
-    return (m ? m[1] : a).trim().toLowerCase();
+    return addressSpec(a).toLowerCase();
   }).filter(Boolean);
 }
 
@@ -100,8 +100,7 @@ function isOwnAddress(addrString: string, identityAddrs: Set<string>): boolean {
 }
 
 function displayName(addr: string): string {
-  const m = addr.match(/^([^<>]+?)\s*<[^>]+>$/);
-  const name = m ? m[1].trim() : addr.trim();
+  const name = addressDisplayName(addr) ?? addr.trim();
   // Quoting is a wire-format detail — a pill reading `"Doe, Jane"` would just
   // look like a mistake.
   return name.length >= 2 && name.startsWith('"') && name.endsWith('"')
@@ -110,8 +109,7 @@ function displayName(addr: string): string {
 }
 
 function addrSpec(addr: string): string {
-  const m = addr.match(/<([^>]+)>/);
-  return m ? m[1].trim() : addr.trim();
+  return addressSpec(addr);
 }
 
 /** What the text in an address input would become as a pill, if anything. */

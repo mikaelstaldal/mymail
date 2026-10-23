@@ -150,3 +150,36 @@ test('contact address casefold keeps compatibility variants of ASCII distinct', 
   assert.equal(foldContactAddress('ceo@bu\u017Finess.com'), 'ceo@bu\u017Finess.com');
   assert.equal(foldContactAddress('STRAẞE@example.com'), 'strasse@example.com');
 });
+
+// Sender-name extraction is shared by message rows and reply/forward attribution.
+// Check parsing and a generous CPU budget; component rendering is outside this test.
+test('display names parse in linear time even with long interior whitespace', async () => {
+  const { addressDisplayName } = await import('../static/util/address.js');
+  for (const [raw, expected] of [
+    ['Jane Doe <jane@example.com>', 'Jane Doe'],
+    ['"Doe, Jane" <jane@example.com>', '"Doe, Jane"'],
+    ['  Jane  <jane@example.com>', 'Jane'],
+    ['jane@example.com', null], ['<jane@example.com>', null],
+    ['Jane <>', null], ['Jane > <jane@example.com>', null],
+    ['Jane <jane@example.com', null], ['Jane <jane@example.com> trailing', null],
+  ]) assert.equal(addressDisplayName(raw), expected);
+  const name = 'a' + ' '.repeat(200_000) + 'x';
+  const start = performance.now();
+  assert.equal(addressDisplayName(name + ' <evil@example.com>'), name);
+  assert.equal(addressDisplayName(name), null);
+  assert.ok(performance.now() - start < 500, '200 KB sender names must parse within 500 ms');
+});
+
+test('address specs stay linear on repeated unmatched angle brackets', async () => {
+  const { addressSpec } = await import('../static/util/address.js');
+  for (const [raw, expected] of [
+    ['Jane <jane@example.com>', 'jane@example.com'],
+    [' jane@example.com ', 'jane@example.com'],
+    ['<> then < a@b >', 'a@b'], ['a<b<c>', 'b<c'],
+    ['<>', '<>'], ['a<unfinished', 'a<unfinished'],
+  ]) assert.equal(addressSpec(raw), expected);
+  const raw = '<'.repeat(200_000);
+  const start = performance.now();
+  assert.equal(addressSpec(raw), raw);
+  assert.ok(performance.now() - start < 500, '200 KB malformed headers must parse within 500 ms');
+});

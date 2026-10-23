@@ -108,3 +108,24 @@ export function hasValidRecipient(...lists: string[]): boolean {
   if (!lists.every(isValidAddressList)) return false;
   return lists.some(l => l.trim() !== '');
 }
+
+/** Extract a display-name prefix in linear time, or return null for bare/malformed input.
+ * Keep whitespace matching out of a backtracking regex: received names can be very long. */
+export function addressDisplayName(raw: string): string | null {
+  const angle = raw.indexOf('<');
+  if (angle <= 0 || !raw.endsWith('>') || angle === raw.length - 2
+      || raw.indexOf('>') !== raw.length - 1) return null;
+  return raw.slice(0, angle).trim();
+}
+
+/** First nonempty angle-bracket address, with a linear malformed-input fallback. */
+export function addressSpec(raw: string): string {
+  let angle = raw.indexOf('<');
+  while (angle >= 0) {
+    const end = raw.indexOf('>', angle + 1);
+    if (end < 0) break;
+    if (end > angle + 1) return raw.slice(angle + 1, end).trim();
+    angle = raw.indexOf('<', end + 1);
+  }
+  return raw.trim();
+}

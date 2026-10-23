@@ -1,3 +1,4 @@
+import { addressDisplayName } from '../util/address.js';
 import { useRef, useEffect } from 'preact/hooks';
 import { formatDateAdaptive, formatDateSchedule } from '../util/date.js';
 import { Icon } from './Icon.js';
@@ -68,10 +69,10 @@ function IndeterminateCheckbox({ checked, indeterminate, onChange, ariaLabel }: 
 
 
 function senderName(from: string): string {
-  const m = from.match(/^([^<>]+?)\s*<[^>]+>$/);
+  const name = addressDisplayName(from);
   // The server quotes a display name containing specials, e.g. `"Doe, Jane"`;
   // the quotes are wire format, not part of the name.
-  return m ? m[1].trim().replace(/^"(.*)"$/, '$1') : revealFormatChars(from);
+  return name !== null ? name.replace(/^"(.*)"$/, '$1') : revealFormatChars(from);
 }
 
 function Badges({ msg }: { msg: MessageSummary }) {

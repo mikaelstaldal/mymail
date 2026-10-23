@@ -1673,6 +1673,10 @@ infrastructure:
 
 ## Performance and system requirements
 
+Sender display-name extraction in message lists and reply/forward attribution must take linear time in
+the received address length, including names containing long runs of whitespace. Address-spec extraction
+in compose must also take linear time for malformed headers with repeated unmatched angle brackets.
+
 mymail should be able to handle a database of at least 10 GiB containing at least 200000 messages on a system with
 512 MiB RAM with reasonable performance for a single user.
 
