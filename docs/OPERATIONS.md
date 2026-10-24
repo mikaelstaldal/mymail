@@ -73,8 +73,14 @@ This creates `/var/lib/mymail/mymail.sqlite` (mode `0600`) and seeds the built-i
 MyMail uses HTTP Basic Auth backed by an htpasswd file (bcrypt). Create the file as the `mymail` user:
 
 ```bash
-htpasswd -Bc /var/lib/mymail/htpasswd myuser
+htpasswd -B -C 10 -c /var/lib/mymail/htpasswd myuser
 ```
+
+Set an explicit bcrypt cost (`-C 10` in this example) and test authentication latency on your server.
+Higher costs slow password guessing but also increase CPU use on every Basic-authenticated request; configure
+external request limits as described below. See the
+[htpasswd options](https://httpd.apache.org/docs/2.4/programs/htpasswd.html).
+Omit `-c` when updating an existing file, since it overwrites the file.
 
 Protect the file:
 
@@ -251,9 +257,48 @@ Spam filter settings (enabled/disabled, score header name, threshold) are manage
 
 MyMail does not terminate TLS itself. Place it behind nginx.
 
-Create `/etc/nginx/sites-available/mymail`:
+### Rate limiting and authentication abuse
+
+Configure request-rate limiting in the reverse proxy or an upstream firewall before requests reach MyMail.
+MyMail has no built-in request throttling, authentication lockout, or cap on concurrent bcrypt comparisons.
+With `-basic-auth-file`, each request carrying parseable Basic credentials can trigger an expensive bcrypt
+comparison, including unknown usernames and wrong passwords. A flood can exhaust CPU, and repeated password
+attempts are not limited by the application. Use strong passwords as well as external rate limits.
+
+Apply per-client limits to all paths and methods, including GET requests, static assets, and failed authentication
+attempts, rather than only writes or a login endpoint. Add an aggregate request limit sized for the server's CPU
+capacity so requests from many IP addresses cannot bypass the per-client protection. Tune sustained rates and
+bursts under load with bcrypt enabled, allowing normal page loads, mailbox refreshes, and API clients.
+The nginx values below are starting points, not a capacity guarantee. The aggregate budget is shared by all
+clients: when exhausted, it rejects requests even from clients below their individual limit. Size it for expected
+concurrent users while preserving CPU headroom. The example allows bounded bursts immediately to avoid delaying
+normal page loads; those bursts can still cause CPU spikes, so tune burst sizes as well as sustained rates.
+
+Use the client address observed by the edge proxy for limiting and logging. If another trusted proxy sits in front,
+configure client-IP handling to trust only that proxy; never accept arbitrary client-supplied forwarding headers.
+For fail2ban-style blocking of repeated 401 responses, use the edge proxy's access log: behind a reverse proxy,
+MyMail's authentication log records the proxy's address as `RemoteAddr`. Failure-based blocking supplements
+request limits; it does not prevent the bcrypt work needed to produce the initial 401 responses.
+
+Keep the backend listener private so clients cannot bypass these controls (see [Firewall](#firewall)). A firewall
+that only limits new TCP connections is insufficient on its own, since one persistent connection can carry many
+HTTP requests. Use HTTP request limiting at the proxy or an HTTP-aware upstream firewall.
+
+After deployment, verify in a controlled test that excessive requests with invalid Basic credentials are rejected
+at the edge, that rejected requests do not reach MyMail, and that legitimate clients remain usable. Monitor proxy
+rejections, 401 responses, and backend CPU usage when tuning the limits.
+
+### nginx configuration
+
+Create `/etc/nginx/sites-available/mymail`, included from the `http` context of `/etc/nginx/nginx.conf`.
+The zone definitions must be outside the `server` blocks, as required by
+[nginx's request limiting module](https://nginx.org/en/docs/http/ngx_http_limit_req_module.html).
 
 ```nginx
+# Shared request-rate state; these directives belong in the http context.
+limit_req_zone $binary_remote_addr zone=mymail_per_ip:10m rate=5r/s;
+limit_req_zone $server_name zone=mymail_total:1m rate=10r/s;
+
 server {
     listen 80;
     server_name mail.example.com;
@@ -271,9 +316,10 @@ server {
     ssl_protocols TLSv1.2 TLSv1.3;
     ssl_prefer_server_ciphers off;
 
-    # Rate limiting (adjust as needed)
-    limit_req_zone $binary_remote_addr zone=mymail:10m rate=30r/m;
-    limit_req zone=mymail burst=10 nodelay;
+    # Apply before forwarding any request to MyMail; tune rates and bursts for your CPU.
+    limit_req zone=mymail_per_ip burst=20 nodelay;
+    limit_req zone=mymail_total burst=40 nodelay;
+    limit_req_status 429;
 
     # Max upload size (attachments)
     client_max_body_size 35m;
