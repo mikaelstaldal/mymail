@@ -545,6 +545,15 @@ function validateAddrList(raw: string, field: string): string {
 
 /** Mirrors handler.validateSendFields, shared by the send and draft endpoints. */
 function validateSendFields(body: Record<string, unknown>): SendFields {
+  for (const [field, limit] of [['body_text', 8388608], ['body_html', 8388608], ['in_reply_to', 998]] as const) {
+    if (runeLength(optString(body, field) ?? '') > limit) {
+      throw validationError(`${field} must not exceed ${limit} characters`);
+    }
+  }
+  if (Array.isArray(body.references) && (body.references.length > 1000 ||
+      body.references.some((ref) => typeof ref === 'string' && runeLength(ref) > 998))) {
+    throw validationError('references must not exceed 1000 items of 998 characters each');
+  }
   const subject = stripHeaderControls(optString(body, 'subject') ?? '');
   if (byteLength(subject) > MAX_SUBJECT_LEN) {
     throw validationError(`subject must not exceed ${MAX_SUBJECT_LEN} characters`);
@@ -648,6 +657,7 @@ async function readMultipart(
     }
   }
 
+  if (form.getAll('attachments').length > 100) throw validationError('attachments must not exceed 100 items');
   const files: UploadedAttachment[] = [];
   for (const entry of form.getAll('attachments')) {
     if (typeof entry === 'string') continue;
@@ -779,6 +789,7 @@ async function reorderFolders(state: DemoState, body: Record<string, unknown>): 
 
 /** The reorder precondition shared by folders, filters and identities. */
 function validateReorder(ids: number[], existing: number[]): void {
+  if (ids.length > 1000) throw validationError('ids must not exceed 1000 items');
   const seen = new Set<number>();
   const known = new Set(existing);
   for (const id of ids) {
@@ -1700,6 +1711,9 @@ async function createIdentity(state: DemoState, body: Record<string, unknown>): 
 }
 
 function identityFromRequest(state: DemoState, body: Record<string, unknown>, id: number): DemoIdentity {
+  if (runeLength(optString(body, 'name') ?? '') > 200 || runeLength(optString(body, 'address') ?? '') > 254) {
+    throw validationError('identity name must not exceed 200 characters and address must not exceed 254 characters');
+  }
   const signature = optString(body, 'signature') ?? '';
   if (runeLength(signature) > MAX_SIGNATURE_LEN) {
     throw validationError('signature must not exceed 51200 characters');

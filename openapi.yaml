@@ -396,17 +396,22 @@ components:
           maxLength: 998
         body_text:
           type: string
+          maxLength: 8388608
         body_html:
           type: string
+          maxLength: 8388608
         in_reply_to:
           type: string
+          maxLength: 998
           description: |
             Surrounding angle brackets are stripped before storage (e.g. `<id@domain>` is
             stored as `id@domain`), consistent with `references` handling.
         references:
           type: array
+          maxItems: 1000
           items:
             type: string
+            maxLength: 998
           description: |
             Threading Reference IDs. Elements may include or omit angle brackets
             (e.g. `<id@domain>` or `id@domain`); the server strips surrounding angle brackets
@@ -464,17 +469,22 @@ components:
           maxLength: 998
         body_text:
           type: string
+          maxLength: 8388608
         body_html:
           type: string
+          maxLength: 8388608
         in_reply_to:
           type: string
+          maxLength: 998
           description: |
             Surrounding angle brackets are stripped before storage (e.g. `<id@domain>` is
             stored as `id@domain`), consistent with `references` handling.
         references:
           type: array
+          maxItems: 1000
           items:
             type: string
+            maxLength: 998
           description: |
             Threading Reference IDs. Elements may include or omit angle brackets
             (e.g. `<id@domain>` or `id@domain`); the server strips surrounding angle brackets
@@ -624,8 +634,10 @@ components:
       properties:
         name:
           type: string
+          maxLength: 200
         address:
           type: string
+          maxLength: 254
         is_default:
           type: boolean
         position:
@@ -1032,6 +1044,7 @@ paths:
               properties:
                 ids:
                   type: array
+                  maxItems: 1000
                   items:
                     type: integer
               required: [ids]
@@ -1368,6 +1381,7 @@ paths:
                   $ref: '#/components/schemas/SendRequest'
                 attachments:
                   type: array
+                  maxItems: 100
                   items:
                     type: string
                     format: binary
@@ -2231,6 +2245,7 @@ paths:
                   $ref: '#/components/schemas/DraftRequest'
                 attachments:
                   type: array
+                  maxItems: 100
                   items:
                     type: string
                     format: binary
@@ -2430,6 +2445,7 @@ paths:
                   $ref: '#/components/schemas/DraftRequest'
                 attachments:
                   type: array
+                  maxItems: 100
                   items:
                     type: string
                     format: binary
@@ -2571,6 +2587,7 @@ paths:
               properties:
                 ids:
                   type: array
+                  maxItems: 1000
                   items:
                     type: integer
               required: [ids]
@@ -2762,6 +2779,7 @@ paths:
               properties:
                 ids:
                   type: array
+                  maxItems: 1000
                   items:
                     type: integer
               required: [ids]

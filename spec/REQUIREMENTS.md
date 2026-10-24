@@ -1874,3 +1874,15 @@ Token management errors and approval prompts, and batch import diagnostics and f
 visibly escape terminal controls (C0 except tab/newline, lone carriage returns, DEL, C1, bidirectional
 formatting controls, and invalid UTF-8 bytes). This also applies when output is redirected, so captured
 diagnostics remain safe to display later. Ordinary Unicode text and CRLF line endings are preserved.
+
+### Write request size limits
+
+Compose and draft requests accept at most 8,388,608 Unicode characters each in `body_text` and
+`body_html`, 998 characters in `in_reply_to`, and 1000 `references` entries of at most 998 characters
+per entry. Reference normalization still retains only the newest suffix fitting within 16 KiB.
+Identity names and addresses are limited to 200 and 254 characters respectively. Folder, filter,
+and identity reorder requests accept at most 1000 IDs. Multipart send and draft requests accept
+at most 100 attachments. Oversized fields or arrays return HTTP 400, including in demo mode.
+The server's overall 32 MiB request byte limit continues to apply independently.
+When composing replies or reopening old drafts, the web UI omits threading IDs over 998 characters
+and keeps the newest 1000 references, so received mail remains replyable within these limits.

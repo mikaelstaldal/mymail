@@ -1,3 +1,4 @@
+import { composeThreading } from '../util/threading.js';
 import { addressDisplayName, addressSpec } from '../util/address.js';
 import { parseMailto } from '../util/mailto.js';
 import { revealFormatChars } from '../util/phishing.js';
@@ -862,8 +863,7 @@ export function ComposeForm({ replyId, replyAllId, forwardId, draftId, mailto }:
       subject: stateRef.current.subject,
       body_html: joinQuotedHtml(bodyHtmlRef.current, quoteHtmlRef.current),
       body_text: joinQuotedText(wrapText(bodyTextRef.current, getWrapColumn()), quoteText()),
-      in_reply_to: inReplyToRef.current || undefined,
-      references: refsRef.current.length > 0 ? refsRef.current : undefined,
+      ...composeThreading(inReplyToRef.current, refsRef.current),
       send_at: stateRef.current.sendAt ? new Date(stateRef.current.sendAt).toISOString() : null,
     };
   }, []);

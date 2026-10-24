@@ -1697,3 +1697,38 @@ test('thread reference budget truncates safely without losing direct replies', a
   assert.equal(res.body.items.length, 41);
   assert.equal(res.body.truncated, true);
 });
+
+test('write request size limits match the server contract', async () => {
+  const state = newState();
+  for (const [field, value] of [
+    ['body_text', 'a'.repeat(8388609)], ['body_html', 'a'.repeat(8388609)],
+    ['in_reply_to', 'a'.repeat(999)], ['references', Array(1001).fill('id')],
+    ['references', ['a'.repeat(999)]],
+  ]) {
+    assert.equal((await call(state, 'POST', '/drafts', { [field]: value })).status, 400, field);
+  }
+  for (const [field, value] of [['name', 'a'.repeat(201)], ['address', 'a'.repeat(255)]]) {
+    assert.equal((await call(state, 'POST', '/identities', {
+      name: 'Test', address: 'test@example.com', [field]: value,
+    })).status, 400, field);
+  }
+  for (const path of ['/folders/reorder', '/filters/reorder', '/identities/reorder']) {
+    assert.equal((await call(state, 'PATCH', path, { ids: Array(1001).fill(1) })).status, 400);
+  }
+});
+
+test('demo multipart routes reject more than 100 attachments', async () => {
+  for (const [method, path] of [
+    ['POST', '/messages/send-with-attachments'], ['POST', '/drafts-with-attachments'],
+    ['PUT', '/drafts-with-attachments/123'],
+  ]) {
+    globalThis.__demoState = newState();
+    const form = new FormData();
+    form.append('message', JSON.stringify({ to_addr: 'test@example.com' }));
+    for (let i = 0; i < 101; i++) form.append('attachments', new Blob(['test']), 'test.txt');
+    const response = await handleApiRequest(path, new Request(`https://demo.example/api/v1${path}`, {
+      method, body: form,
+    }));
+    assert.equal(response.status, 400, path);
+  }
+});

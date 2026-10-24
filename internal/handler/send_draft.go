@@ -9,6 +9,7 @@ import (
 	"net/mail"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	ht "github.com/ogen-go/ogen/http"
 
@@ -104,6 +105,28 @@ func validateSendFields(
 ) (sendFieldsValidated, error) {
 	var v sendFieldsValidated
 	var err error
+
+	for _, field := range []struct {
+		name  string
+		value api.OptString
+		limit int
+	}{
+		{"body_text", bodyTextOpt, 8 * 1024 * 1024},
+		{"body_html", bodyHTMLOpt, 8 * 1024 * 1024},
+		{"in_reply_to", inReplyToOpt, 998},
+	} {
+		if utf8.RuneCountInString(field.value.Value) > field.limit {
+			return v, fmt.Errorf("%s must not exceed %d characters", field.name, field.limit)
+		}
+	}
+	if len(refsSlice) > maxRefsCount {
+		return v, fmt.Errorf("references must not exceed %d items", maxRefsCount)
+	}
+	for _, ref := range refsSlice {
+		if utf8.RuneCountInString(ref) > 998 {
+			return v, fmt.Errorf("references items must not exceed 998 characters")
+		}
+	}
 
 	if s, ok := toAddrOpt.Get(); ok {
 		if v.toAddr, err = validateAndStripAddrList(s, "to_addr"); err != nil {

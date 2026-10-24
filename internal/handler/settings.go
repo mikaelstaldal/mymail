@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/mikaelstaldal/mymail/internal/api"
 	"github.com/mikaelstaldal/mymail/internal/repository"
@@ -140,6 +141,9 @@ func (h *Handler) IdentitiesGet(ctx context.Context) (*api.IdentitiesGetOK, erro
 }
 
 func (h *Handler) IdentitiesPost(ctx context.Context, req *api.IdentityRequest) (api.IdentitiesPostRes, error) {
+	if utf8.RuneCountInString(req.Name) > 200 || utf8.RuneCountInString(req.Address) > 254 {
+		return &api.IdentitiesPostBadRequest{Error: "identity name must not exceed 200 characters and address must not exceed 254 characters"}, nil
+	}
 	identity := identityFromRequest(req)
 	created, err := h.identities.CreateIdentity(ctx, identity)
 	if errors.Is(err, repository.ErrInvalidAddress) {
@@ -155,6 +159,9 @@ func (h *Handler) IdentitiesPost(ctx context.Context, req *api.IdentityRequest) 
 }
 
 func (h *Handler) IdentitiesIDPut(ctx context.Context, req *api.IdentityRequest, params api.IdentitiesIDPutParams) (api.IdentitiesIDPutRes, error) {
+	if utf8.RuneCountInString(req.Name) > 200 || utf8.RuneCountInString(req.Address) > 254 {
+		return &api.IdentitiesIDPutBadRequest{Error: "identity name must not exceed 200 characters and address must not exceed 254 characters"}, nil
+	}
 	id := int64(params.ID)
 	identity := identityFromRequest(req)
 	updated, err := h.identities.UpdateIdentity(ctx, id, identity)
