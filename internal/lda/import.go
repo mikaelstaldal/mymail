@@ -21,6 +21,7 @@ import (
 
 	"github.com/mikaelstaldal/mymail/internal/model"
 	"github.com/mikaelstaldal/mymail/internal/repository"
+	"github.com/mikaelstaldal/mymail/internal/termsafe"
 )
 
 // builtinSlugs maps the built-in folder slugs (case-sensitive) to their IDs.
@@ -139,7 +140,7 @@ func RunImport(db *sql.DB, mappingArgs []string) int {
 	}
 	mappings, err := parseMappings(mappingArgs)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "import: %v\n", err)
+		fmt.Fprintln(os.Stderr, termsafe.String(fmt.Sprintf("import: %v", err)))
 		return 1
 	}
 
@@ -156,7 +157,7 @@ func RunImport(db *sql.DB, mappingArgs []string) int {
 	for _, m := range mappings {
 		fid, err := resolveFolder(ctx, db, m.folder, nameCache)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "import: %v\n", err)
+			fmt.Fprintln(os.Stderr, termsafe.String(fmt.Sprintf("import: %v", err)))
 			return 1
 		}
 		rs = append(rs, resolved{m.folder, fid, m.format, m.path})
@@ -175,11 +176,11 @@ func RunImport(db *sql.DB, mappingArgs []string) int {
 		case "mbx":
 			imp, skip, e = importMbx(r.path, r.folderID, db)
 		}
-		fmt.Printf("%s: %d imported, %d skipped\n", r.folderName, imp, skip)
+		fmt.Printf("%s: %d imported, %d skipped\n", termsafe.String(r.folderName), imp, skip)
 		totalImported += imp
 		totalSkipped += skip
 		if e != nil {
-			log.Printf("import: %s (%s %s): %v", r.folderName, r.format, r.path, e)
+			importLogf("import: %s (%s %s): %v", r.folderName, r.format, r.path, e)
 			exitCode = 1
 		}
 	}
@@ -276,7 +277,7 @@ func commitBatch(ctx context.Context, db *sql.DB, batch []batchEntry, folderID i
 			addr, name := parseFromAddr(row.fromAddr)
 			if addr != "" {
 				if err := contactRepo.UpsertContact(ctx, addr, name); err != nil {
-					log.Printf("import: upsert contact: %v", err)
+					importLogf("import: upsert contact: %v", err)
 				}
 			}
 		}
@@ -342,7 +343,7 @@ func importMaildir(dir string, folderID int64, db *sql.DB) (imported, skipped in
 		})
 	}
 	if curErr != nil {
-		log.Printf("import maildir %s: partial read of cur/: %v", dir, curErr)
+		importLogf("import maildir %s: partial read of cur/: %v", dir, curErr)
 	}
 
 	// Sort lexicographically by key ascending.
@@ -358,7 +359,7 @@ func importMaildir(dir string, folderID int64, db *sql.DB) (imported, skipped in
 	flush := func() {
 		n, err := commitBatch(ctx, db, batch, folderID, contactRepo)
 		if err != nil {
-			log.Printf("import maildir %s: commit batch: %v", dir, err)
+			importLogf("import maildir %s: commit batch: %v", dir, err)
 			skipped += len(batch)
 			if flushErr == nil {
 				flushErr = err
@@ -377,13 +378,13 @@ func importMaildir(dir string, folderID int64, db *sql.DB) (imported, skipped in
 		fi, statErr := os.Stat(msg.filename)
 		raw, readErr := readImportFile(msg.filename)
 		if readErr != nil {
-			log.Printf("import maildir: read %s: %v", msg.filename, readErr)
+			importLogf("import maildir: read %s: %v", msg.filename, readErr)
 			skipped++
 			continue
 		}
 		pm, parseErr := ParseMessage(raw)
 		if parseErr != nil {
-			log.Printf("import maildir: parse %s: %v", msg.filename, parseErr)
+			importLogf("import maildir: parse %s: %v", msg.filename, parseErr)
 			skipped++
 			continue
 		}
@@ -399,7 +400,7 @@ func importMaildir(dir string, folderID int64, db *sql.DB) (imported, skipped in
 		} else if mtime != nil {
 			date = *mtime
 		} else {
-			log.Printf("import maildir: no date or mtime for %s, skipping", msg.filename)
+			importLogf("import maildir: no date or mtime for %s, skipping", msg.filename)
 			skipped++
 			continue
 		}
@@ -408,7 +409,7 @@ func importMaildir(dir string, folderID int64, db *sql.DB) (imported, skipped in
 		if pm.MessageID != nil {
 			var exists bool
 			if exists, err = isDuplicate(ctx, db, pm.MessageID, raw, false); err != nil {
-				log.Printf("import maildir: duplicate check %s: %v", msg.filename, err)
+				importLogf("import maildir: duplicate check %s: %v", msg.filename, err)
 			} else if exists {
 				skipped++
 				continue
@@ -473,7 +474,7 @@ func importMbox(path string, folderID int64, db *sql.DB) (imported, skipped int,
 	flush := func() {
 		n, err := commitBatch(ctx, db, batch, folderID, contactRepo)
 		if err != nil {
-			log.Printf("import mbox %s: commit batch: %v", path, err)
+			importLogf("import mbox %s: commit batch: %v", path, err)
 			skipped += len(batch)
 			if flushErr == nil {
 				flushErr = err
@@ -496,20 +497,20 @@ func importMbox(path string, folderID int64, db *sql.DB) (imported, skipped int,
 			break
 		}
 		if nextErr != nil {
-			log.Printf("import mbox %s[%d]: %v", path, msgIdx, nextErr)
+			importLogf("import mbox %s[%d]: %v", path, msgIdx, nextErr)
 			skipped++
 			msgIdx++
 			continue
 		}
 		raw, readErr := io.ReadAll(io.LimitReader(msgReader, MaxMessageBytes+1))
 		if readErr != nil {
-			log.Printf("import mbox %s[%d]: read: %v", path, msgIdx, readErr)
+			importLogf("import mbox %s[%d]: read: %v", path, msgIdx, readErr)
 			skipped++
 			msgIdx++
 			continue
 		}
 		if len(raw) > MaxMessageBytes {
-			log.Printf("import mbox %s[%d]: message exceeds %d bytes", path, msgIdx, MaxMessageBytes)
+			importLogf("import mbox %s[%d]: message exceeds %d bytes", path, msgIdx, MaxMessageBytes)
 			skipped++
 			msgIdx++
 			if _, err := io.Copy(io.Discard, msgReader); err != nil {
@@ -520,7 +521,7 @@ func importMbox(path string, folderID int64, db *sql.DB) (imported, skipped int,
 		}
 		pm, parseErr := ParseMessage(raw)
 		if parseErr != nil {
-			log.Printf("import mbox %s[%d]: parse: %v", path, msgIdx, parseErr)
+			importLogf("import mbox %s[%d]: parse: %v", path, msgIdx, parseErr)
 			skipped++
 			msgIdx++
 			continue
@@ -529,7 +530,7 @@ func importMbox(path string, folderID int64, db *sql.DB) (imported, skipped int,
 		// Detect mismatch early: more messages than separator lines found.
 		if !useMtime && msgIdx >= separatorCount {
 			useMtime = true
-			log.Printf("import mbox %s: message count exceeds separator count (%d); using file mtime fallback",
+			importLogf("import mbox %s: message count exceeds separator count (%d); using file mtime fallback",
 				path, separatorCount)
 		}
 
@@ -548,7 +549,7 @@ func importMbox(path string, folderID int64, db *sql.DB) (imported, skipped int,
 		} else if fileMtime != nil {
 			date = fileMtime.UTC()
 		} else {
-			log.Printf("import mbox %s[%d]: no date available, skipping", path, msgIdx)
+			importLogf("import mbox %s[%d]: no date available, skipping", path, msgIdx)
 			skipped++
 			msgIdx++
 			continue
@@ -558,7 +559,7 @@ func importMbox(path string, folderID int64, db *sql.DB) (imported, skipped int,
 		if pm.MessageID != nil {
 			var exists bool
 			if exists, err = isDuplicate(ctx, db, pm.MessageID, raw, false); err != nil {
-				log.Printf("import mbox %s[%d]: duplicate check: %v", path, msgIdx, err)
+				importLogf("import mbox %s[%d]: duplicate check: %v", path, msgIdx, err)
 			} else if exists {
 				skipped++
 				msgIdx++
@@ -577,7 +578,7 @@ func importMbox(path string, folderID int64, db *sql.DB) (imported, skipped int,
 
 	// Post-loop: log if scanner overcounted separators (mboxo body-From lines).
 	if !useMtime && separatorCount > msgIdx {
-		log.Printf("import mbox %s: separator count (%d) > message count (%d); From-separator timestamps may be misaligned",
+		importLogf("import mbox %s: separator count (%d) > message count (%d); From-separator timestamps may be misaligned",
 			path, separatorCount, msgIdx)
 	}
 
@@ -677,7 +678,7 @@ func importMbx(path string, folderID int64, db *sql.DB) (imported, skipped int, 
 	flush := func() {
 		n, err := commitBatch(ctx, db, batch, folderID, contactRepo)
 		if err != nil {
-			log.Printf("import mbx %s: commit batch: %v", path, err)
+			importLogf("import mbx %s: commit batch: %v", path, err)
 			skipped += len(batch)
 			if flushErr == nil {
 				flushErr = err
@@ -702,7 +703,7 @@ func importMbx(path string, folderID int64, db *sql.DB) (imported, skipped int, 
 			break
 		}
 		if readErr != nil && readErr != io.EOF {
-			log.Printf("import mbx %s[%d]: read header: %v", path, msgIdx, readErr)
+			importLogf("import mbx %s[%d]: read header: %v", path, msgIdx, readErr)
 			if flushErr == nil {
 				flushErr = readErr
 			}
@@ -716,7 +717,7 @@ func importMbx(path string, folderID int64, db *sql.DB) (imported, skipped int, 
 		// Parse: <date>,<size>;<8hex-uflags><4hex-sysflags>-<8hex-uid>
 		dateStr, rest, ok := strings.Cut(line, ",")
 		if !ok {
-			log.Printf("import mbx %s[%d]: malformed header (no comma): %q", path, msgIdx, line)
+			importLogf("import mbx %s[%d]: malformed header (no comma): %q", path, msgIdx, line)
 			if flushErr == nil {
 				flushErr = fmt.Errorf("malformed mbx per-message header at message %d", msgIdx)
 			}
@@ -724,7 +725,7 @@ func importMbx(path string, folderID int64, db *sql.DB) (imported, skipped int, 
 		}
 		sizeStr, flagsStr, ok := strings.Cut(rest, ";")
 		if !ok {
-			log.Printf("import mbx %s[%d]: malformed header (no semicolon): %q", path, msgIdx, line)
+			importLogf("import mbx %s[%d]: malformed header (no semicolon): %q", path, msgIdx, line)
 			if flushErr == nil {
 				flushErr = fmt.Errorf("malformed mbx per-message header at message %d", msgIdx)
 			}
@@ -733,7 +734,7 @@ func importMbx(path string, folderID int64, db *sql.DB) (imported, skipped int, 
 
 		msgSize, parseErr := strconv.ParseUint(sizeStr, 10, 63)
 		if parseErr != nil || msgSize == 0 {
-			log.Printf("import mbx %s[%d]: invalid message size %q", path, msgIdx, sizeStr)
+			importLogf("import mbx %s[%d]: invalid message size %q", path, msgIdx, sizeStr)
 			if flushErr == nil {
 				flushErr = fmt.Errorf("invalid mbx message size at message %d", msgIdx)
 			}
@@ -742,7 +743,7 @@ func importMbx(path string, folderID int64, db *sql.DB) (imported, skipped int, 
 
 		// flagsStr layout: <8hex user flags><4hex sys flags>-<8hex uid>
 		if len(flagsStr) < 21 || flagsStr[12] != '-' {
-			log.Printf("import mbx %s[%d]: malformed flags field: %q", path, msgIdx, flagsStr)
+			importLogf("import mbx %s[%d]: malformed flags field: %q", path, msgIdx, flagsStr)
 			if flushErr == nil {
 				flushErr = fmt.Errorf("malformed mbx flags field at message %d", msgIdx)
 			}
@@ -750,7 +751,7 @@ func importMbx(path string, folderID int64, db *sql.DB) (imported, skipped int, 
 		}
 		sysFlags, parseErr := strconv.ParseUint(flagsStr[8:12], 16, 64)
 		if parseErr != nil {
-			log.Printf("import mbx %s[%d]: parse sys flags %q: %v", path, msgIdx, flagsStr[8:12], parseErr)
+			importLogf("import mbx %s[%d]: parse sys flags %q: %v", path, msgIdx, flagsStr[8:12], parseErr)
 			if flushErr == nil {
 				flushErr = parseErr
 			}
@@ -760,10 +761,10 @@ func importMbx(path string, folderID int64, db *sql.DB) (imported, skipped int, 
 		// Skip expunged and oversized messages without allocating a body buffer.
 		if sysFlags&fEXPUNGED != 0 || msgSize > MaxMessageBytes {
 			if msgSize > MaxMessageBytes {
-				log.Printf("import mbx %s[%d]: message exceeds %d bytes", path, msgIdx, MaxMessageBytes)
+				importLogf("import mbx %s[%d]: message exceeds %d bytes", path, msgIdx, MaxMessageBytes)
 			}
 			if _, err := io.CopyN(io.Discard, br, int64(msgSize)); err != nil {
-				log.Printf("import mbx %s[%d]: discard skipped body: %v", path, msgIdx, err)
+				importLogf("import mbx %s[%d]: discard skipped body: %v", path, msgIdx, err)
 				if flushErr == nil {
 					flushErr = err
 				}
@@ -776,7 +777,7 @@ func importMbx(path string, folderID int64, db *sql.DB) (imported, skipped int, 
 
 		raw := make([]byte, msgSize)
 		if _, err := io.ReadFull(br, raw); err != nil {
-			log.Printf("import mbx %s[%d]: read body: %v", path, msgIdx, err)
+			importLogf("import mbx %s[%d]: read body: %v", path, msgIdx, err)
 			if flushErr == nil {
 				flushErr = err
 			}
@@ -785,7 +786,7 @@ func importMbx(path string, folderID int64, db *sql.DB) (imported, skipped int, 
 
 		pm, pmErr := ParseMessage(raw)
 		if pmErr != nil {
-			log.Printf("import mbx %s[%d]: parse: %v", path, msgIdx, pmErr)
+			importLogf("import mbx %s[%d]: parse: %v", path, msgIdx, pmErr)
 			skipped++
 			msgIdx++
 			continue
@@ -800,7 +801,7 @@ func importMbx(path string, folderID int64, db *sql.DB) (imported, skipped int, 
 		} else if fileMtime != nil {
 			date = *fileMtime
 		} else {
-			log.Printf("import mbx %s[%d]: no date available, skipping", path, msgIdx)
+			importLogf("import mbx %s[%d]: no date available, skipping", path, msgIdx)
 			skipped++
 			msgIdx++
 			continue
@@ -810,7 +811,7 @@ func importMbx(path string, folderID int64, db *sql.DB) (imported, skipped int, 
 		if pm.MessageID != nil {
 			var exists bool
 			if exists, err = isDuplicate(ctx, db, pm.MessageID, raw, false); err != nil {
-				log.Printf("import mbx %s[%d]: duplicate check: %v", path, msgIdx, err)
+				importLogf("import mbx %s[%d]: duplicate check: %v", path, msgIdx, err)
 			} else if exists {
 				skipped++
 				msgIdx++
@@ -851,4 +852,9 @@ func parseMbxDate(s string) *time.Time {
 		return nil
 	}
 	return storableDate(t)
+}
+
+// Sanitize after formatting so paths and nested parser/OS errors are all covered.
+func importLogf(format string, args ...any) {
+	log.Print(termsafe.String(fmt.Sprintf(format, args...)))
 }

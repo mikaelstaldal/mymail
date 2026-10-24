@@ -15,6 +15,7 @@ import (
 
 	"github.com/mikaelstaldal/go-server-common/devicegrant/client"
 	"github.com/mikaelstaldal/mymail/internal/clihttp"
+	"github.com/mikaelstaldal/mymail/internal/termsafe"
 )
 
 func login(args []string, base string, stdout, stderr io.Writer) error {
@@ -62,7 +63,7 @@ func login(args []string, base string, stdout, stderr io.Writer) error {
 		if uri == "" {
 			uri = a.VerificationURI
 		}
-		_, err := fmt.Fprintf(stderr, "Open %s\nUser code: %s\nApprove this request on the page above.\n", uri, a.UserCode)
+		_, err := fmt.Fprintf(stderr, "Open %s\nUser code: %s\nApprove this request on the page above.\n", termsafe.String(uri), termsafe.String(a.UserCode))
 		return err
 	})
 	if err != nil {

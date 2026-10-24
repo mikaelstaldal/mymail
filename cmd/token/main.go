@@ -20,6 +20,7 @@ import (
 	"unicode"
 
 	"github.com/mikaelstaldal/mymail/internal/clihttp"
+	"github.com/mikaelstaldal/mymail/internal/termsafe"
 	"golang.org/x/term"
 )
 
@@ -52,7 +53,7 @@ var tokenPattern = regexp.MustCompile(`^mymail_[A-Za-z0-9_-]{43}$`)
 
 func main() {
 	if err := run(os.Args[1:], os.Stdin, os.Stdout, os.Stderr); err != nil {
-		fmt.Fprintln(os.Stderr, "mymail-token:", err)
+		_ = writeTokenError(os.Stderr, err)
 		os.Exit(1)
 	}
 }
@@ -322,4 +323,9 @@ func parseFolders(value string) ([]int64, error) {
 		ids = append(ids, id)
 	}
 	return ids, nil
+}
+
+// writeTokenError protects every error source, including the device login client.
+func writeTokenError(stderr io.Writer, err error) error {
+	return termsafe.Copy(stderr, strings.NewReader("mymail-token: "+err.Error()+"\n"))
 }

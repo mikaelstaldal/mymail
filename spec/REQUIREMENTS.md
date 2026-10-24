@@ -1865,3 +1865,10 @@ forwards retain their original links. The browser demo follows the same rules.
   When the server reports `malformed_sender`, the "Add sender to contacts" shortcut is
   not offered, and a `From` holding several mailboxes is shown as received rather than
   as one of them.
+
+## Terminal diagnostics
+
+Token management errors and approval prompts, and batch import diagnostics and folder summaries,
+visibly escape terminal controls (C0 except tab/newline, lone carriage returns, DEL, C1, bidirectional
+formatting controls, and invalid UTF-8 bytes). This also applies when output is redirected, so captured
+diagnostics remain safe to display later. Ordinary Unicode text and CRLF line endings are preserved.
