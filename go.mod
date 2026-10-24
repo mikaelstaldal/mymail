@@ -65,3 +65,6 @@ require (
 	modernc.org/mathutil v1.7.1 // indirect
 	modernc.org/memory v1.11.0 // indirect
 )
+
+// Use the sibling checkout until the termsafe package is published.
+replace github.com/mikaelstaldal/go-server-common => ../go-server-common

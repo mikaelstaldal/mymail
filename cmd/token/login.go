@@ -14,8 +14,8 @@ import (
 	"unicode/utf8"
 
 	"github.com/mikaelstaldal/go-server-common/devicegrant/client"
+	"github.com/mikaelstaldal/go-server-common/termsafe"
 	"github.com/mikaelstaldal/mymail/internal/clihttp"
-	"github.com/mikaelstaldal/mymail/internal/termsafe"
 )
 
 func login(args []string, base string, stdout, stderr io.Writer) error {

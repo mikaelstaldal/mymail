@@ -19,8 +19,8 @@ import (
 	"time"
 	"unicode"
 
+	"github.com/mikaelstaldal/go-server-common/termsafe"
 	"github.com/mikaelstaldal/mymail/internal/clihttp"
-	"github.com/mikaelstaldal/mymail/internal/termsafe"
 	"golang.org/x/term"
 )
 

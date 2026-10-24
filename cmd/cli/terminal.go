@@ -4,7 +4,7 @@ import (
 	"io"
 	"strings"
 
-	"github.com/mikaelstaldal/mymail/internal/termsafe"
+	"github.com/mikaelstaldal/go-server-common/termsafe"
 )
 
 func copyTerminal(dst io.Writer, src io.Reader) error {

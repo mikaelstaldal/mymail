@@ -19,9 +19,9 @@ import (
 	"github.com/emersion/go-maildir"
 	"github.com/emersion/go-mbox"
 
+	"github.com/mikaelstaldal/go-server-common/termsafe"
 	"github.com/mikaelstaldal/mymail/internal/model"
 	"github.com/mikaelstaldal/mymail/internal/repository"
-	"github.com/mikaelstaldal/mymail/internal/termsafe"
 )
 
 // builtinSlugs maps the built-in folder slugs (case-sensitive) to their IDs.
