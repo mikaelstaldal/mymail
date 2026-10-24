@@ -47,6 +47,7 @@ const MAX_REFS_BYTES = 16 * 1024;
 const MAX_REFS_COUNT = 1000;
 /** Transitive-closure cap for threading (repository.GetMessageThread). */
 const THREAD_CAP = 1000;
+const THREAD_REFERENCE_CAP = 4096;
 /** How much of body_text the search snippet is built from. */
 const SNIPPET_SOURCE_LIMIT = 64 * 1024;
 const SNIPPET_CONTEXT_TOKENS = 15;

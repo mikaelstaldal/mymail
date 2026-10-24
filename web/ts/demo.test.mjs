@@ -1685,3 +1685,15 @@ test('demo normalizes visible domain claims before link and display-name checks'
     }
   }
 });
+
+test('thread reference budget truncates safely without losing direct replies', async () => {
+  const messages = [message({ id: 1, messageId: 'victim@x', subject: 'Budget' })];
+  for (let i = 0; i < 40; i++) {
+    messages.push(message({ id: i + 2, messageId: `child${i}@x`, inReplyTo: 'victim@x',
+      references: Array.from({ length: 998 }, (_, j) => `junk${i}-${j}@x`).join('\n') }));
+  }
+  const res = await call(newState(messages), 'GET', '/messages/1/thread');
+  assert.equal(res.status, 200);
+  assert.equal(res.body.items.length, 41);
+  assert.equal(res.body.truncated, true);
+});

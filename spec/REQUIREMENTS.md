@@ -1044,7 +1044,9 @@ Hovering a folder in the sidebar shows a tooltip with its slug and numeric id, e
    that message, replacing the main view with it. Entries in Junk and Trash carry a visible folder label,
    use subdued sender styling, and start collapsed; the label remains visible when expanded. This applies
    to both real and demo mode. The thread panel is resizable by dragging the divider between the body
-   and the thread strip. When the thread is truncated at the 1000-message cap (`truncated: true` in the API response),
+   and the thread strip. Thread closure follows only newly discovered IDs and at most 4096 distinct references in both real and demo mode;
+   SQL parameter counts are independent of reference count, and server lookups have a two-second deadline.
+   When the thread is truncated at the 1000-message or 4096-reference cap (`truncated: true` in the API response),
    a "thread too long" indicator is shown in place of the missing entries.
 
    **Importing an event into MyCal.** When the **MyCal URL** preference resolves to a non-empty value (see Settings →

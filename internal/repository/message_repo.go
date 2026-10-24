@@ -53,15 +53,6 @@ func int64Args(ids []int64) []any {
 	return args
 }
 
-// stringArgs converts a slice of strings to []any for use as SQL args.
-func stringArgs(ss []string) []any {
-	args := make([]any, len(ss))
-	for i, s := range ss {
-		args[i] = s
-	}
-	return args
-}
-
 // setToInt64Slice converts a map[int64]bool set to a slice.
 func setToInt64Slice(m map[int64]bool) []int64 {
 	out := make([]int64, 0, len(m))
@@ -900,25 +891,6 @@ func normalizeSubject(s string) string {
 	return strings.TrimSpace(s)
 }
 
-// addThreadRow adds a newly found thread row to the tracking sets and returns true if it was new.
-func addThreadRow(
-	row threadSeedRow,
-	foundIDs map[int64]bool,
-	knownMsgIDs map[string]bool,
-	referencedMsgIDs map[string]bool,
-) {
-	foundIDs[row.id] = true
-	if row.messageID.Valid && row.messageID.String != "" {
-		knownMsgIDs[row.messageID.String] = true
-	}
-	if row.inReplyTo.Valid && row.inReplyTo.String != "" {
-		referencedMsgIDs[row.inReplyTo.String] = true
-	}
-	for _, ref := range splitNL(row.refs.String) {
-		referencedMsgIDs[ref] = true
-	}
-}
-
 // fetchSummariesByIDs fetches MessageSummary rows for the given IDs ordered by
 // date ASC, ties broken by ascending id.
 //
@@ -950,8 +922,10 @@ func (r *MessageRepository) fetchSummariesByIDs(ctx context.Context, ids []int64
 }
 
 // GetMessageThread returns all messages in the thread, using the iterative transitive-closure
-// algorithm with a 1000-message cap and subject-based fallback.
+// algorithm with message/reference budgets, a deadline, and subject-based fallback.
 func (r *MessageRepository) GetMessageThread(ctx context.Context, id int64) ([]oas.MessageSummary, bool, error) {
+	ctx, cancel := context.WithTimeout(ctx, threadTimeout)
+	defer cancel()
 	// Fetch seed row including subject and folder_id for the subject-based fallback.
 	var seed threadSeedRow
 	err := r.db.QueryRowContext(ctx,
@@ -965,57 +939,63 @@ func (r *MessageRepository) GetMessageThread(ctx context.Context, id int64) ([]o
 	}
 
 	foundIDs := make(map[int64]bool)
-	knownMsgIDs := make(map[string]bool)
-	referencedMsgIDs := make(map[string]bool)
-
-	addThreadRow(seed, foundIDs, knownMsgIDs, referencedMsgIDs)
-
+	known := make(map[string]bool)
+	referenced := make(map[string]bool)
+	pendingKnown := make(map[string]bool)
+	pendingRefs := make(map[string]bool)
 	truncated := false
-
-	for len(foundIDs) < 1000 {
-		prevCount := len(foundIDs)
-
-		// Forward query: find messages that reference any ID in knownMsgIDs.
-		if len(knownMsgIDs) > 0 {
-			newRows, err := r.threadForwardQuery(ctx, knownMsgIDs, foundIDs)
-			if err != nil {
-				return nil, false, err
-			}
-			for _, row := range newRows {
-				if len(foundIDs) >= 1000 {
-					truncated = true
-					break
-				}
-				addThreadRow(row, foundIDs, knownMsgIDs, referencedMsgIDs)
-			}
-			if truncated {
-				break
-			}
+	add := func(row threadSeedRow) {
+		if foundIDs[row.id] {
+			return
 		}
-
-		// Backward query: find messages whose message_id is referenced by found rows.
-		if len(referencedMsgIDs) > 0 {
-			newRows, err := r.threadBackwardQuery(ctx, referencedMsgIDs, foundIDs)
-			if err != nil {
-				return nil, false, err
-			}
-			for _, row := range newRows {
-				if len(foundIDs) >= 1000 {
-					truncated = true
-					break
-				}
-				addThreadRow(row, foundIDs, knownMsgIDs, referencedMsgIDs)
-			}
-			if truncated {
-				break
-			}
+		if len(foundIDs) >= 1000 {
+			truncated = true
+			return
 		}
-
-		if len(foundIDs) == prevCount {
-			break // fixed point
+		foundIDs[row.id] = true
+		if value := row.messageID.String; value != "" && !known[value] {
+			known[value] = true
+			pendingKnown[value] = true
+		}
+		refs := splitNL(row.refs.String)
+		if row.inReplyTo.String != "" {
+			refs = append([]string{row.inReplyTo.String}, refs...)
+		}
+		for _, ref := range refs {
+			if referenced[ref] {
+				continue
+			}
+			if len(referenced) >= threadReferenceCap {
+				truncated = true
+				continue
+			}
+			referenced[ref] = true
+			pendingRefs[ref] = true
 		}
 	}
-
+	add(seed)
+	for len(foundIDs) < 1000 && (len(pendingKnown) > 0 || len(pendingRefs) > 0) {
+		forward, backward := pendingKnown, pendingRefs
+		pendingKnown, pendingRefs = make(map[string]bool), make(map[string]bool)
+		if len(forward) > 0 {
+			rows, err := r.threadForwardQuery(ctx, forward, foundIDs)
+			if err != nil {
+				return nil, false, err
+			}
+			for _, row := range rows {
+				add(row)
+			}
+		}
+		if len(backward) > 0 && len(foundIDs) < 1000 {
+			rows, err := r.threadBackwardQuery(ctx, backward, foundIDs)
+			if err != nil {
+				return nil, false, err
+			}
+			for _, row := range rows {
+				add(row)
+			}
+		}
+	}
 	if len(foundIDs) >= 1000 {
 		truncated = true
 	}
@@ -1040,6 +1020,10 @@ func (r *MessageRepository) GetMessageThread(ctx context.Context, id int64) ([]o
 	}
 	return summaries, truncated, nil
 }
+
+// Bound closure work independently of the number of messages and per-message header limits.
+const threadReferenceCap = 4096
+const threadTimeout = 2 * time.Second
 
 // Subject fallback is optional: expensive matches must not hold up opening mail.
 const threadSubjectMaxRunes = 500
@@ -1103,27 +1087,14 @@ func (r *MessageRepository) threadForwardQuery(
 	knownMsgIDs map[string]bool,
 	foundIDs map[int64]bool,
 ) ([]threadSeedRow, error) {
-	msgIDs := setToStringSlice(knownMsgIDs)
-	excluded := setToInt64Slice(foundIDs)
-
-	// Build: in_reply_to IN (?,…) OR LIKE clause per msgID.
-	var sb strings.Builder
-	var args []any
-
-	sb.WriteString(`SELECT id, message_id, in_reply_to, "references" FROM messages WHERE `)
-
-	if len(excluded) > 0 {
-		sb.WriteString(`id NOT IN (` + placeholders(len(excluded)) + `) AND `)
-		args = append(args, int64Args(excluded)...)
-	}
-
-	sb.WriteString(`(in_reply_to IN (` + placeholders(len(msgIDs)) + `)`)
-	args = append(args, stringArgs(msgIDs)...)
-
-	sb.WriteString(` OR id IN (SELECT message_id FROM message_references WHERE ref_msg_id IN (` + placeholders(len(msgIDs)) + `)))`)
-	args = append(args, stringArgs(msgIDs)...)
-
-	rows, err := r.db.QueryContext(ctx, sb.String(), args...)
+	// JSON keeps the number of SQL parameters independent of frontier size.
+	msgIDs, _ := json.Marshal(setToStringSlice(knownMsgIDs))
+	excluded, _ := json.Marshal(setToInt64Slice(foundIDs))
+	rows, err := r.db.QueryContext(ctx, `SELECT id, message_id, in_reply_to, "references" FROM messages
+ WHERE id NOT IN (SELECT value FROM json_each(?)) AND
+ (in_reply_to IN (SELECT value FROM json_each(?)) OR id IN
+ (SELECT message_id FROM message_references WHERE ref_msg_id IN (SELECT value FROM json_each(?))))
+ ORDER BY id LIMIT 1001`, string(excluded), string(msgIDs), string(msgIDs))
 	if err != nil {
 		return nil, err
 	}
@@ -1138,25 +1109,14 @@ func (r *MessageRepository) threadBackwardQuery(
 	referencedMsgIDs map[string]bool,
 	foundIDs map[int64]bool,
 ) ([]threadSeedRow, error) {
-	refIDs := setToStringSlice(referencedMsgIDs)
-	excluded := setToInt64Slice(foundIDs)
-
-	var sb strings.Builder
-	var args []any
-
-	sb.WriteString(`SELECT id, message_id, in_reply_to, "references" FROM messages WHERE message_id IN (` + placeholders(len(refIDs)) + `)`)
-	args = append(args, stringArgs(refIDs)...)
-	// A quarantined colliding ID must not displace an ordinary copy.
-	sb.WriteString(` AND (folder_id NOT IN (4, 7) OR NOT EXISTS (
-      SELECT 1 FROM messages AS ordinary WHERE ordinary.message_id = messages.message_id
-      AND ordinary.folder_id NOT IN (4, 7)))`)
-
-	if len(excluded) > 0 {
-		sb.WriteString(` AND id NOT IN (` + placeholders(len(excluded)) + `)`)
-		args = append(args, int64Args(excluded)...)
-	}
-
-	rows, err := r.db.QueryContext(ctx, sb.String(), args...)
+	refIDs, _ := json.Marshal(setToStringSlice(referencedMsgIDs))
+	excluded, _ := json.Marshal(setToInt64Slice(foundIDs))
+	rows, err := r.db.QueryContext(ctx, `SELECT id, message_id, in_reply_to, "references" FROM messages
+ WHERE message_id IN (SELECT value FROM json_each(?))
+ AND (folder_id NOT IN (4, 7) OR NOT EXISTS (
+ SELECT 1 FROM messages AS ordinary WHERE ordinary.message_id = messages.message_id
+ AND ordinary.folder_id NOT IN (4, 7)))
+ AND id NOT IN (SELECT value FROM json_each(?)) ORDER BY id LIMIT 1001`, string(refIDs), string(excluded))
 	if err != nil {
 		return nil, err
 	}

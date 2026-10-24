@@ -979,3 +979,60 @@ func TestThreadPrefersOrdinaryCopyOfCollidingID(t *testing.T) {
 		})
 	}
 }
+
+// Many individually valid headers must not overflow SQLite's variable limit.
+func TestThreadReferenceBudget(t *testing.T) {
+	db := openTestDB(t)
+	r := NewMessageRepository(db)
+	parent := makeMsg(1, "budget")
+	parent.MessageID = sql.NullString{String: "victim@x", Valid: true}
+	id, err := r.InsertMessage(t.Context(), parent)
+	require.NoError(t, err)
+	for i := range 40 {
+		msg := makeMsg(7, "reply")
+		msg.MessageID = sql.NullString{String: fmt.Sprintf("child%d@x", i), Valid: true}
+		msg.InReplyTo = parent.MessageID
+		refs := make([]string, 998)
+		for j := range refs {
+			refs[j] = fmt.Sprintf("junk%d-%d@x", i, j)
+		}
+		msg.References = sql.NullString{String: strings.Join(refs, "\n"), Valid: true}
+		_, err := r.InsertMessage(t.Context(), msg)
+		require.NoError(t, err)
+	}
+	got, truncated, err := r.GetMessageThread(t.Context(), id)
+	require.NoError(t, err)
+	assert.Len(t, got, 41)
+	assert.True(t, truncated)
+}
+
+func TestThreadFrontierLongChain(t *testing.T) {
+	db := openTestDB(t)
+	r := NewMessageRepository(db)
+	var last int64
+	for i := range 500 {
+		msg := makeMsg(1, "chain")
+		msg.MessageID = sql.NullString{String: fmt.Sprintf("chain%d@x", i), Valid: true}
+		if i > 0 {
+			msg.InReplyTo = sql.NullString{String: fmt.Sprintf("chain%d@x", i-1), Valid: true}
+		}
+		refs := make([]string, 5)
+		for j := range refs {
+			refs[j] = fmt.Sprintf("junk%d-%d@x", i, j)
+		}
+		msg.References = sql.NullString{String: strings.Join(refs, "\n"), Valid: true}
+		var err error
+		last, err = r.InsertMessage(t.Context(), msg)
+		require.NoError(t, err)
+	}
+	ctx, cancelDeadline := context.WithTimeout(t.Context(), 2*time.Second)
+	defer cancelDeadline()
+	got, truncated, err := r.GetMessageThread(ctx, last)
+	require.NoError(t, err) // An external deadline also makes the old unbounded lookup fail.
+	assert.False(t, truncated)
+	assert.Len(t, got, 500)
+	cancelled, cancel := context.WithCancel(t.Context())
+	cancel()
+	_, _, err = r.GetMessageThread(cancelled, last)
+	require.ErrorIs(t, err, context.Canceled)
+}

@@ -1162,43 +1162,42 @@ function getThread(state: DemoState, id: number): Response {
   const found = new Set<number>();
   const known = new Set<string>();
   const referenced = new Set<string>();
+  let pendingKnown = new Set<string>();
+  let pendingRefs = new Set<string>();
+  let truncated = false;
   const add = (msg: DemoMessage) => {
+    if (found.has(msg.id)) return;
+    if (found.size >= THREAD_CAP) { truncated = true; return; }
     found.add(msg.id);
-    if (msg.messageId !== null && msg.messageId !== '') known.add(msg.messageId);
-    if (msg.inReplyTo !== null && msg.inReplyTo !== '') referenced.add(msg.inReplyTo);
-    for (const ref of splitNL(msg.references)) referenced.add(ref);
+    if (msg.messageId && !known.has(msg.messageId)) {
+      known.add(msg.messageId);
+      pendingKnown.add(msg.messageId);
+    }
+    for (const ref of [msg.inReplyTo, ...splitNL(msg.references)]) {
+      if (!ref || referenced.has(ref)) continue;
+      if (referenced.size >= THREAD_REFERENCE_CAP) { truncated = true; continue; }
+      referenced.add(ref);
+      pendingRefs.add(ref);
+    }
   };
   add(seed);
-
-  let truncated = false;
-  while (found.size < THREAD_CAP) {
-    const before = found.size;
-
-    // Forward: anything that links to a message we already have.
-    for (const msg of state.messages) {
-      if (found.has(msg.id)) continue;
-      const links =
-        (msg.inReplyTo !== null && known.has(msg.inReplyTo)) ||
-        splitNL(msg.references).some((ref) => known.has(ref));
-      if (!links) continue;
-      if (found.size >= THREAD_CAP) { truncated = true; break; }
-      add(msg);
+  const orderedMessages = [...state.messages].sort((a, b) => a.id - b.id);
+  while (found.size < THREAD_CAP && (pendingKnown.size > 0 || pendingRefs.size > 0)) {
+    const forward = pendingKnown, backward = pendingRefs;
+    pendingKnown = new Set<string>();
+    pendingRefs = new Set<string>();
+    for (const msg of orderedMessages) {
+      if ((msg.inReplyTo !== null && forward.has(msg.inReplyTo)) ||
+          splitNL(msg.references).some((ref) => forward.has(ref))) add(msg);
     }
-    if (truncated) break;
-
-    // Backward: anything a message we already have links to.
-    for (const msg of state.messages) {
-      if (found.has(msg.id)) continue;
-      if (msg.messageId === null || !referenced.has(msg.messageId)) continue;
-      // Mirrors threadBackwardQuery's preference for ordinary colliding copies.
+    if (found.size >= THREAD_CAP) break;
+    for (const msg of orderedMessages) {
+      if (msg.messageId === null || !backward.has(msg.messageId)) continue;
+      // Prefer ordinary colliding copies, as threadBackwardQuery does.
       if ([4, 7].includes(msg.folderId) && state.messages.some((other) =>
         other.messageId === msg.messageId && ![4, 7].includes(other.folderId))) continue;
-      if (found.size >= THREAD_CAP) { truncated = true; break; }
       add(msg);
     }
-    if (truncated) break;
-
-    if (found.size === before) break; // fixed point
   }
   if (found.size >= THREAD_CAP) truncated = true;
 
