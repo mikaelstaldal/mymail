@@ -98,8 +98,8 @@ func TestLinksBoundedAndDocumentParsed(t *testing.T) {
 	assert.Equal(t, "example.com", links[1].Text)
 	assert.Equal(t, "https://evil.org?a=1&b=2", links[1].Href)
 	links = Links(strings.Repeat(`<a href="https://evil.org">example.com</a>`, MaxLinks+100))
-	require.Len(t, links, MaxLinks)
-	assert.Equal(t, MaxLinks-1, links[MaxLinks-1].Index)
+	require.Len(t, links, MaxLinks+1)
+	assert.Equal(t, MaxLinks, links[MaxLinks].Index)
 }
 func TestAttachmentRisk(t *testing.T) {
 	for _, v := range []struct{ name, ct, want string }{{"x.pdf", "application/x-executable", "executable_content_type"}, {"x.PS1", "application/octet-stream", "executable_extension"}, {"photo.jpeg", "image/jpeg", ""}, {"a.exe ", "", "executable_extension"}} {

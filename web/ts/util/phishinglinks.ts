@@ -6,7 +6,7 @@ export function phishingLinks(body: string): Array<{ Index: number; Text: string
   const links = [];
   let index = 0;
   for (const a of template.content.querySelectorAll('a')) {
-    if (index >= 1000) break;
+    if (index >= 1000) { links.push({ Index: index, Text: '', Href: '' }); break; }
     const text: string[] = [];
     const stack: Node[] = Array.from(a.childNodes).reverse();
     while (stack.length) {
@@ -23,10 +23,12 @@ export function phishingLinks(body: string): Array<{ Index: number; Text: string
 export function rewritePhishingLinks(body: string, id: number, indices: number[], base: string): string {
   const template = document.createElement('template');
   template.innerHTML = body;
+  // Index 1000 is the overflow sentinel, not an assessed link.
   const flagged = new Set(indices);
   let index = 0;
   for (const a of template.content.querySelectorAll('a')) {
-    if (flagged.has(index)) a.setAttribute('href', `${base}#/link/${id}/${index}`);
+    if (flagged.has(1000) && index >= 1000) a.removeAttribute('href');
+    else if (flagged.has(index)) a.setAttribute('href', `${base}#/link/${id}/${index}`);
     index++;
   }
   return template.innerHTML;

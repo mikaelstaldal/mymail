@@ -40,6 +40,7 @@ var confusables = func() map[string]string {
 	return m
 }()
 
+// MaxLinks bounds link analysis; an extra sentinel reports unchecked anchors.
 const MaxLinks = 1000
 
 // OversizedHost bounds IDNA input before conversion, then enforces DNS wire
@@ -364,6 +365,10 @@ func ComputeWithLinks(m model.DBMessage, atts []api.AttachmentMeta, c Context, l
 		add(api.MessageWarningKindFirstTimeSender)
 	}
 	for _, link := range links {
+		if link.Index >= MaxLinks {
+			add(api.MessageWarningKindTooManyLinks)
+			break
+		}
 		host := LinkHost(link.Href)
 		if host == "" {
 			continue
@@ -524,7 +529,8 @@ type Link struct {
 }
 
 // Links parses the document once, walks it iteratively, and collects each text
-// node at most once. At most MaxLinks anchors are analysed. Indices count ALL
+// node at most once. At most MaxLinks anchors are analysed; an extra Link with
+// Index MaxLinks and no text/href signals overflow. Indices count ALL
 // anchors (including those without href), matching the confirmation-page API.
 func Links(body string) []Link {
 	// Bodies stored before ingest bounded formatting can still amplify.
@@ -562,6 +568,7 @@ func Links(body string) []Link {
 		}
 		if n.Type == html.ElementNode && n.Data == "a" {
 			if index >= MaxLinks {
+				links = append(links, Link{Index: MaxLinks})
 				break
 			}
 			href := ""
@@ -662,13 +669,10 @@ func tokenizedLinks(body string) []Link {
 		}
 		finish()
 		if tt == html.EndTagToken {
-			if len(links) >= MaxLinks {
-				return links
-			}
 			continue
 		}
 		if len(links) >= MaxLinks {
-			return links
+			return append(links, Link{Index: MaxLinks})
 		}
 		href := ""
 		for _, a := range token.Attr {

@@ -1278,7 +1278,7 @@ async function getMessageBody(state: DemoState, id: number, url: URL, request: R
   }
   const msg = findMessage(state, id);
   const warnings = await demoWarnings(state, msg, []);
-  const servedHTML = await rewriteDemoLinks(msg.bodyHtml, id, warnings.filter(w => w.kind === 'deceptive_link').map(w => Number(w.link_index)), new URL('../../../../', url).href);
+  const servedHTML = await rewriteDemoLinks(msg.bodyHtml, id, warnings.filter(w => w.kind === 'deceptive_link' || w.kind === 'too_many_links').map(w => w.kind === 'too_many_links' ? 1000 : Number(w.link_index)), new URL('../../../../', url).href);
   const imgSrc = url.searchParams.get('external') === '1' ? 'https: data:' : 'data:';
   // sandbox and frame-ancestors are left out of the meta copy: browsers ignore
   // it there, and the iframe is same-document anyway.

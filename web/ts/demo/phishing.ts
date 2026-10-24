@@ -256,6 +256,7 @@ async function demoWarnings(state: DemoState, msg: DemoMessage, atts: DemoAttach
   }
   if (from.address && !demoSentTo(state).includes(foldAddress(from.address)) && !state.contacts.some(c => c.explicit && c.address === foldAddress(from.address))) out.push({ kind: 'first_time_sender' });
   for (const link of await parseDemoLinks(msg.bodyHtml)) {
+    if (link.Index >= 1000) { out.push({ kind: 'too_many_links' }); break; }
     const host = warningHost(link.Href); if (!host) continue; lookalike(host);
     const textHost = warningTextHost(normalizeWarningDomainText(link.Text).trim());
     if (warningOversizedHost(host) || warningOversizedHost(textHost) || warningIP(host) || /(^|\.)xn--/.test(host) || (textHost && warningRegistrable(textHost) !== warningRegistrable(host))) out.push({ kind: 'deceptive_link', link_index: link.Index, text: link.Text, href: link.Href, decoded_host: warningOversizedHost(host) ? host : decodeWarningDomain(host) });

@@ -1794,7 +1794,8 @@ Basic authentication or tokens configured. Both discovery resources return
   Unicode format characters (category Cf, including U+180E) and map U+3002,
   U+FF0E, U+FF61, U+2024 and U+FE52 to ASCII dots. Apply this before display-name
   tokenization; actual addresses, destinations and stored/displayed text stay unchanged.
-  Links after the cap are not assessed. A link with ordinary prose text alone
+  If additional anchors exist, emit a `too_many_links` warning and remove `href`
+  from every unchecked anchor in the served body, leaving stored HTML unchanged. A link with ordinary prose text alone
   does not imply deception. Bare domain text requires a recognized ICANN TLD
   (including domains under private suffixes); filenames/versions such as
   `report.pdf`, `v1.2` and `3.14` are not treated as URLs. Explicit HTTP(S) URLs

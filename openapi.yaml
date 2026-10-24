@@ -225,7 +225,7 @@ components:
       properties:
         kind:
           type: string
-          enum: [auth_fail, malformed_sender, display_name_address, lookalike_domain, reply_to_mismatch, first_time_sender, deceptive_link, risky_attachment]
+          enum: [auth_fail, malformed_sender, display_name_address, lookalike_domain, reply_to_mismatch, first_time_sender, deceptive_link, too_many_links, risky_attachment]
         failed_checks:
           type: array
           items:
@@ -1767,7 +1767,9 @@ paths:
         `data:` URIs (resolved inline attachments) are permitted; with `?external=1` HTTPS
         images are also allowed.
         Links carrying a `deceptive_link` warning are rewritten at serve time to
-        the authenticated MyMail confirmation route. Relative hrefs resolve against
+        the authenticated MyMail confirmation route. A `too_many_links` warning means
+        anchors after the first 1000 were not assessed and have their href removed.
+        Relative hrefs resolve against
         this endpoint's URL, including any deployment path prefix. This applies to
         all consumers, including CLI and MCP body reads. For original destinations,
         use `body_html` and `warnings` from GET /messages/{id}, or the raw message;

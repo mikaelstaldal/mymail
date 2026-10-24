@@ -79,7 +79,7 @@ func (r *MessageRepository) WarningContext(ctx context.Context, from string, lin
 	// history for every message. Explicit contacts use a small partial address index;
 	// their domain functions are evaluated now rather than frozen in an expression
 	// index that dependency upgrades could invalidate. The HTML analyser supplies
-	// at most MaxLinks hosts.
+	// at most MaxLinks hosts; deduplicate skeleton keys before the indexed lookup.
 	if a, err := mail.ParseAddress(from); err == nil {
 		_, d, _ := strings.Cut(a.Address, "@")
 		linkHosts = append(linkHosts, d)

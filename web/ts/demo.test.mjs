@@ -1216,14 +1216,22 @@ test('demo exempts outgoing and own authenticated mail and revokes evidence on c
   assert.equal((await call(state, 'GET', '/messages/1')).body.warnings[0].kind, 'first_time_sender');
 });
 
-test('demo document link analysis caps anchors and recognizes IP/punycode hrefs', async () => {
+test('demo link analysis reports overflow, disables unchecked links, and recognizes IP/punycode hrefs', async () => {
   const state = newState([message({ id: 1, bodyHtml: '<a href="https://[2001:db8::1]">click</a><a href="https://xn--bcher-kva.de">click</a>' })]);
   const warnings = (await call(state, 'GET', '/messages/1')).body.warnings;
   assert.equal(warnings.filter(w => w.kind === 'deceptive_link').length, 2);
   assert.equal(warnings.find(w => w.punycode)?.domain, 'bücher.de');
   const links = phishingLinks('<a href="https://evil.org">example.com</a>'.repeat(1001));
-  assert.equal(links.length, 1000);
-  assert.equal(links[999].Index, 999);
+  assert.equal(links.length, 1001);
+  assert.equal(links[1000].Index, 1000);
+  const bodyHtml = '<a href="https://a.example/"></a>'.repeat(1000)
+    + '<a href="https://evil.example/login">paypal.com</a>';
+  const overflow = newState([message({ id: 1, bodyHtml })]);
+  const detail = (await call(overflow, 'GET', '/messages/1')).body;
+  assert.ok(detail.warnings.some(w => w.kind === 'too_many_links'));
+  const served = await call(overflow, 'GET', '/messages/1/body');
+  assert.ok(!served.body.includes('#/link/1/1000'));
+  assert.ok(!served.body.includes('href="https://evil.example/login"'));
 });
 
 

@@ -26,6 +26,7 @@ export function warningParts(w: MessageWarning): WarningPart[] | null {
     case 'reply_to_mismatch': return ['Replies will go to ', value(w.address), ', on a different domain from the sender'];
     case 'first_time_sender': return ['You have never sent mail to this sender'];
     case 'deceptive_link': return null;
+    case 'too_many_links': return ['This message has more than 1000 links. Additional links were not checked and have been disabled'];
     case 'risky_attachment': return ['Attachment “', value(w.filename), `” ${attachmentReason(w.reason)}`];
   }
 }

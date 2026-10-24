@@ -287,7 +287,8 @@ also help detect lookalike domains. History is backfilled from Sent on upgrade a
 afterwards. Warnings refresh when you read mail, so a later send can remove the first-time signal. Drafts, Sent,
 Scheduled, and own-identity mail with trusted DMARC pass are exempt. A warning is a reason to check the message; no
 warnings is no guarantee of safety. Legitimate internationalized domains can also produce an advisory. Only the
-first 1000 anchors are checked. The browser demo includes a deliberately suspicious message and a harmless
+first 1000 anchors are checked. If more exist, a warning explains that additional links are unchecked
+and disabled. The browser demo includes a deliberately suspicious message and a harmless
 placeholder attachment for trying every warning in the UI and API.
 
 To save a sender, click **Add sender to contacts** beside From in a received message. The Contacts editor opens so
