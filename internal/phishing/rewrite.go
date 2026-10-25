@@ -6,7 +6,6 @@ import (
 	"strings"
 
 	"github.com/mikaelstaldal/mymail/internal/api"
-	"github.com/mikaelstaldal/mymail/internal/sanitize"
 	"golang.org/x/net/html"
 )
 
@@ -28,7 +27,7 @@ func RewriteLinks(body string, id int64, warnings []api.MessageWarning) string {
 		return body
 	}
 	// Bounded exactly as in Links, so that anchor indices agree.
-	doc, err := html.Parse(strings.NewReader(sanitize.BoundFormatting(body)))
+	doc, err := parseBody(body)
 	if err != nil {
 		return rewriteTokenized(body, id, flagged, overflow)
 	}

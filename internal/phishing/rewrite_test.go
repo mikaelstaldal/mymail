@@ -49,3 +49,22 @@ func TestExactLinkLimitHasNoOverflow(t *testing.T) {
 		assert.Equal(t, body, RewriteLinks(body, 42, warnings))
 	}
 }
+
+// A standards-mode table closes the paragraph and its anchor before the table's
+// text. Parsing in quirks mode incorrectly includes " more" in the link text.
+func TestLinksStandardsMode(t *testing.T) {
+	body := `<a>skip</a><p><a href="https://evil.example/">paypal.com<table><tr><td> more</td></tr></table></a></p><a href="https://evil.example/next">example.com</a>`
+	links := Links(body)
+	require.Len(t, links, 3)
+	assert.Equal(t, Link{Index: 1, Text: "paypal.com", Href: "https://evil.example/"}, links[1])
+	warnings := ComputeWithLinks(model.DBMessage{FolderID: 1}, nil, Context{}, links)
+	result := RewriteLinks(body, 42, warnings)
+	assert.Contains(t, result, `href="../../../../#/link/42/1"`)
+	assert.Contains(t, result, `href="../../../../#/link/42/2"`)
+	rendered := Links(result)
+	require.Len(t, rendered, 3)
+	assert.Equal(t, "paypal.com", rendered[1].Text)
+	assert.Equal(t, "example.com", rendered[2].Text)
+	assert.NotContains(t, result, "https://evil.example/")
+	assert.NotContains(t, result, "<!DOCTYPE")
+}

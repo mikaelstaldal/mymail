@@ -25,13 +25,18 @@ func countNodes(t *testing.T, h string) int {
 
 // clonesPerRepeat is how many nodes each further "<p>x" adds to the parse of
 // prefix: two of its own, plus every formatting element the tree builder
-// reconstructs for it.
+// reconstructs for it. Check both ingestion (quirks) and phishing (standards)
+// parsing and return the larger amplification.
 func clonesPerRepeat(t *testing.T, prefix string, bound func(string) string) int {
 	t.Helper()
 	const repeats = 50
-	short := countNodes(t, bound(prefix+strings.Repeat("<p>x", repeats)))
-	long := countNodes(t, bound(prefix+strings.Repeat("<p>x", 2*repeats)))
-	return (long-short)/repeats - 2
+	largest := 0
+	for _, doctype := range []string{"", "<!DOCTYPE html>"} {
+		short := countNodes(t, doctype+bound(prefix+strings.Repeat("<p>x", repeats)))
+		long := countNodes(t, doctype+bound(prefix+strings.Repeat("<p>x", 2*repeats)))
+		largest = max(largest, (long-short)/repeats-2)
+	}
+	return largest
 }
 
 func boundDefault(h string) string { return boundFormatting(h, MaxActiveFormatting) }

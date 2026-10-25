@@ -1,7 +1,9 @@
 /** Document parsing for the demo worker, which has no DOM API. The inert
- * template does not load external images or execute message content. */
+ * template does not load external images or execute message content. Its owner
+ * document has a doctype, matching the standards-mode message iframe and Go parser
+ * even if the host page itself uses quirks mode. */
 export function phishingLinks(body: string): Array<{ Index: number; Text: string; Href: string }> {
-  const template = document.createElement('template');
+  const template = document.implementation.createHTMLDocument('').createElement('template');
   template.innerHTML = body;
   const links = [];
   let index = 0;
@@ -21,7 +23,7 @@ export function phishingLinks(body: string): Array<{ Index: number; Text: string
 }
 
 export function rewritePhishingLinks(body: string, id: number, indices: number[], base: string): string {
-  const template = document.createElement('template');
+  const template = document.implementation.createHTMLDocument('').createElement('template');
   template.innerHTML = body;
   // Index 1000 is the overflow sentinel, not an assessed link.
   const flagged = new Set(indices);

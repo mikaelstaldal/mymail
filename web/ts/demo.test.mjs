@@ -1740,3 +1740,18 @@ test('demo multipart routes reject more than 100 attachments', async () => {
     assert.equal(response.status, 400, path);
   }
 });
+
+// Checks output parity for the Go regression payload. jsdom's template parser
+// does not model host-document quirks mode, so this cannot detect removal of the
+// helper's explicit standards-mode document ownership. The real demo host page
+// already has a doctype; that ownership is defensive hardening.
+test('demo link analysis and rewriting match standards-mode message output', () => {
+  const body = '<a>skip</a><p><a href="https://evil.example/">paypal.com<table><tr><td> more</td></tr></table></a></p><a href="https://evil.example/next">example.com</a>';
+  const links = phishingLinks(body);
+  assert.deepEqual(links.map(l => [l.Index, l.Text]), [[0, 'skip'], [1, 'paypal.com'], [2, 'example.com']]);
+  const result = rewritePhishingLinks(body, 42, [1, 2], '/');
+  const rendered = new JSDOM('<!DOCTYPE html>' + result).window.document;
+  assert.equal(rendered.compatMode, 'CSS1Compat');
+  assert.deepEqual(Array.from(rendered.querySelectorAll('a'), a => [a.textContent, a.getAttribute('href')]),
+    [['skip', null], ['paypal.com', '/#/link/42/1'], ['example.com', '/#/link/42/2']]);
+});

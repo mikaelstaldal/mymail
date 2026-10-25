@@ -17,7 +17,6 @@ import (
 	"github.com/mikaelstaldal/mymail/internal/api"
 	"github.com/mikaelstaldal/mymail/internal/attachmentname"
 	"github.com/mikaelstaldal/mymail/internal/model"
-	"github.com/mikaelstaldal/mymail/internal/sanitize"
 	"github.com/mikaelstaldal/mymail/internal/senderauth"
 	"golang.org/x/net/html"
 	"golang.org/x/net/idna"
@@ -534,7 +533,7 @@ type Link struct {
 // anchors (including those without href), matching the confirmation-page API.
 func Links(body string) []Link {
 	// Bodies stored before ingest bounded formatting can still amplify.
-	doc, err := html.Parse(strings.NewReader(sanitize.BoundFormatting(body)))
+	doc, err := parseBody(body)
 	if err != nil {
 		// x/net/html bounds its open-element stack at 512. A deeply nested
 		// message must not hide all its links merely by exceeding that bound.

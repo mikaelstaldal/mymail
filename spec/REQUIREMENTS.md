@@ -1831,6 +1831,10 @@ The route addresses a stored message and link index, never a destination paramet
 it resolves through the authenticated message-detail API and its folder grants.
 Body links are rewritten only when served; stored HTML, raw mail, replies and
 forwards retain their original links. The browser demo follows the same rules.
+Link analysis and rewriting use the same standards-mode DOM parser, matching
+the message iframe for malformed paragraph/table nesting. Documents exceeding
+the parser depth limit use a tokenizer fallback; that fallback does not guarantee
+browser-equivalent anchor text or indices.
 
 ### Phishing signals in the web UI
 
