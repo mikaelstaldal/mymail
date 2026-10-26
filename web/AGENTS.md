@@ -1,5 +1,14 @@
 # MyMail — Web UI
 
+## Theme preference revision
+
+`../mysuite/spec/sidebar-footer.md` (current scope and §7) now requires Settings as the only
+sidebar footer control and Auto/Light/Dark in Settings, with Auto as the default. This supersedes
+older descriptions below of the footer pair, theme toggle, and stacked labels. Keep the Settings
+CSS pins and geometry. Resolve Auto through `prefers-color-scheme` and listen for live changes;
+never store its resolved light/dark palette as an explicit preference. Theme changes must notify
+content renderers as well as update CSS. `e2e/tests/theme.spec.ts` covers preference behavior.
+
 Instructions for working under `web/`: the TypeScript sources in `web/ts/` and the embedded assets in
 `web/static/`. The repo-root `AGENTS.md` is always loaded as well and covers everything else — project
 overview, architecture, the Go backend, the database, the REST API, demo mode and the sanitization
@@ -19,7 +28,7 @@ map before assuming an edit below is safe.
 
 ## The sidebar footer is governed from outside this repo
 
-The rule for `.sidebar-theme-toggle, .sidebar-settings-link` in `web/static/app.css` looks like
+The rule for `.sidebar-settings-link` in `web/static/app.css` looks like
 ordinary CSS with a verbose comment. Every declaration in it is load-bearing, and the contract is
 `../mysuite/spec/sidebar-footer.md`. Each of the following is a plausible tidy-up that breaks the
 three apps' consistency:
@@ -28,23 +37,18 @@ three apps' consistency:
   the value in all three repos. The rest of this stylesheet uses `0.8rem`, so the canonical spelling
   looks like the odd one out — and any formatter would "fix" it unprompted.
 - **Deleting `flex-shrink: 0`, `text-align: center`, `font-weight: 400` or `font-style: normal` as
-  redundant.** They are no-ops *today*, pinned because the two controls reach the same values by
-  different routes: the toggle is a `<button>` taking them from the UA stylesheet, Settings is an
-  `<a>` inheriting them from `body`.
-- **Adding `font-weight`, `font-style` or `font` to a base `button` rule.** That would move the
-  toggle and not the anchor — a divergence inside one app, between two controls 6px apart. The class
-  selector outranks a bare `button` rule, so the pin above is what makes this harmless: this item is
-  the reason that one exists, not a separate risk.
+  redundant.** Settings is an anchor inheriting typography and alignment from `body`; explicit
+  pins keep it aligned with the sibling apps' buttons when inherited styles change.
 - **Restoring `outline: none` on their `:focus-visible`,** or adding a
   `@media (forced-colors: active)` block containing `outline: revert`. Both silently undo a WCAG
   1.4.11 fix; the second looks like it is protecting it.
-- **Removing `--focus-ring` as unused.** These two controls no longer use it, but many other rules
+- **Removing `--focus-ring` as unused.** Settings no longer uses it, but many other rules
   still do.
 - **Re-adding `class="folder-icon"` to the two footer icons.** It dims them to `opacity: 0.85`; the
   contract wants full opacity.
 - **Changing `.sidebar-footer`'s padding.** It is not spacing — it *is* the buttons' (8, 8) position
   on screen, and below 4px it starts cropping the focus outline.
-- **Folding the pair into a generic icon-button class**, or renaming either selector.
+- **Folding Settings into a generic icon-button class**, or renaming its selector.
 - **Retuning `--surface`.** It looks like an ordinary theme colour — it also feeds `--topbar-bg`,
   `--surface-bg` and `.btn-ghost` — but the sidebar paints it, so it is the colour behind these two
   controls, and the contract records that colour per app as a literal (`#ffffff` light, `#1f2937`

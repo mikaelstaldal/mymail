@@ -2,7 +2,7 @@ import { mailtoHandlerUrl } from '../../util/mailto.js';
 import { useState, useEffect } from 'preact/hooks';
 import { getMycalUrl, getWrapColumn, WRAP_COLUMN_KEY, isDemo } from '../../util/config.js';
 import { normalizeWrapColumn, WRAP_COLUMN, WRAP_OFF, MAX_WRAP_COLUMN } from '../../util/wrap.js';
-import { getTheme, onThemeChange, setTheme } from '../../util/theme.js';
+import { getThemePreference, setTheme, type ThemePreference } from '../../util/theme.js';
 
 type Density = 'compact' | 'normal' | 'relaxed';
 type BodyView = 'html' | 'text';
@@ -24,7 +24,7 @@ export function Preferences() {
       setMailtoMessage('Your browser blocked registration. Check its protocol handler settings.');
     }
   }
-  const [darkMode, setDarkMode] = useState(() => getTheme() === 'dark');
+  const [themePreference, setThemePreference] = useState(getThemePreference);
   const [density, setDensity] = useState<Density>(
     () => (localStorage.getItem('density') as Density | null) ?? 'normal',
   );
@@ -39,10 +39,6 @@ export function Preferences() {
   // stored is normalised. Blur then snaps the field to the column in effect.
   const [wrapColumn, setWrapColumn] = useState(() => String(getWrapColumn()));
 
-  // The sidebar carries the same toggle, so follow it rather than going stale
-  // while this tab is open.
-  useEffect(() => onThemeChange(t => setDarkMode(t === 'dark')), []);
-
   useEffect(() => {
     // Auto-disable if notification permission was revoked since last visit
     if (
@@ -54,11 +50,6 @@ export function Preferences() {
       localStorage.setItem('notificationsEnabled', 'false');
     }
   }, []);
-
-  function toggleDarkMode(value: boolean) {
-    setDarkMode(value);
-    setTheme(value ? 'dark' : 'light');
-  }
 
   function changeDensity(value: Density) {
     setDensity(value);
@@ -138,17 +129,18 @@ export function Preferences() {
 
       <div class="pref-row">
         <div class="pref-row-info">
-          <div class="pref-label">Dark Mode</div>
-          <div class="pref-description">Switch to a dark color scheme.</div>
+          <label class="pref-label" for="theme-preference">Theme</label>
+          <div class="pref-description">Auto follows your browser's color scheme.</div>
         </div>
-        <label class="pref-toggle" aria-label="Toggle dark mode">
-          <input
-            type="checkbox"
-            checked={darkMode}
-            onChange={e => toggleDarkMode((e.target as HTMLInputElement).checked)}
-          />
-          <span class="pref-toggle-track" />
-        </label>
+        <select id="theme-preference" value={themePreference} onChange={e => {
+          const value = (e.target as HTMLSelectElement).value as ThemePreference;
+          setTheme(value);
+          setThemePreference(value);
+        }}>
+          <option value="auto">Auto</option>
+          <option value="light">Light</option>
+          <option value="dark">Dark</option>
+        </select>
       </div>
 
       <div class="pref-row">

@@ -1,43 +1,45 @@
-// Light/dark theme: the single source of truth for the app's runtime theme,
-// mirroring MyNotes' web/ts/util/theme.ts. The chosen value is persisted in
-// localStorage under `darkMode` — the key the Preferences tab has always used,
-// so an existing preference carries over — and applied to the document root as
-// `data-theme`, which app.css keys every colour off. Light is the default.
-
+// Implements ../mysuite/spec/sidebar-footer.md: preference and resolved theme are distinct.
 export type Theme = 'light' | 'dark';
+export type ThemePreference = 'auto' | Theme;
 
-const STORAGE_KEY = 'darkMode';
-
-// Fired on `document` whenever the theme changes. Two controls expose the same
-// preference — the sidebar's toggle button and the switch in Preferences — and
-// either may be mounted while the other is used, so both listen rather than
-// reading localStorage once and drifting out of step.
 const THEME_EVENT = 'mymail-themechange';
+const browserTheme = typeof window.matchMedia === 'function'
+  ? window.matchMedia('(prefers-color-scheme: dark)') : null;
+
+export function getThemePreference(): ThemePreference {
+  const stored = localStorage.getItem('theme');
+  if (stored === 'auto' || stored === 'light' || stored === 'dark') return stored;
+  if (stored !== null) return 'auto';
+  // Preserve explicit preferences from before the three-way selector.
+  const legacy = localStorage.getItem('darkMode');
+  return legacy === 'true' ? 'dark' : legacy === 'false' ? 'light' : 'auto';
+}
 
 export function getTheme(): Theme {
-  return localStorage.getItem(STORAGE_KEY) === 'true' ? 'dark' : 'light';
+  const preference = getThemePreference();
+  return preference === 'auto' ? (browserTheme?.matches ? 'dark' : 'light') : preference;
 }
 
-/** Reflect a theme on the document root; app.css keys every colour off this. */
 export function applyTheme(theme: Theme): void {
   document.documentElement.dataset.theme = theme;
+  document.documentElement.style.colorScheme = theme;
 }
 
-/** Persist, apply, and notify subscribers. */
-export function setTheme(theme: Theme): void {
-  localStorage.setItem(STORAGE_KEY, String(theme === 'dark'));
+function updateTheme(): void {
+  const theme = getTheme();
   applyTheme(theme);
   document.dispatchEvent(new CustomEvent<Theme>(THEME_EVENT, { detail: theme }));
 }
 
-/** Flip between light and dark, returning the new theme. */
-export function toggleTheme(): Theme {
-  const next: Theme = getTheme() === 'dark' ? 'light' : 'dark';
-  setTheme(next);
-  return next;
+export function setTheme(preference: ThemePreference): void {
+  localStorage.setItem('theme', preference);
+  updateTheme();
 }
 
-/** Subscribe to theme changes; returns an unsubscribe function. */
+browserTheme?.addEventListener('change', () => {
+  if (getThemePreference() === 'auto') updateTheme();
+});
+
 export function onThemeChange(cb: (theme: Theme) => void): () => void {
   const handler = (e: Event) => cb((e as CustomEvent<Theme>).detail);
   document.addEventListener(THEME_EVENT, handler);

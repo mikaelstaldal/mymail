@@ -1,5 +1,13 @@
 # MyMail — Functional Requirements
 
+## Theme preference (current behavior)
+
+The shared `../mysuite/spec/sidebar-footer.md` contract places only Settings in the sidebar
+footer. Settings offers Theme: Auto, Light, Dark; Auto is the default and follows the browser's
+`prefers-color-scheme` both at startup and live. Explicit choices override the browser, persist
+locally, and existing explicit preferences are retained. Demo builds also offer this setting.
+This supersedes older descriptions below of a sidebar theme toggle or two footer controls.
+
 A self-hosted personal (single-user) email client with a backend, storage, REST API, and embedded web UI.
 Designed to run on a Linux server alongside a mail system such as Postfix.
 
@@ -1376,8 +1384,8 @@ Hovering a folder in the sidebar shows a tooltip with its slug and numeric id, e
 
 10. **Contact management** — Paginated list with add/edit/delete.
 
-11. **Preferences** — Client-side display preferences: dark mode toggle (the same preference the sidebar's
-    light/dark button carries; either control moves the other), message list density (Compact/Normal/Relaxed),
+11. **Preferences** — Client-side display preferences: Theme (Auto/Light/Dark; Auto follows the browser),
+    message list density (Compact/Normal/Relaxed),
     default body view (HTML/Plain text), browser notifications toggle, compose line width (the column composing wraps
     at, or `0` to wrap nothing — see **Compose View → Line breaks**).
 
@@ -1398,12 +1406,12 @@ Opening a link alone neither saves a draft nor sends mail; the ordinary compose 
 
 ### Settings Navigation
 
-The sidebar footer holds two controls: a light/dark mode button, and — to its right — a gear icon that opens
-`/#/settings`.
+The sidebar footer holds Settings, with a gear icon and text, opening `/#/settings`.
+Theme selection is available in Settings → Preferences, defaulting to Auto.
 
-**These two are a shared MySuite contract, not MyMail's to define.** MyCal, MyNotes and MyMail must render them
+**Settings is a shared MySuite contract, not MyMail's to define.** MyCal, MyNotes and MyMail must render it
 identically, so that someone with all three open in browser tabs sees nothing move when switching between them.
-Their geometry, colours, hover and focus treatment, the width-stable label, and their position on screen are
+Its geometry, colours, hover and focus treatment, and position on screen are
 specified in **`spec/sidebar-footer.md` in the `mysuite` repository** (`../mysuite`, alongside this one —
 <https://github.com/mikaelstaldal/mysuite>; referenced by path because that is what resolves with both
 checkouts side by side). **Changing any of this is a change in all three repositories.** The
@@ -1420,14 +1428,13 @@ What is MyMail's own, and stays here:
   three either way. Tracked in the contract's open items, to be settled across all three rather than here.
 - The footer separator resolves through **`--sidebar-footer-border`**, a MyMail-local alias for `--border`, so the
   rule does not reach past the sidebar's token layer. Its value is the contract's; the indirection is not.
-- **`--focus-ring` is still MyMail's focus token** and is used by many other rules. These two controls simply stop
-  using it; the token stays.
+- **`--focus-ring` is still MyMail's focus token** and is used by many other rules.
+  Settings does not use it; the token stays.
 - The sidebar column is **`13.75rem`**, not a pixel width: the buttons are sized in `rem`, so a fixed column would
   let a reader's larger browser font grow them out of it — WCAG 1.4.4 (Resize Text). At the default root that
-  leaves **203px** of content box for the pair, which is MyMail's own budget and the reason a wider label does not
-  fit (see `Sidebar.tsx`).
-- The mode button writes the same stored preference as the Preferences tab's dark mode switch; either control
-  moves the other.
+  leaves **203px** of content box for Settings, which remains content-sized.
+- Theme uses Auto/Light/Dark in Preferences, persisted locally. Auto follows live browser preference changes;
+  explicit Light or Dark overrides them.
 
 The Settings page itself uses a tabbed layout:
 
@@ -1538,7 +1545,7 @@ and the feature degrades silently (polling continues; no browser notifications a
 
 - Selected folder
 - Compose draft state (JSON with all field values, draft `id`, and `savedAt` timestamp)
-- Dark mode toggle (applied as `data-theme` on `<html>`, `"light"` or `"dark"`)
+- Theme selector: Auto (default), Light, Dark; resolved as `data-theme` on `<html>`
 - Message list density preference
 - Notification permission state (cached)
 - Preferred body view (`"html"` or `"text"`)

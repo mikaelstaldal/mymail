@@ -347,12 +347,6 @@ html, body {
   gap: 6px;
 }
 
-/* Both words stacked in one grid cell: the cell is as wide as the longer of
-   them, so the button's width does not change when the theme is toggled. */
-.sidebar-theme-label { display: grid; }
-.sidebar-theme-label > span { grid-area: 1 / 1; visibility: hidden; }
-.sidebar-theme-label > .is-shown { visibility: visible; }
-
 /* Outlined, and geometrically identical to the same pair in MyCal and MyNotes:
    the three apps share one spec for this footer, so the buttons must measure the
    same in all of them. It is `spec/sidebar-footer.md` in the sibling `mysuite`
@@ -379,7 +373,6 @@ html, body {
    copy of a number that lives in another repo is a copy that goes stale.
    Only this pair is outlined; .sidebar-reload-btn stays a ghost button, being an
    icon-only affordance in the header rather than one of the two the spec covers. */
-.sidebar-theme-toggle,
 .sidebar-settings-link {
   display: inline-flex;
   align-items: center;
@@ -422,7 +415,6 @@ html, body {
    themes, or hovering erases the outline: in the dark theme --border and
    --hover-bg are the same #374151, so keeping --border here would fill the
    button with its own border colour. --text-faint is distinct in both. */
-.sidebar-theme-toggle:hover,
 .sidebar-settings-link:hover {
   background: var(--sidebar-hover);
   border-color: var(--text-faint);
@@ -457,7 +449,6 @@ html, body {
    pair is what the shared MySuite spec covers; fixing the rest is not a
    find-replace, since several of those are inputs in tight containers where a 4px
    outward outline needs the same clearance check this rule got. */
-.sidebar-theme-toggle:focus-visible,
 .sidebar-settings-link:focus-visible {
   outline: 2px solid var(--primary);
   outline-offset: 2px;

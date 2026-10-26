@@ -18,7 +18,7 @@ because relative links resolve with the checkouts side by side, which its cross-
 `../mysuite/AGENTS.md` before changing anything it covers, and make the change there first: **changing any of it
 is a change in all three repositories**, however local the edit looks from here. Currently binding:
 
-- `spec/sidebar-footer.md` — the theme toggle and Settings button in the sidebar footer.
+- `spec/sidebar-footer.md` — Settings in the sidebar footer and Auto/Light/Dark theme preferences.
 - `spec/app-logo.md` — the logo badge in the top left, and the mark inside it.
 - `spec/app-name-label.md` — the app name beside that badge: its font, size and placement. It
   **supersedes** `app-logo.md` §2, which had put the label out of scope while MyNotes' top-left was

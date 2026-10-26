@@ -128,18 +128,17 @@ test.describe('App logo and app-name label contracts', () => {
   const HEADER = '.sidebar-header';
 
   test.beforeEach(async ({ page }) => {
+    await page.emulateMedia({ colorScheme: 'light' });
     await page.goto('/');
     // A selector that matches nothing returns a falsy value, and a falsy value
     // compared against an expectation frequently reads as a pass.
     await expect(page.locator(BADGE)).toBeVisible();
-    // State the starting theme rather than assuming it: the dark-mode tests
-    // below click "Switch to dark mode" and would report only "element not
-    // found" if the app had started dark.
+    // Pin the initial browser preference independently of the test host.
     await expect(page.locator('html')).toHaveAttribute('data-theme', 'light');
   });
 
   const darkMode = async (page: Page) => {
-    await page.getByRole('button', { name: 'Switch to dark mode' }).click();
+    await page.emulateMedia({ colorScheme: 'dark' });
     await expect(page.locator('html[data-theme="dark"]')).toHaveCount(1);
   };
 
