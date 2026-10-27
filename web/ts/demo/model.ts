@@ -190,7 +190,15 @@ interface PendingReply {
  * excluded — they are far larger and are read one at a time — so editing a
  * draft never rewrites the files hanging off it.
  */
+interface DemoBlockedSender {
+  id: number;
+  address: string;
+  created_at: string;
+  source_message_id: number | null;
+}
+
 interface DemoState {
+  blockedSenders: DemoBlockedSender[];
   sentTo?: string[];
   nextMessageId: number;
   nextAttachmentId: number;

@@ -166,8 +166,9 @@ function applyFilters(
   msg: { fromAddr: string; toAddr: string; ccAddr: string; subject: string },
   filters: DemoFilter[],
   folderIds: Set<number>,
+  initialFolderId = FOLDER_INBOX,
 ): FilterOutcome {
-  let folderId = FOLDER_INBOX;
+  let folderId = initialFolderId;
   let markRead = false;
   for (const filter of filters) {
     if (!filterMatches(msg, filter)) continue;

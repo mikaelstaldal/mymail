@@ -36,6 +36,12 @@ var migrations = [][]string{
 	// and so failed every listing containing them. Fall back to delivery time.
 	{`UPDATE messages SET date = created_at WHERE date NOT GLOB '[0-9][0-9][0-9][0-9]-*'`},
 	schemaV14(),
+	{`CREATE TABLE blocked_senders (
+		id INTEGER PRIMARY KEY,
+		address TEXT NOT NULL UNIQUE,
+		created_at TEXT NOT NULL,
+		source_message_id INTEGER
+	)`},
 }
 
 // OpenDB opens the SQLite database at path, enables foreign keys, sets the

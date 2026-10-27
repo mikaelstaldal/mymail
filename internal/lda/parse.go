@@ -102,14 +102,8 @@ func ParseMessage(raw []byte) (*model.ParsedMessage, error) {
 	fromFields := senderauth.Fields(msg.Header, "From")
 	fromAddr := decodeFromFields(fromFields)
 	var fromAddresses []string
-	// Ambiguous or malformed From fields must not trigger sender routing.
-	if len(fromFields) == 1 {
-		parser := mail.AddressParser{WordDecoder: dec}
-		if addresses, err := parser.ParseList(fromFields[0]); err == nil && len(addresses) == 1 {
-			for _, address := range addresses {
-				fromAddresses = append(fromAddresses, address.Address)
-			}
-		}
+	if address := senderauth.SingleFrom(msg.Header, dec); address != "" {
+		fromAddresses = append(fromAddresses, address)
 	}
 	toAddr := service.DecodeAddressHeader(msg.Header.Get("To"))
 	ccAddr := service.DecodeAddressHeader(msg.Header.Get("Cc"))

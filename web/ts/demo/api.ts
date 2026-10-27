@@ -335,6 +335,7 @@ function deliverDueReplies(state: DemoState, now: number): boolean {
       { fromAddr: reply.fromAddr, toAddr: reply.toAddr, ccAddr: '', subject: reply.subject },
       state.filters,
       folderIds,
+      state.blockedSenders.some(b => b.address === blockedSenderAddress(reply.fromAddr)) ? FOLDER_JUNK : FOLDER_INBOX,
     );
     if (outcome.folderId === null) continue; // a `drop` filter matched
 
@@ -1341,6 +1342,34 @@ async function cancelSnooze(state: DemoState, id: number): Promise<Response> {
   return jsonResponse(200, { id: msg.id, folder_id: msg.folderId });
 }
 
+/** Mirrors repository.SenderAddress (one parsed mailbox, ASCII fold only). */
+function blockedSenderAddress(from: string): string {
+  try {
+    const addresses = parseAddressList(from);
+    return addresses.length === 1 ? senderASCIILower(addresses[0].address) : '';
+  } catch { return ''; }
+}
+
+/** Mirrors repository.ownAddress. */
+function ownBlockedAddress(state: DemoState, address: string): boolean {
+  return state.identities.some(i => foldAddress(i.address) === foldAddress(address));
+}
+
+/** Mirrors repository.removeIdentityBlocks, including Unicode identity equivalence. */
+function removeIdentityBlocks(state: DemoState, address: string): void {
+  state.blockedSenders = state.blockedSenders.filter(b => foldAddress(b.address) !== address);
+}
+
+/** Mirrors repository.addBlocked; keeps the original source on duplicates. */
+function addBlockedSender(state: DemoState, address: string, source: number | null): DemoBlockedSender | undefined {
+  if (state.blockedSenders.some(b => b.address === address)) return undefined;
+  const row = { id: Math.max(0, ...state.blockedSenders.map(b => b.id)) + 1,
+    address, created_at: nowTimestamp(), source_message_id: source };
+  state.blockedSenders.push(row);
+  return row;
+}
+
+/** Mirrors repository.MessageRepository.markJunk. */
 async function markJunk(state: DemoState, id: number): Promise<Response> {
   const msg = findMessage(state, id);
   if ([FOLDER_DRAFTS, FOLDER_SCHEDULED, FOLDER_SNOOZED, FOLDER_JUNK].includes(msg.folderId)) {
@@ -1349,18 +1378,58 @@ async function markJunk(state: DemoState, id: number): Promise<Response> {
   msg.folderId = FOLDER_JUNK;
   msg.read = true;
   msg.updatedAt = nowTimestamp();
+  const address = blockedSenderAddress(msg.fromAddr);
+  const added = address && !ownBlockedAddress(state, address) ? addBlockedSender(state, address, msg.id) : undefined;
   await saveState(state);
-  return jsonResponse(200, { id: msg.id, folder_id: msg.folderId });
+  return jsonResponse(200, { id: msg.id, folder_id: msg.folderId, blocked_sender: added?.address });
 }
 
+/** Mirrors repository.MessageRepository.markJunk for the undo action. */
 async function markNotJunk(state: DemoState, id: number): Promise<Response> {
   const msg = findMessage(state, id);
   if (msg.folderId !== FOLDER_JUNK) throw validationError('message is not in junk folder');
   msg.folderId = FOLDER_INBOX;
   msg.read = false;
   msg.updatedAt = nowTimestamp();
+  const address = blockedSenderAddress(msg.fromAddr);
+  const removed = state.blockedSenders.some(b => b.address === address);
+  state.blockedSenders = state.blockedSenders.filter(b => b.address !== address);
   await saveState(state);
-  return jsonResponse(200, { id: msg.id, folder_id: msg.folderId });
+  return jsonResponse(200, { id: msg.id, folder_id: msg.folderId, blocked_sender: removed ? address : undefined });
+}
+
+/** Mirrors handler.BlockedSendersGet and BlockedSenderRepository.List. */
+function listBlockedSenders(state: DemoState, url: URL): Response {
+  const q = url.searchParams.get('q') ?? '';
+  if (runeLength(q) > 500) throw validationError('q must not exceed 500 characters');
+  const { limit, offset } = pagination(url);
+  const items = state.blockedSenders.filter(b => b.address.includes(senderASCIILower(q)))
+    .sort((a, b) => a.address < b.address ? -1 : a.address > b.address ? 1 : 0);
+  return jsonResponse(200, { total: items.length, items: items.slice(offset, offset + limit) });
+}
+
+/** Mirrors handler.BlockedSendersPost and BlockedSenderRepository.Add. */
+async function createBlockedSender(state: DemoState, body: Record<string, unknown>): Promise<Response> {
+  const raw = (optString(body, 'address') ?? '').trim();
+  if (runeLength(raw) > MAX_ADDRESS_LEN) throw validationError('address must not exceed 254 characters');
+  let address: string;
+  try {
+    const parsed = parseAddress(raw);
+    if (parsed.name !== '') throw new Error();
+    address = senderASCIILower(parsed.address);
+  } catch { throw validationError('invalid address'); }
+  if (ownBlockedAddress(state, address)) throw validationError('cannot block own identity');
+  const added = addBlockedSender(state, address, null);
+  await saveState(state);
+  return jsonResponse(added ? 201 : 200, added ?? state.blockedSenders.find(b => b.address === address));
+}
+
+/** Mirrors handler.BlockedSendersIDDelete. */
+async function deleteBlockedSender(state: DemoState, id: number): Promise<Response> {
+  if (!state.blockedSenders.some(b => b.id === id)) throw notFoundError('blocked sender not found');
+  state.blockedSenders = state.blockedSenders.filter(b => b.id !== id);
+  await saveState(state);
+  return noContentResponse();
 }
 
 async function serveAttachment(state: DemoState, id: number): Promise<Response> {
@@ -1706,6 +1775,7 @@ async function createIdentity(state: DemoState, body: Record<string, unknown>): 
   if (identity.isDefault) for (const other of state.identities) other.isDefault = false;
 
   state.identities.push(identity);
+  removeIdentityBlocks(state, identity.address);
   await saveState(state);
   return jsonResponse(201, toIdentityDTO(identity));
 }
@@ -1756,6 +1826,7 @@ async function updateIdentity(state: DemoState, id: number, body: Record<string,
   }
   identity.name = replacement.name;
   identity.address = replacement.address;
+  removeIdentityBlocks(state, identity.address);
   identity.position = replacement.position;
   identity.signature = replacement.signature;
 
@@ -2173,6 +2244,15 @@ async function route(
       if (segments.length === 1) {
         if (method === 'GET') return jsonResponse(200, toSpamFilterDTO(state.spamFilter));
         if (method === 'PUT') return updateSpamFilter(state, await readJSON(request));
+      }
+      break;
+
+    case 'blocked-senders':
+      if (segments.length === 1) {
+        if (method === 'GET') return listBlockedSenders(state, url);
+        if (method === 'POST') return createBlockedSender(state, await readJSON(request));
+      } else if (segments.length === 2 && method === 'DELETE') {
+        return deleteBlockedSender(state, pathId(second));
       }
       break;
 

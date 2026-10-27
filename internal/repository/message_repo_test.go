@@ -412,12 +412,16 @@ func TestMarkJunkAndNotJunk(t *testing.T) {
 
 	id, _ := r.InsertMessage(ctx, makeMsg(1, "junk test"))
 
-	got, err := r.MarkJunk(ctx, id)
+	_, _, err := r.MarkJunkWithSender(ctx, id, true)
+	require.NoError(t, err)
+	got, err := r.GetMessageDetail(ctx, id)
 	require.NoError(t, err)
 	assert.Equal(t, 7, got.FolderID)
 	assert.True(t, got.Read)
 
-	got2, err := r.MarkNotJunk(ctx, id)
+	_, _, err = r.MarkJunkWithSender(ctx, id, false)
+	require.NoError(t, err)
+	got2, err := r.GetMessageDetail(ctx, id)
 	require.NoError(t, err)
 	assert.Equal(t, 1, got2.FolderID)
 	assert.False(t, got2.Read)

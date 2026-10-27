@@ -101,6 +101,22 @@ func runCore(db *sql.DB, rawBytes []byte) int {
 		folderID = 7
 	}
 
+	// Phase 1: blocking is independent of the configurable spam detector.
+	if len(pm.FromAddresses) == 1 {
+		var blocked bool
+		if err := withRetry(func() error {
+			var err error
+			blocked, err = repository.NewBlockedSenderRepository(db).IsBlocked(ctx, pm.FromAddresses[0])
+			return err
+		}); err != nil {
+			log.Printf("lda: blocked sender lookup: %v", err)
+			return 75
+		}
+		if blocked {
+			folderID = 7
+		}
+	}
+
 	filterRepo := repository.NewFilterRepository(db)
 	var filters []oas.Filter
 	if err := withRetry(func() error {

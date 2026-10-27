@@ -3,6 +3,7 @@ import { Identities } from './settings/Identities.js';
 import { Folders } from './settings/Folders.js';
 import { Filters } from './settings/Filters.js';
 import { SpamFilter } from './settings/SpamFilter.js';
+import { BlockedSenders } from './settings/BlockedSenders.js';
 import { Contacts } from './settings/Contacts.js';
 import { Preferences } from './settings/Preferences.js';
 import { ApiTokens } from './settings/ApiTokens.js';
@@ -18,6 +19,7 @@ const TABS = [
   { slug: 'folders', label: 'Folders' },
   { slug: 'filters', label: 'Filters' },
   { slug: 'spam', label: 'Spam Filter' },
+  { slug: 'blocked-senders', label: 'Blocked senders' },
   { slug: 'contacts', label: 'Contacts' },
   { slug: 'preferences', label: 'Preferences' },
   { slug: 'api-tokens', label: 'API Tokens' },
@@ -44,6 +46,7 @@ export function SettingsPage({ tab, senderMessageId }: SettingsPageProps) {
         {activeTab === 'folders' && <Folders />}
         {activeTab === 'filters' && <Filters />}
         {activeTab === 'spam' && <SpamFilter />}
+        {activeTab === 'blocked-senders' && <BlockedSenders />}
         {activeTab === 'contacts' && <Contacts key={senderMessageId ?? 'list'} senderMessageId={senderMessageId} />}
         {activeTab === 'preferences' && <Preferences />}
         {activeTab === 'api-tokens' && !isDemo() && <ApiTokens />}

@@ -1218,53 +1218,6 @@ func (r *MessageRepository) CancelSnooze(ctx context.Context, id int64) (model.D
 	return r.GetMessageDetail(ctx, id)
 }
 
-// MarkJunk moves the message to Junk (folder_id=7) and marks it as read.
-// Returns ErrForbiddenFolder if the message is in Junk (7), Drafts (3), Scheduled (5), or Snoozed (6).
-// Returns ErrNotFound if the message does not exist.
-func (r *MessageRepository) MarkJunk(ctx context.Context, id int64) (model.DBMessage, error) {
-	var folderID int64
-	err := r.db.QueryRowContext(ctx, `SELECT folder_id FROM messages WHERE id = ?`, id).Scan(&folderID)
-	if errors.Is(err, sql.ErrNoRows) {
-		return model.DBMessage{}, ErrNotFound
-	}
-	if err != nil {
-		return model.DBMessage{}, err
-	}
-	switch folderID {
-	case 3, 5, 6, 7:
-		return model.DBMessage{}, ErrForbiddenFolder
-	}
-
-	_, err = r.db.ExecContext(ctx, `UPDATE messages SET folder_id = 7, read = 1 WHERE id = ?`, id)
-	if err != nil {
-		return model.DBMessage{}, err
-	}
-	return r.GetMessageDetail(ctx, id)
-}
-
-// MarkNotJunk moves the message from Junk to Inbox and marks it unread.
-// Returns ErrForbiddenFolder if the message is not in Junk (7).
-// Returns ErrNotFound if the message does not exist.
-func (r *MessageRepository) MarkNotJunk(ctx context.Context, id int64) (model.DBMessage, error) {
-	var folderID int64
-	err := r.db.QueryRowContext(ctx, `SELECT folder_id FROM messages WHERE id = ?`, id).Scan(&folderID)
-	if errors.Is(err, sql.ErrNoRows) {
-		return model.DBMessage{}, ErrNotFound
-	}
-	if err != nil {
-		return model.DBMessage{}, err
-	}
-	if folderID != 7 {
-		return model.DBMessage{}, ErrForbiddenFolder
-	}
-
-	_, err = r.db.ExecContext(ctx, `UPDATE messages SET folder_id = 1, read = 0 WHERE id = ?`, id)
-	if err != nil {
-		return model.DBMessage{}, err
-	}
-	return r.GetMessageDetail(ctx, id)
-}
-
 // searchTimeout bounds a single search query. Must stay below the HTTP
 // server's WriteTimeout (see main.go) so the query is cancelled and a clean
 // error returned before the connection write deadline trips.

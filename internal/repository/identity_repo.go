@@ -162,6 +162,10 @@ func (r *IdentityRepository) CreateIdentity(ctx context.Context, identity oas.Id
 
 	newID, _ := res.LastInsertId()
 
+	if err := removeIdentityBlocks(ctx, tx, identity.Address); err != nil {
+		return oas.Identity{}, err
+	}
+
 	if err := tx.Commit(); err != nil {
 		return oas.Identity{}, err
 	}
@@ -226,6 +230,10 @@ func (r *IdentityRepository) UpdateIdentity(ctx context.Context, id int64, ident
 		); err != nil {
 			return oas.Identity{}, err
 		}
+	}
+
+	if err := removeIdentityBlocks(ctx, tx, identity.Address); err != nil {
+		return oas.Identity{}, err
 	}
 
 	if err := tx.Commit(); err != nil {

@@ -71,12 +71,12 @@ func TestOpenDBAndInitSchema(t *testing.T) {
 	// Schema version must match the latest migration.
 	var v int
 	db.QueryRow("PRAGMA user_version").Scan(&v)
-	assert.Equal(t, 14, v, "user_version")
+	assert.Equal(t, 15, v, "user_version")
 
 	// All tables must exist.
 	tables := []string{
 		"folders", "messages", "attachments", "identities",
-		"contacts", "filters", "spam_filter_settings", "message_references", "api_tokens", "api_token_folders",
+		"blocked_senders", "contacts", "filters", "spam_filter_settings", "message_references", "api_tokens", "api_token_folders",
 	}
 	for _, tbl := range tables {
 		var name string
@@ -121,7 +121,7 @@ func TestOpenDBAndInitSchema(t *testing.T) {
 	err = InitSchema(db)
 	assert.NoError(t, err, "second InitSchema")
 	db.QueryRow("PRAGMA user_version").Scan(&v)
-	assert.Equal(t, 14, v, "user_version after second run")
+	assert.Equal(t, 15, v, "user_version after second run")
 
 	// Basic FK cascade: insert a message row then delete it; attachment should cascade.
 	_, err = db.Exec(`INSERT INTO folders(id,name,slug,position) VALUES(1,'Inbox','inbox',0)`)

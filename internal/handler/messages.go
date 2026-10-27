@@ -418,7 +418,7 @@ func (h *Handler) MessagesIDSnoozeDelete(ctx context.Context, params api.Message
 func (h *Handler) MessagesIDMarkJunkPost(ctx context.Context, params api.MessagesIDMarkJunkPostParams) (api.MessagesIDMarkJunkPostRes, error) {
 	id := int64(params.ID)
 
-	msg, err := h.messages.MarkJunk(ctx, id)
+	folder, address, err := h.messages.MarkJunkWithSender(ctx, id, true)
 	if errors.Is(err, repository.ErrNotFound) {
 		return &api.MessagesIDMarkJunkPostNotFound{Error: "message not found"}, nil
 	}
@@ -429,13 +429,17 @@ func (h *Handler) MessagesIDMarkJunkPost(ctx context.Context, params api.Message
 		return nil, err
 	}
 
-	return &api.MessagesIDMarkJunkPostOK{ID: msg.ID, FolderID: msg.FolderID}, nil
+	res := &api.MessagesIDMarkJunkPostOK{ID: int(id), FolderID: folder}
+	if address != "" {
+		res.BlockedSender.SetTo(address)
+	}
+	return res, nil
 }
 
 func (h *Handler) MessagesIDMarkNotJunkPost(ctx context.Context, params api.MessagesIDMarkNotJunkPostParams) (api.MessagesIDMarkNotJunkPostRes, error) {
 	id := int64(params.ID)
 
-	msg, err := h.messages.MarkNotJunk(ctx, id)
+	folder, address, err := h.messages.MarkJunkWithSender(ctx, id, false)
 	if errors.Is(err, repository.ErrNotFound) {
 		return &api.MessagesIDMarkNotJunkPostNotFound{Error: "message not found"}, nil
 	}
@@ -446,7 +450,11 @@ func (h *Handler) MessagesIDMarkNotJunkPost(ctx context.Context, params api.Mess
 		return nil, err
 	}
 
-	return &api.MessagesIDMarkNotJunkPostOK{ID: msg.ID, FolderID: msg.FolderID}, nil
+	res := &api.MessagesIDMarkNotJunkPostOK{ID: int(id), FolderID: folder}
+	if address != "" {
+		res.BlockedSender.SetTo(address)
+	}
+	return res, nil
 }
 
 func (h *Handler) AttachmentsIDGet(ctx context.Context, params api.AttachmentsIDGetParams) (api.AttachmentsIDGetRes, error) {

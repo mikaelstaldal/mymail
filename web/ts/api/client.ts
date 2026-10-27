@@ -198,10 +198,10 @@ export const api = {
       ),
 
     markJunk: (id: number) =>
-      request<{ id: number; folder_id: number }>('POST', `/messages/${id}/mark-junk`),
+      request<{ id: number; folder_id: number; blocked_sender?: string }>('POST', `/messages/${id}/mark-junk`),
 
     markNotJunk: (id: number) =>
-      request<{ id: number; folder_id: number }>('POST', `/messages/${id}/mark-not-junk`),
+      request<{ id: number; folder_id: number; blocked_sender?: string }>('POST', `/messages/${id}/mark-not-junk`),
 
     cancelSnooze: (id: number) =>
       request<{ id: number; folder_id: number }>('DELETE', `/messages/${id}/snooze`),
@@ -269,6 +269,19 @@ export const api = {
 
     update: (body: SpamFilterSettings) =>
       request<SpamFilterSettings>('PUT', '/spam-filter', body),
+  },
+
+  blockedSenders: {
+    list: (params: { q?: string; limit?: number; offset?: number } = {}) => {
+      const query = new URLSearchParams();
+      for (const [key, value] of Object.entries(params)) {
+        if (value !== undefined) query.set(key, String(value));
+      }
+      return request<{ total: number; items: components['schemas']['BlockedSender'][] }>(
+        'GET', `/blocked-senders?${query}`);
+    },
+    add: (address: string) => request<components['schemas']['BlockedSender']>('POST', '/blocked-senders', { address }),
+    remove: (id: number) => request<void>('DELETE', `/blocked-senders/${id}`),
   },
 
   contacts: {

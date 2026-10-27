@@ -453,6 +453,7 @@ function message(overrides) {
 /** A fresh store with the built-in folders, one identity, and `messages`. */
 function newState(messages = []) {
   return {
+    blockedSenders: [],
     nextMessageId: messages.reduce((max, m) => Math.max(max, m.id + 1), 1),
     nextAttachmentId: 1,
     nextFolderId: 100,
@@ -1754,4 +1755,87 @@ test('demo link analysis and rewriting match standards-mode message output', () 
   assert.equal(rendered.compatMode, 'CSS1Compat');
   assert.deepEqual(Array.from(rendered.querySelectorAll('a'), a => [a.textContent, a.getAttribute('href')]),
     [['skip', null], ['paypal.com', '/#/link/42/1'], ['example.com', '/#/link/42/2']]);
+});
+
+// Blocked senders mirror the API and Phase 1 delivery, with user filters applied afterwards.
+test('blocked senders API validates, preserves duplicates and supports literal search and delete', async () => {
+  const state = newState();
+  const first = await call(state, 'POST', '/blocked-senders', { address: 'ALICE@example.com' });
+  assert.equal(first.status, 201);
+  assert.equal(first.body.address, 'alice@example.com');
+  assert.equal(first.body.source_message_id, null);
+  const again = await call(state, 'POST', '/blocked-senders', { address: 'alice@example.com' });
+  assert.equal(again.status, 200);
+  assert.deepEqual(again.body, first.body);
+  for (const address of ['not email', 'Name <a@example.com>', 'demo@example.com', 'x'.repeat(255) + '@example.com']) {
+    assert.equal((await call(state, 'POST', '/blocked-senders', { address })).status, 400, address);
+  }
+  assert.equal((await call(state, 'GET', '/blocked-senders?q=ALICE')).body.total, 1);
+  assert.equal((await call(state, 'GET', '/blocked-senders?q=%25')).body.total, 0);
+  assert.equal((await call(state, 'GET', '/blocked-senders?q=' + 'a'.repeat(501))).status, 400);
+  assert.equal((await call(state, 'DELETE', `/blocked-senders/${first.body.id}`)).status, 204);
+  assert.equal((await call(state, 'DELETE', `/blocked-senders/${first.body.id}`)).status, 404);
+});
+
+test('mark junk blocks and not junk unblocks, without moving other messages', async () => {
+  const state = newState([message({ id: 1, fromAddr: 'Alice <ALICE@example.com>' }), message({ id: 2 })]);
+  const junk = await call(state, 'POST', '/messages/1/mark-junk');
+  assert.equal(junk.status, 200);
+  assert.equal(junk.body.blocked_sender, 'alice@example.com');
+  assert.equal(state.messages[1].folderId, 1);
+  assert.equal(state.blockedSenders[0].source_message_id, 1);
+  const undo = await call(state, 'POST', '/messages/1/mark-not-junk');
+  assert.equal(undo.body.blocked_sender, 'alice@example.com');
+  assert.deepEqual(state.blockedSenders, []);
+});
+
+test('junk actions skip own and ambiguous senders, and generic moves do not block', async () => {
+  for (const fromAddr of ['demo@example.com', 'alice@example.com, other@example.com', 'not email']) {
+    const state = newState([message({ id: 1, fromAddr })]);
+    const result = await call(state, 'POST', '/messages/1/mark-junk');
+    assert.equal(result.status, 200);
+    assert.equal(result.body.blocked_sender, undefined);
+    assert.deepEqual(state.blockedSenders, []);
+  }
+  const state = newState([message({ id: 1 })]);
+  assert.equal((await call(state, 'POST', '/messages/move', { ids: [1], folder_id: 7 })).status, 200);
+  assert.deepEqual(state.blockedSenders, []);
+});
+
+test('blocked auto-replies go to Junk before filters, skip contacts, and unblock restores Inbox', async () => {
+  for (const action of ['', 'move', 'drop']) {
+    const source = message({ id: 1, folderId: 2, fromAddr: 'demo@example.com', toAddr: 'alice@example.com' });
+    const state = newState([source]);
+    await call(state, 'POST', '/blocked-senders', { address: 'ALICE@example.com' });
+    if (action) state.filters = [{ id: 1, matchFrom: 'alice@example.com', matchTo: '', matchSubject: '', action, folderId: 1, stop: true }];
+    state.pendingReplies = [{ sourceMessageId: 1, dueAt: Date.now() - 1000 }];
+    await call(state, 'GET', '/folders');
+    if (action === 'drop') { assert.equal(state.messages.length, 1); continue; }
+    const reply = state.messages[1];
+    assert.equal(reply.folderId, action === 'move' ? 1 : 7);
+    if (action === '') {
+      assert.equal(state.contacts.length, 0);
+      await call(state, 'POST', `/messages/${reply.id}/mark-not-junk`);
+      state.pendingReplies = [{ sourceMessageId: 1, dueAt: Date.now() - 1000 }];
+      await call(state, 'GET', '/folders');
+      assert.equal(state.messages[2].folderId, 1);
+    }
+  }
+});
+
+test('own identities use Unicode identity equivalence and identity changes remove existing blocks', async () => {
+  const state = newState([message({ id: 1, folderId: 2, fromAddr: 'Me <ME@EXÄMPLE.SE>' })]);
+  assert.equal((await call(state, 'POST', '/identities', { address: 'me@exämple.se' })).status, 201);
+  assert.equal((await call(state, 'POST', '/blocked-senders', { address: 'ME@EXÄMPLE.SE' })).status, 400);
+  const junk = await call(state, 'POST', '/messages/1/mark-junk');
+  assert.equal(junk.status, 200);
+  assert.equal(junk.body.blocked_sender, undefined);
+  assert.equal(state.blockedSenders.length, 0);
+  assert.equal((await call(state, 'POST', '/blocked-senders', { address: 'SECOND@EXÄMPLE.SE' })).status, 201);
+  const second = await call(state, 'POST', '/identities', { address: 'second@exämple.se' });
+  assert.equal(second.status, 201);
+  assert.equal(state.blockedSenders.length, 0);
+  assert.equal((await call(state, 'POST', '/blocked-senders', { address: 'THIRD@EXÄMPLE.SE' })).status, 201);
+  assert.equal((await call(state, 'PUT', `/identities/${second.body.id}`, { address: 'third@exämple.se' })).status, 200);
+  assert.equal(state.blockedSenders.length, 0);
 });

@@ -109,6 +109,9 @@ async function loadState(): Promise<DemoState> {
   if (cachedState === null) {
     const stored = await readRecord<DemoState>(KV_STORE, STATE_KEY);
     cachedState = stored ?? (await seedStore());
+    // Upgrade the existing single-record store, mirroring schema migration 15.
+    // Like contacts and filters, blocked senders belong in this atomic state record.
+    cachedState.blockedSenders ??= [];
   }
   return cachedState;
 }
@@ -140,6 +143,7 @@ async function saveState(state: DemoState): Promise<void> {
 /** The state an unreachable seed document leaves behind: empty, but usable. */
 function emptyState(): DemoState {
   return {
+    blockedSenders: [],
     nextMessageId: 1,
     nextAttachmentId: 1,
     nextFolderId: FIRST_USER_FOLDER,

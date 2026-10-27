@@ -648,6 +648,21 @@ components:
           maxLength: 51200
       required: [name, address]
 
+    BlockedSender:
+      type: object
+      properties:
+        id:
+          type: integer
+        address:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+        source_message_id:
+          type: integer
+          nullable: true
+      required: [id, address, created_at, source_message_id]
+
     Contact:
       type: object
       properties:
@@ -1976,6 +1991,8 @@ paths:
         These checks are based on the current folder_id, not historical state. Marking a
         message in the Trash (id=4) or Sent (id=2) folder as junk is **permitted** — no 400 is
         returned for those source folders.
+        Blocks future deliveries from the single parsed From address, except the user's own identities.
+        Existing messages are unaffected; generic moves to Junk do not block. From is not authenticated.
       parameters:
         - name: id
           in: path
@@ -1992,6 +2009,9 @@ paths:
                 properties:
                   id:
                     type: integer
+                  blocked_sender:
+                    type: string
+                    description: Address blocked or unblocked by this action; absent if no entry changed.
                   folder_id:
                     type: integer
                 required: [id, folder_id]
@@ -2005,7 +2025,9 @@ paths:
   /messages/{id}/mark-not-junk:
     post:
       summary: Mark message as not junk
-      description: Moves the message from Junk to Inbox and marks it as unread. Returns 400 if not in Junk.
+      description: |
+        Moves the message from Junk to Inbox and marks it as unread. Returns 400 if not in Junk.
+        Removes the single parsed From address from blocked senders, if present.
       parameters:
         - name: id
           in: path
@@ -2022,6 +2044,9 @@ paths:
                 properties:
                   id:
                     type: integer
+                  blocked_sender:
+                    type: string
+                    description: Address blocked or unblocked by this action; absent if no entry changed.
                   folder_id:
                     type: integer
                 required: [id, folder_id]
@@ -2802,6 +2827,96 @@ paths:
           $ref: '#/components/responses/Default'
 
   # ── Contacts ───────────────────────────────────────────────────────────────
+
+  /blocked-senders:
+    get:
+      summary: List blocked senders
+      description: Exact sender addresses, ordered by address. From headers are not authenticated.
+      parameters:
+        - name: q
+          in: query
+          schema:
+            type: string
+            maxLength: 500
+          description: Case-insensitive substring filter on address.
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 50
+            maximum: 200
+        - name: offset
+          in: query
+          schema:
+            type: integer
+            default: 0
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  total:
+                    type: integer
+                  items:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/BlockedSender'
+                required: [total, items]
+        'default':
+          $ref: '#/components/responses/Default'
+    post:
+      summary: Block a sender
+      description: |
+        Block an exact mailbox address, stored ASCII-lowercased. A bare addr-spec is required.
+        Own identity addresses cannot be blocked. Future deliveries only; user filters can override Junk routing.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                address:
+                  type: string
+                  maxLength: 254
+              required: [address]
+      responses:
+        '200':
+          description: Already blocked
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BlockedSender'
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BlockedSender'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        'default':
+          $ref: '#/components/responses/Default'
+
+  /blocked-senders/{id}:
+    delete:
+      summary: Unblock a sender
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '204':
+          description: Deleted
+        '404':
+          $ref: '#/components/responses/NotFound'
+        'default':
+          $ref: '#/components/responses/Default'
 
   /contacts:
     get:

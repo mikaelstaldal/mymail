@@ -1,6 +1,6 @@
 -- Application-owned DDL from a freshly migrated database; see AGENTS.md.
 -- This omits seed rows and is not a replacement for mymail -init.
-PRAGMA user_version = 14;
+PRAGMA user_version = 15;
 
 CREATE INDEX idx_attachments_message_id ON attachments(message_id);
 
@@ -52,6 +52,13 @@ CREATE TABLE "attachments" (
 		content_type TEXT    NOT NULL,
 		size         INTEGER NOT NULL,
 		data         BLOB    NOT NULL
+	);
+
+CREATE TABLE blocked_senders (
+		id INTEGER PRIMARY KEY,
+		address TEXT NOT NULL UNIQUE,
+		created_at TEXT NOT NULL,
+		source_message_id INTEGER
 	);
 
 CREATE TABLE contacts (

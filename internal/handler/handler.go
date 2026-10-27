@@ -16,15 +16,16 @@ import (
 
 type Handler struct {
 	api.UnimplementedHandler
-	folders      *repository.FolderRepository
-	messages     *repository.MessageRepository
-	attachments  *repository.AttachmentRepository
-	drafts       *repository.DraftRepository
-	contacts     *repository.ContactRepository
-	identities   *repository.IdentityRepository
-	filters      *repository.FilterRepository
-	spamFilter   *repository.SpamFilterRepository
-	sendmailPath string
+	folders        *repository.FolderRepository
+	messages       *repository.MessageRepository
+	attachments    *repository.AttachmentRepository
+	drafts         *repository.DraftRepository
+	blockedSenders *repository.BlockedSenderRepository
+	contacts       *repository.ContactRepository
+	identities     *repository.IdentityRepository
+	filters        *repository.FilterRepository
+	spamFilter     *repository.SpamFilterRepository
+	sendmailPath   string
 }
 
 func New(
@@ -38,16 +39,21 @@ func New(
 	spamFilter *repository.SpamFilterRepository,
 	sendmailPath string,
 ) *Handler {
+	var blockedSenders *repository.BlockedSenderRepository
+	if messages != nil {
+		blockedSenders = messages.BlockedSenders()
+	}
 	return &Handler{
-		folders:      folders,
-		messages:     messages,
-		attachments:  attachments,
-		drafts:       drafts,
-		contacts:     contacts,
-		identities:   identities,
-		filters:      filters,
-		spamFilter:   spamFilter,
-		sendmailPath: sendmailPath,
+		folders:        folders,
+		messages:       messages,
+		attachments:    attachments,
+		drafts:         drafts,
+		contacts:       contacts,
+		blockedSenders: blockedSenders,
+		identities:     identities,
+		filters:        filters,
+		spamFilter:     spamFilter,
+		sendmailPath:   sendmailPath,
 	}
 }
 

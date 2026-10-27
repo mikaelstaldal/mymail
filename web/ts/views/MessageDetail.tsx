@@ -619,7 +619,8 @@ export function MessageDetail({ id, folders }: MessageDetailProps) {
     const sourceFolderId = msg.folder_id;
     setActionInFlight(true);
     try {
-      await api.messages.markJunk(msg.id);
+      const result = await api.messages.markJunk(msg.id);
+      if (result.blocked_sender) showToast(`Future mail from ${result.blocked_sender} goes to Junk`);
       navigateToSourceFolder(sourceFolderId);
     } catch (e) {
       showToast(e instanceof Error ? e.message : 'Failed to mark as junk');
@@ -631,7 +632,8 @@ export function MessageDetail({ id, folders }: MessageDetailProps) {
     if (!msg || actionInFlight) return;
     setActionInFlight(true);
     try {
-      await api.messages.markNotJunk(msg.id);
+      const result = await api.messages.markNotJunk(msg.id);
+      if (result.blocked_sender) showToast(`${result.blocked_sender} unblocked`);
       navigate('#/inbox');
     } catch (e) {
       showToast(e instanceof Error ? e.message : 'Failed to mark as not junk');

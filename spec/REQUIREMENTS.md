@@ -368,6 +368,32 @@ Existing filters that relied on display names or partial addresses must be updat
 - `drop` — discard the message entirely; nothing is stored. Dropped messages are logged at INFO level (envelope From and
   Message-ID) but are otherwise unrecoverable.
 
+### Blocked Senders
+
+Mark as junk moves the message to Junk, marks it read, and blocks future mail from its sender automatically.
+Not junk moves it to Inbox, marks it unread, and removes the sender's block. Neither action moves other existing mail.
+Generic moves or PATCH to Junk do not block senders.
+
+The dedicated blocked senders list stores unique, ASCII-lowercased exact mailbox addresses, never domains.
+Sender extraction follows `match_from`: exactly one parsed mailbox in exactly one From field; malformed or repeated
+From fields do not add or remove blocks. The user's own identity addresses cannot be added to the list, using
+identity address equivalence (including Unicode case folding). Adding or changing an identity removes matching blocks.
+Phase 1 delivery checks the list regardless of whether spam detection is enabled. Phase 2 user filters can override
+the Junk destination, and `drop` still drops. Junk delivery does not collect contacts.
+Import preserves its explicit target folder, bypassing both spam detection and blocked-sender routing.
+
+From headers are not authenticated: a forged From can cause a friend's address to be blocked. Not junk and
+Settings → Blocked senders provide the undo. Settings lists blocked addresses with substring search, pagination,
+an add-address field and a Remove action. Mark as junk and Not junk show the affected address in a toast when the
+list changes. This list does not create or reorder user filters.
+
+The REST API exposes `GET /blocked-senders` (`q`, `limit`, `offset`), `POST /blocked-senders` (`address`, returning
+201 for new entries and 200 for existing entries), and `DELETE /blocked-senders/{id}` (204 or 404).
+Rows include `id`, `address`, `created_at`, and nullable `source_message_id` (no foreign key: messages can be deleted).
+The junk-action responses optionally include `blocked_sender`, the address added or removed.
+These endpoints require full access and are excluded from the API-token and MCP surface.
+The browser demo mirrors this behavior, including blocked routing for generated replies.
+
 ### Spam Filter Settings
 
 A single global configuration:
@@ -528,7 +554,8 @@ checker hostname but do not perform authentication checks.
 
 **Phase 1 — Spam detection:**
 
-- If spam filter is enabled and the message is detected as spam, initial folder is Junk; otherwise Inbox.
+- If the sender is blocked, or the enabled spam filter detects spam, initial folder is Junk; otherwise Inbox.
+  Blocked-sender matching is independent of the spam filter enabled flag.
 
 **Phase 2 — User-defined filters:**
 
@@ -1506,11 +1533,13 @@ asked. The other bulk actions (Mark read, Mark unread, Move to) are not confirme
 
 **Junk folder:** The **Delete** button on a Junk message permanently deletes it immediately (no Trash step), consistent
 with `DELETE /folders/7/messages` bulk-delete semantics. Message detail shows a **Not junk** button (moves to Inbox and
-marks as unread — mirroring snooze-expiry behaviour so the message appears as new on return to Inbox) and standard Move
+marks as unread and unblocks its sender — mirroring snooze-expiry behaviour so the message appears as new on return
+to Inbox) and standard Move
 controls (allows moving to any folder directly). All other views show a **Mark as junk** button, **except** messages in
 Snoozed, Scheduled, or Drafts — for those the **Mark as junk** button is not shown. The schedule or snooze must be
 cancelled (or the draft discarded) before marking a message as junk. After **Mark as junk** is triggered, the UI stays
-in the current folder (it does not navigate to the Junk folder).
+in the current folder (it does not navigate to the Junk folder). It also blocks future mail from the sender, as
+specified in Blocked Senders above.
 
 **Empty folder button:** Trash and Junk views show an **Empty** button (with confirmation prompt). For Trash: messages
 already in Trash are permanently deleted (standard two-step semantics). For Junk: all messages are permanently deleted
