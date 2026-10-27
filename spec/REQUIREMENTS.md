@@ -1,13 +1,5 @@
 # MyMail — Functional Requirements
 
-## Theme preference (current behavior)
-
-The shared `../mysuite/spec/sidebar-footer.md` contract places only Settings in the sidebar
-footer. Settings offers Theme: Auto, Light, Dark; Auto is the default and follows the browser's
-`prefers-color-scheme` both at startup and live. Explicit choices override the browser, persist
-locally, and existing explicit preferences are retained. Demo builds also offer this setting.
-This supersedes older descriptions below of a sidebar theme toggle or two footer controls.
-
 A self-hosted personal (single-user) email client with a backend, storage, REST API, and embedded web UI.
 Designed to run on a Linux server alongside a mail system such as Postfix.
 
@@ -1433,8 +1425,10 @@ What is MyMail's own, and stays here:
 - The sidebar column is **`13.75rem`**, not a pixel width: the buttons are sized in `rem`, so a fixed column would
   let a reader's larger browser font grow them out of it — WCAG 1.4.4 (Resize Text). At the default root that
   leaves **203px** of content box for Settings, which remains content-sized.
-- Theme uses Auto/Light/Dark in Preferences, persisted locally. Auto follows live browser preference changes;
-  explicit Light or Dark overrides them.
+- Theme offers **Auto**, **Light**, **Dark** in Preferences, including demo builds. Auto is the
+  default for absent or invalid preferences and follows the browser's `prefers-color-scheme` at
+  startup and live. Explicit Light or Dark overrides the browser. Changes take effect immediately
+  and persist locally across reloads; existing explicit preferences are retained.
 
 The Settings page itself uses a tabbed layout:
 

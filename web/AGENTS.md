@@ -1,14 +1,5 @@
 # MyMail — Web UI
 
-## Theme preference revision
-
-`../mysuite/spec/sidebar-footer.md` (current scope and §7) now requires Settings as the only
-sidebar footer control and Auto/Light/Dark in Settings, with Auto as the default. This supersedes
-older descriptions below of the footer pair, theme toggle, and stacked labels. Keep the Settings
-CSS pins and geometry. Resolve Auto through `prefers-color-scheme` and listen for live changes;
-never store its resolved light/dark palette as an explicit preference. Theme changes must notify
-content renderers as well as update CSS. `e2e/tests/theme.spec.ts` covers preference behavior.
-
 Instructions for working under `web/`: the TypeScript sources in `web/ts/` and the embedded assets in
 `web/static/`. The repo-root `AGENTS.md` is always loaded as well and covers everything else — project
 overview, architecture, the Go backend, the database, the REST API, demo mode and the sanitization
