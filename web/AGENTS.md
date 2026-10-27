@@ -5,6 +5,80 @@ Instructions for working under `web/`: the TypeScript sources in `web/ts/` and t
 overview, architecture, the Go backend, the database, the REST API, demo mode and the sanitization
 policies. File paths here are written relative to the repo root, as they are there.
 
+## Coding guides
+
+- Prefer HTML+CSS to JavaScript for interactive UI.
+- Prefer CSS to images, prefer SVG to bitmap images.
+
+## Build & Development Commands
+
+```bash
+# Compile the demo-mode service worker (separate project — worker code, not DOM code)
+tsc --project web/ts/demo/tsconfig.json
+
+# Type-check TypeScript without emitting files
+tsc --project web/ts/tsconfig.json --noEmit
+
+# Run the frontend tests (needs web/static/*.js compiled first; unpack.sh is a
+# no-op once web/ts/third_party/test/node_modules/ exists)
+web/ts/third_party/test/unpack.sh
+node --test web/ts/quotetext.test.mjs web/ts/wrap.test.mjs web/ts/address.test.mjs web/ts/signature.test.mjs web/ts/confirm.test.mjs web/ts/icslinks.test.mjs web/ts/demo.test.mjs web/ts/date.test.mjs
+
+# Run a single frontend test
+node --test --test-name-pattern 'depth cap' web/ts/quotetext.test.mjs
+```
+
+## Web UI (TypeScript + Preact)
+
+- TypeScript sources in `web/ts/`; compiled to `web/static/` by `tsc` — no bundler.
+- ES6 modules with import maps.
+- Preact + JSX and Quill rich-text editor are vendored (no CDN) in `web/static/third_party/`.
+- Hash-based routing (`/#/inbox`, `/#/compose`, `/#/settings/:tab`, etc.).
+- `openapi-typescript` generates `web/ts/api/types.ts` from `openapi.yaml`.
+- Unit-tested with `node --test` against the compiled `web/static/` output; see **Testing → Frontend**.
+
+## Testing
+
+### Frontend (TypeScript)
+
+Plain `node --test` with `node:assert/strict` — no test framework, no package manager. Tests are
+`web/ts/*.test.mjs` and import the **compiled** output from `web/static/`, not the `.ts` sources, so
+`tsc` must have run first (`build.sh` orders it that way).
+
+DOM-dependent code gets a DOM from jsdom, imported via `web/ts/third_party/test/jsdom.js` and installed
+on `globalThis` *before* the module under test is imported — a module reading `DOMParser`/`Node` at
+load time would otherwise see nothing. Use a dynamic `await import()` for that ordering.
+
+jsdom is vendored as one deterministic `jsdom-node_modules.tar.gz` (it can't be bundled: it reads
+data files from its own package dir at runtime). `web/ts/third_party/test/unpack.sh` extracts it with
+`tar` alone and is idempotent; `web/ts/third_party/rebuild.sh` regenerates the tarball and is
+maintainer-only (it is the only thing here that needs npm).
+
+**Only logic reachable from a plain function is covered this way** — component rendering and Quill
+interaction are not tested. That means a function worth testing generally belongs in `web/ts/util/`,
+exported, rather than kept private inside a `.tsx` view (this is why `quoteHtmlToText` lives in
+`web/ts/util/quotetext.ts` and not in `ComposeForm.tsx`).
+
+**Each test file's header comment says what it covers, why that code was factored out to be testable
+at all, and what it deliberately leaves unasserted.** Those explanations live with the tests rather
+than here — read the header before the cases.
+
+| Test | Under test | DOM |
+|---|---|---|
+| `quotetext.test.mjs` | `util/quotetext.ts` — the text/plain half of a reply or forward | yes |
+| `icslinks.test.mjs` | `util/icslinks.ts` — which links in an incoming body get an "Import to Calendar" button | yes |
+| `wrap.test.mjs` | `util/wrap.ts` — every line break a composed message gets | no |
+| `address.test.mjs` | `util/address.ts` — whether the Send button is offered at all | no |
+| `signature.test.mjs` | `util/signature.ts` — the identity signature as a region of the Quill document | no |
+| `confirm.test.mjs` | `util/confirm.ts` — the store behind every confirmation the UI asks for | no |
+| `date.test.mjs` | `util/date.ts` — the Date, Scheduled and Snoozed columns' formatters and the new-snooze midnight default | no |
+| `demo.test.mjs` | `web/ts/demo/*.ts` — the demo backend, evaluated as the worker scripts they are | no |
+
+## Important Implementation Notes
+
+- **Compose soft-break mark:** the editor wraps at the `wrapColumn` preference (default 80, `0` off) and marks its own breaks with a Quill block format rendered as `class="ql-softwrap-y"`, so a paragraph can be re-filled rather than only broken further. Three things keep it working: the sanitiser must never allow `class` (or the mark ships to recipients), the format's attribute name must stay equal to the class prefix (or Quill's clipboard cannot map the class back when a draft is reopened), and `internal/sanitize.joinSoftWrappedParagraphs` plus `web/ts/demo/text.ts` must recognize the same mark (or sent HTML hard-wraps again). Enter inside a wrapped paragraph must clear the mark explicitly — splitting a paragraph copies it to both halves, and a marked break is one the wrapper may dissolve.
+- **Compose signature mark:** the identity signature is found by a second block format, `class="ql-signature-y"` (`web/ts/util/signature.ts`), never by searching the editor's HTML for what `signatureToHtml` produced — Quill does not give that string back, and the swap that relied on it left the old identity's signature in the message. It carries the same two obligations as the soft-break mark, plus two of its own. A wrap break made inside the signature must carry the mark, or the half above it stops counting as signature and a swap leaves it behind (Quill puts the block format only on the half inheriting the old newline, so `autoWrapEditor` has to add it back). Enter at the end of the signature must clear it, or a paragraph written below the signature is deleted by the next swap.
+
 **Parts of this directory are governed from outside the repo**, by the `mysuite` contracts, and each
 gets a `##` section below of its own. They exist for the same reason — they name the
 ordinary-looking edits that break a cross-repo contract while changing nothing you can see in
@@ -237,90 +311,3 @@ the badge under content overflow (`app-name-label.md` §4.5 — the same open it
 §9.1); MyCal hides its label below 600px and MyMail has no width breakpoint at all, which is
 recorded rather than harmonised (§4.4); and how the label degrades under a long name differs
 between the three and is deliberately not mandated (§8.5). Do not fix any of them locally.
-
-## API discovery is governed from outside this repo
-
-The public `/openapi.yaml` and `/.well-known/api-catalog` endpoints and the
-`service-desc` Link header on API responses are governed by
-`../mysuite/spec/api-discovery.md`. Read it before changing their HTTP behaviour.
-MyMail's in-process coverage lives in `discovery_test.go`.
-
-## The MCP server is governed from outside this repo
-
-`cmd/mcp` builds `mymail-mcp`, a stdio MCP server that exposes exactly what an API
-token can reach: reads as `mymail://` resources, folder search as the
-`search_messages` tool, and `mark_message_read`. Its contract is
-`../mysuite/spec/mcp-server.md`; read it before changing what the server exposes or
-how it reports errors. `cmd/mcp`'s drift test probes every operation in
-`openapi.yaml` through the bearer middleware, so widening the token's surface fails
-it until the MCP server exposes the new operation or the contract excludes it. An
-operation missing from `openapi.yaml` is invisible to it.
-
-## Build & Development Commands
-
-```bash
-# Compile the demo-mode service worker (separate project — worker code, not DOM code)
-tsc --project web/ts/demo/tsconfig.json
-
-# Type-check TypeScript without emitting files
-tsc --project web/ts/tsconfig.json --noEmit
-
-# Run the frontend tests (needs web/static/*.js compiled first; unpack.sh is a
-# no-op once web/ts/third_party/test/node_modules/ exists)
-web/ts/third_party/test/unpack.sh
-node --test web/ts/quotetext.test.mjs web/ts/wrap.test.mjs web/ts/address.test.mjs web/ts/signature.test.mjs web/ts/confirm.test.mjs web/ts/icslinks.test.mjs web/ts/demo.test.mjs web/ts/date.test.mjs
-
-# Run a single frontend test
-node --test --test-name-pattern 'depth cap' web/ts/quotetext.test.mjs
-```
-
-## Web UI (TypeScript + Preact)
-
-- TypeScript sources in `web/ts/`; compiled to `web/static/` by `tsc` — no bundler.
-- ES6 modules with import maps.
-- Preact + JSX and Quill rich-text editor are vendored (no CDN) in `web/static/third_party/`.
-- Hash-based routing (`/#/inbox`, `/#/compose`, `/#/settings/:tab`, etc.).
-- `openapi-typescript` generates `web/ts/api/types.ts` from `openapi.yaml`.
-- Unit-tested with `node --test` against the compiled `web/static/` output; see **Testing → Frontend**.
-
-## Testing
-
-### Frontend (TypeScript)
-
-Plain `node --test` with `node:assert/strict` — no test framework, no package manager. Tests are
-`web/ts/*.test.mjs` and import the **compiled** output from `web/static/`, not the `.ts` sources, so
-`tsc` must have run first (`build.sh` orders it that way).
-
-DOM-dependent code gets a DOM from jsdom, imported via `web/ts/third_party/test/jsdom.js` and installed
-on `globalThis` *before* the module under test is imported — a module reading `DOMParser`/`Node` at
-load time would otherwise see nothing. Use a dynamic `await import()` for that ordering.
-
-jsdom is vendored as one deterministic `jsdom-node_modules.tar.gz` (it can't be bundled: it reads
-data files from its own package dir at runtime). `web/ts/third_party/test/unpack.sh` extracts it with
-`tar` alone and is idempotent; `web/ts/third_party/rebuild.sh` regenerates the tarball and is
-maintainer-only (it is the only thing here that needs npm).
-
-**Only logic reachable from a plain function is covered this way** — component rendering and Quill
-interaction are not tested. That means a function worth testing generally belongs in `web/ts/util/`,
-exported, rather than kept private inside a `.tsx` view (this is why `quoteHtmlToText` lives in
-`web/ts/util/quotetext.ts` and not in `ComposeForm.tsx`).
-
-**Each test file's header comment says what it covers, why that code was factored out to be testable
-at all, and what it deliberately leaves unasserted.** Those explanations live with the tests rather
-than here — read the header before the cases.
-
-| Test | Under test | DOM |
-|---|---|---|
-| `quotetext.test.mjs` | `util/quotetext.ts` — the text/plain half of a reply or forward | yes |
-| `icslinks.test.mjs` | `util/icslinks.ts` — which links in an incoming body get an "Import to Calendar" button | yes |
-| `wrap.test.mjs` | `util/wrap.ts` — every line break a composed message gets | no |
-| `address.test.mjs` | `util/address.ts` — whether the Send button is offered at all | no |
-| `signature.test.mjs` | `util/signature.ts` — the identity signature as a region of the Quill document | no |
-| `confirm.test.mjs` | `util/confirm.ts` — the store behind every confirmation the UI asks for | no |
-| `date.test.mjs` | `util/date.ts` — the Date, Scheduled and Snoozed columns' formatters and the new-snooze midnight default | no |
-| `demo.test.mjs` | `web/ts/demo/*.ts` — the demo backend, evaluated as the worker scripts they are | no |
-
-## Important Implementation Notes
-
-- **Compose soft-break mark:** the editor wraps at the `wrapColumn` preference (default 80, `0` off) and marks its own breaks with a Quill block format rendered as `class="ql-softwrap-y"`, so a paragraph can be re-filled rather than only broken further. Three things keep it working: the sanitiser must never allow `class` (or the mark ships to recipients), the format's attribute name must stay equal to the class prefix (or Quill's clipboard cannot map the class back when a draft is reopened), and `internal/sanitize.joinSoftWrappedParagraphs` plus `web/ts/demo/text.ts` must recognize the same mark (or sent HTML hard-wraps again). Enter inside a wrapped paragraph must clear the mark explicitly — splitting a paragraph copies it to both halves, and a marked break is one the wrapper may dissolve.
-- **Compose signature mark:** the identity signature is found by a second block format, `class="ql-signature-y"` (`web/ts/util/signature.ts`), never by searching the editor's HTML for what `signatureToHtml` produced — Quill does not give that string back, and the swap that relied on it left the old identity's signature in the message. It carries the same two obligations as the soft-break mark, plus two of its own. A wrap break made inside the signature must carry the mark, or the half above it stops counting as signature and a swap leaves it behind (Quill puts the block format only on the half inheriting the old newline, so `autoWrapEditor` has to add it back). Enter at the end of the signature must clear it, or a paragraph written below the signature is deleted by the next swap.

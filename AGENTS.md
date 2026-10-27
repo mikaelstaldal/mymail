@@ -150,12 +150,16 @@ User-created folders have `id >= 100`.
 
 Base path: `/api/v1`. Full contract in `openapi.yaml`. Error format: `{"error": "message"}`. Max request body: 32 MiB. Bulk endpoints cap at 1000 message IDs.
 
+The public `/openapi.yaml` and `/.well-known/api-catalog` endpoints and the
+`service-desc` Link header on API responses are governed by
+`../mysuite/spec/api-discovery.md`. Read it before changing their HTTP behaviour.
+MyMail's in-process coverage lives in `discovery_test.go`.
+
 ### MCP server
 
 `cmd/mcp` builds `mymail-mcp`, a stdio MCP server exposing exactly what an API token can
 reach. It is governed by `../mysuite/spec/mcp-server.md`, not by this repo alone: read the
-contract before changing what it exposes, and see `web/AGENTS.md` for what its drift test
-does and does not catch.
+contract before changing what it exposes.
 
 ### Authentication & CSRF
 
