@@ -923,6 +923,22 @@ export function MessageDetail({ id, folders }: MessageDetailProps) {
           </span>
         )}
         <span class="ml-auto" />
+        {hasBoth && (
+          <div class="body-toggle">
+            <button
+              class={`btn btn-ghost btn-sm${effectiveView === 'html' ? ' active' : ''}`}
+              onClick={() => handleBodyViewChange('html')}
+            >
+              HTML
+            </button>
+            <button
+              class={`btn btn-ghost btn-sm${effectiveView === 'text' ? ' active' : ''}`}
+              onClick={() => handleBodyViewChange('text')}
+            >
+              Plain
+            </button>
+          </div>
+        )}
         {folderId !== DRAFTS_ID && (
           <button
             class={`btn btn-ghost btn-sm${showHeaders ? ' active' : ''}`}
@@ -1130,23 +1146,6 @@ export function MessageDetail({ id, folders }: MessageDetailProps) {
             ? <div class="msg-headers-loading">Loading…</div>
             : <pre class="msg-headers-pre">{allHeaders}</pre>
           }
-        </div>
-      )}
-
-      {hasBoth && (
-        <div class="body-toggle">
-          <button
-            class={`btn btn-ghost btn-sm${effectiveView === 'html' ? ' active' : ''}`}
-            onClick={() => handleBodyViewChange('html')}
-          >
-            HTML
-          </button>
-          <button
-            class={`btn btn-ghost btn-sm${effectiveView === 'text' ? ' active' : ''}`}
-            onClick={() => handleBodyViewChange('text')}
-          >
-            Plain
-          </button>
         </div>
       )}
 

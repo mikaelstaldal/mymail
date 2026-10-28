@@ -1065,7 +1065,8 @@ Hovering a folder in the sidebar shows a tooltip with its slug and numeric id, e
    preserves the original return folder. Opening an unread message causes the UI to issue an explicit
    `PUT /messages/{id}/read` request after a successful GET to mark it as read;
    `GET /messages/{id}` itself does not alter read state. When the message has both body types, a toggle switches
-   between HTML and plain text; the preference is stored. Thread display: if the message is part of a thread, a
+   between HTML and plain text from the action bar alongside Reply and the other message buttons;
+   the preference is stored. Thread display: if the message is part of a thread, a
    collapsed conversation strip is shown below the body; clicking an entry expands it inline. Each entry other than the
    currently displayed message also offers an **Open** button (revealed on hover or keyboard focus) that navigates to
    that message, replacing the main view with it. Entries in Junk and Trash carry a visible folder label,
