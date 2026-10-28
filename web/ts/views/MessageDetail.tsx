@@ -794,6 +794,14 @@ export function MessageDetail({ id, folders }: MessageDetailProps) {
   return (
     <div class="msg-detail">
       <div class="msg-detail-actions">
+        <button
+          class="btn btn-ghost btn-sm msg-back-to-list"
+          title="back to list"
+          aria-label="back to list"
+          onClick={() => navigateToSourceFolder(folderId)}
+        >
+          <Icon name="arrow-left" />
+        </button>
         {folderId === DRAFTS_ID ? (
           <>
             <button

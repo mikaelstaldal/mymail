@@ -1048,7 +1048,10 @@ Hovering a folder in the sidebar shows a tooltip with its slug and numeric id, e
    can still see.
 
 2. **Message detail** — Full headers, sanitized HTML body in a sandboxed iframe (or plain-text fallback), attachment
-   download links. Reply/Reply All/Forward/Move/Delete/Snooze/Mark as junk buttons. An **All headers** toggle button (
+   download links. A borderless back-arrow icon button appears first in the action bar, before Reply
+   (or the draft actions), and opens the message's folder list. Its **back to list** label is shown only as a tooltip
+   and is also its accessible name.
+   Reply/Reply All/Forward/Move/Delete/Snooze/Mark as junk buttons. An **All headers** toggle button (
    hidden for drafts) fetches and displays the raw RFC 5322 header block via `GET /messages/{id}/headers`; clicking
    again collapses the panel. **Draft messages** show **Send**, **Edit** (opens the compose form) and **Discard**
    (permanently deletes the draft after confirmation) buttons instead of Reply/Reply-All/Forward. **Send** sends the
