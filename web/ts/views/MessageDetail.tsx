@@ -925,18 +925,18 @@ export function MessageDetail({ id, folders }: MessageDetailProps) {
         <span class="ml-auto" />
         {hasBoth && (
           <div class="body-toggle">
-            <button
-              class={`btn btn-ghost btn-sm${effectiveView === 'html' ? ' active' : ''}`}
-              onClick={() => handleBodyViewChange('html')}
-            >
-              HTML
-            </button>
-            <button
-              class={`btn btn-ghost btn-sm${effectiveView === 'text' ? ' active' : ''}`}
-              onClick={() => handleBodyViewChange('text')}
-            >
-              Plain
-            </button>
+            <span>HTML</span>
+            <label class="body-toggle-control">
+              <input
+                type="checkbox"
+                role="switch"
+                aria-label="Plain text"
+                checked={effectiveView === 'text'}
+                onChange={e => handleBodyViewChange((e.target as HTMLInputElement).checked ? 'text' : 'html')}
+              />
+              <span class="body-toggle-track" aria-hidden="true" />
+            </label>
+            <span>Plain</span>
           </div>
         )}
         {folderId !== DRAFTS_ID && (

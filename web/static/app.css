@@ -986,10 +986,59 @@ html, body {
 }
 
 .body-toggle {
+  position: relative;
   display: flex;
   align-items: center;
-  gap: 4px;
+  gap: 6px;
   flex-shrink: 0;
+  font-size: 0.8rem;
+}
+
+.body-toggle-control {
+  display: flex;
+  position: relative;
+  cursor: pointer;
+}
+
+.body-toggle input {
+  z-index: 1;
+  cursor: pointer;
+  position: absolute;
+  width: 36px;
+  height: 22px;
+  left: 0;
+  top: 0;
+  opacity: 0;
+  margin: 0;
+}
+
+.body-toggle-track {
+  width: 36px;
+  height: 22px;
+  border: 1px solid var(--text-secondary);
+  border-radius: 11px;
+  background: var(--surface);
+  position: relative;
+}
+
+.body-toggle-track::before {
+  content: '';
+  position: absolute;
+  width: 16px;
+  height: 16px;
+  top: 2px;
+  left: 2px;
+  border-radius: 50%;
+  background: var(--text-primary);
+  transition: transform 120ms;
+}
+
+.body-toggle input:checked + .body-toggle-track::before {
+  transform: translateX(14px);
+}
+
+.body-toggle input:focus-visible + .body-toggle-track {
+  box-shadow: var(--focus-ring);
 }
 
 .btn.active {

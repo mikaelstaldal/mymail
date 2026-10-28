@@ -100,7 +100,7 @@ test('long link warnings fit one line and body resizing stays above the thread',
       await page.setViewportSize({ width, height: 800 });
       await checkLink(body);
       for (const view of ['HTML', 'Plain']) {
-        await page.getByRole('button', { name: view, exact: true }).click();
+        await page.getByRole('switch', { name: 'Plain text', exact: true }).setChecked(view === 'Plain');
         const before = (await body.boundingBox())!;
         const handle = (await divider.boundingBox())!;
         await page.mouse.move(handle.x + handle.width / 2, handle.y + handle.height / 2);
@@ -197,7 +197,7 @@ test('multiple deceptive links share one counted warning in both body views', as
     const banner = page.getByRole('note', { name: 'Message warnings' });
     await expect(banner.locator('li')).toHaveCount(1);
     await expect(banner).toHaveText('Message contains 2 deceptive links');
-    await page.getByRole('button', { name: 'Plain', exact: true }).click();
+    await page.getByRole('switch', { name: 'Plain text', exact: true }).check();
     await expect(banner.locator('li')).toHaveCount(1);
     await expect(banner).toContainText('Message contains 2 deceptive links');
   } finally {
@@ -223,8 +223,8 @@ test('warnings explain the server signals and sender address stays visible', asy
   await expect(page.locator('.msg-detail-header .sender-address')).toBeVisible();
   await expect(page.locator('.msg-detail-header .sender-address')).not.toContainText('xn--');
   await expect(page.locator('.sender-idn').first()).toContainText('IDN');
-  const plain = page.getByRole('button', { name: 'Plain', exact: true });
-  await plain.click();
+  const plain = page.getByRole('switch', { name: 'Plain text', exact: true });
+  await plain.check();
   await expect(banner).toBeVisible();
 });
 

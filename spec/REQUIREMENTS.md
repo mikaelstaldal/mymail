@@ -1064,7 +1064,7 @@ Hovering a folder in the sidebar shows a tooltip with its slug and numeric id, e
    snooze" and pre-fills the datetime picker with the current snooze time; submitting updates the expiry time and
    preserves the original return folder. Opening an unread message causes the UI to issue an explicit
    `PUT /messages/{id}/read` request after a successful GET to mark it as read;
-   `GET /messages/{id}` itself does not alter read state. When the message has both body types, a toggle switches
+   `GET /messages/{id}` itself does not alter read state. When the message has both body types, a sliding switch selects
    between HTML and plain text from the action bar alongside Reply and the other message buttons;
    the preference is stored. Thread display: if the message is part of a thread, a
    collapsed conversation strip is shown below the body; clicking an entry expands it inline. Each entry other than the
