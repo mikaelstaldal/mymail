@@ -1028,9 +1028,21 @@ On first load the UI reads `localStorage` for the last selected folder and navig
 
 Hovering a folder in the sidebar shows a tooltip with its slug and numeric id, e.g. `inbox (id 1)`.
 
+When a sidebar folder link has focus, Up and Down move focus through the folders in displayed order,
+across folder groups, stopping at the first or last folder. Enter opens the focused folder and focuses its first
+message after loading finishes. On the already open folder, Enter focuses the first message on the displayed page.
+For an empty folder or a loading error, focus stays on the folder link.
+Right moves focus from a folder to the first message in the displayed list, without opening a different folder.
+Left moves focus from a message row to the current folder in the sidebar.
+If the target list is empty or no current folder exists, focus stays where it is.
+
 ### Views
 
-1. **Folder view** — Paginated message list. Unread messages shown in bold. **Mark all as read** button marks all
+1. **Folder view** — Paginated message list. Tab focuses each message row instead of its selection checkbox,
+   with a visible focus outline. Space selects or deselects the focused message; Enter opens it.
+   Up and Down move focus to the previous or next message, stopping at the ends of the displayed list.
+   These keyboard controls also apply to search results. Unread messages shown in bold.
+   **Mark all as read** button marks all
    messages in the folder as read.
 
    The **Scheduled** and **Snoozed** folders carry one extra column between Subject and Date, showing the time that
@@ -1050,7 +1062,9 @@ Hovering a folder in the sidebar shows a tooltip with its slug and numeric id, e
 2. **Message detail** — Full headers, sanitized HTML body in a sandboxed iframe (or plain-text fallback), attachment
    download links. A borderless back-arrow icon button appears first in the action bar, before Reply
    (or the draft actions), and opens the message's folder list. Its **back to list** label is shown only as a tooltip
-   and is also its accessible name.
+   and is also its accessible name. Backspace also opens the message's folder list, except while editing
+   a field or while a modal dialog is open.
+   Returning with Backspace restores focus to that message's row and retains the originating list page.
    Reply/Reply All/Forward/Move/Delete/Snooze/Mark as junk buttons. An **All headers** toggle button (
    hidden for drafts) fetches and displays the raw RFC 5322 header block via `GET /messages/{id}/headers`; clicking
    again collapses the panel. **Draft messages** show **Send**, **Edit** (opens the compose form) and **Discard**
@@ -1516,6 +1530,11 @@ Both buttons are named after what they do — never "OK" and "Cancel" together:
 - **Anything else** is confirmed with its own verb (**Send**, **Schedule**, **Move to Drafts**) and declined with
   **Cancel** — except where "Cancel" is itself the action being confirmed (cancelling a scheduled message), where the
   declining button says **Keep scheduled**.
+
+Escape activates the current view's Cancel or Discard action, including compose, reply, forward,
+settings forms, and scheduling panels. An open panel's Cancel takes precedence over discarding the view.
+Existing discard confirmations still apply. In a confirmation dialog, Escape cancels the dialog without
+also acting on the underlying view. Disabled actions cannot be activated with Escape.
 
 Confirmation is requested for: deleting a message (from message detail, and in bulk from a message list), emptying
 Trash or Junk, discarding a draft (in compose, in message detail, and in bulk from the Drafts list), sending or

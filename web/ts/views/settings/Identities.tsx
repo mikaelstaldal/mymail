@@ -72,7 +72,7 @@ function IdentityForm({ form, onChange, showDefaultOption, error, saving, onSave
         <button class="btn btn-primary btn-sm" onClick={onSave} disabled={saving}>
           {saving ? 'Saving…' : 'Save'}
         </button>
-        <button class="btn btn-ghost btn-sm" onClick={onCancel} disabled={saving}>Cancel</button>
+        <button class="btn btn-ghost btn-sm" data-escape-action="cancel" onClick={onCancel} disabled={saving}>Cancel</button>
       </div>
     </div>
   );

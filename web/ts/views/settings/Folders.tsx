@@ -140,7 +140,7 @@ export function Folders() {
               autoFocus
               onKeyDown={e => {
                 if (e.key === 'Enter') void createFolder();
-                if (e.key === 'Escape') setCreating(false);
+                if (e.key === 'Escape' && !savingCreate) { e.preventDefault(); setCreating(false); }
               }}
             />
           </div>
@@ -152,7 +152,7 @@ export function Folders() {
             >
               {savingCreate ? 'Creating…' : 'Create'}
             </button>
-            <button class="btn btn-ghost btn-sm" onClick={() => setCreating(false)} disabled={savingCreate}>
+            <button class="btn btn-ghost btn-sm" data-escape-action="cancel" onClick={() => setCreating(false)} disabled={savingCreate}>
               Cancel
             </button>
           </div>
@@ -174,7 +174,7 @@ export function Folders() {
                 autoFocus
                 onKeyDown={e => {
                   if (e.key === 'Enter') void saveEdit();
-                  if (e.key === 'Escape') setEditId(null);
+                  if (e.key === 'Escape' && !savingEdit) { e.preventDefault(); setEditId(null); }
                 }}
               />
             </div>
@@ -186,7 +186,7 @@ export function Folders() {
               >
                 {savingEdit ? 'Saving…' : 'Save'}
               </button>
-              <button class="btn btn-ghost btn-sm" onClick={() => setEditId(null)} disabled={savingEdit}>
+              <button class="btn btn-ghost btn-sm" data-escape-action="cancel" onClick={() => setEditId(null)} disabled={savingEdit}>
                 Cancel
               </button>
             </div>

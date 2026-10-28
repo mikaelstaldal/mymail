@@ -48,6 +48,34 @@ See the [development guide](DEVELOPMENT.md) for build details.
 
 The web UI is available at `http://127.0.0.1:8080`.
 
+## Keyboard navigation
+
+In the web interface, use **Tab** and **Shift+Tab** to move focus forward and backward through controls.
+Focused message rows have a visible outline; moving focus does not select or open a message.
+
+When a folder link in the sidebar has focus:
+
+- **Up / Down** moves through folders in displayed order, including across folder groups, stopping at either end.
+- **Enter** opens the folder and focuses its first message after loading finishes. On the already open folder,
+  it focuses the first message on the displayed page. If the folder is empty or loading fails, focus stays on the link.
+- **Right** focuses the first message in the currently displayed list without opening the focused folder.
+  If the list is empty, focus stays on the link.
+
+When a message row has focus, in a folder or search results:
+
+- **Up / Down** moves to the previous or next message on the displayed page, stopping at either end.
+- **Space** selects or deselects the message without opening it.
+- **Enter** opens the message.
+- **Left** returns focus to the current folder in the sidebar. If there is no current folder, focus stays on the row.
+
+While reading a message, **Backspace** returns to its folder list, restores focus to that message's row,
+and retains the page from which you opened it. Backspace keeps its normal editing behavior in fields and
+does not navigate while a modal dialog is open.
+
+**Escape** activates the current Cancel or Discard action, including in compose, settings forms, and scheduling
+panels. An open panel's Cancel takes precedence over discarding the view; discard confirmations still apply.
+In a confirmation dialog, Escape cancels only the dialog.
+
 ## Command-Line Reference
 
 ### Init mode

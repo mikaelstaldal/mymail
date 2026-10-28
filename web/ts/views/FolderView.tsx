@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'preact/hooks';
 import { api } from '../api/client.js';
-import { navigate } from '../router.js';
+import { navigate, rememberMessageList, takeMessageListReturn } from '../router.js';
 import { showToast } from '../util/toast.js';
 import { confirmDialog } from '../util/confirm.js';
 import { MessageList, type ScheduleColumn } from '../components/MessageList.js';
@@ -28,9 +28,14 @@ const SCHEDULE_COLUMNS: Partial<Record<number, ScheduleColumn>> = {
 interface FolderViewProps {
   folder: Folder;
   folders: Folder[];
+  focusRequest: { folderId: number; requestId: number } | null;
+  onFocusConsumed: (requestId: number) => void;
 }
 
-export function FolderView({ folder, folders }: FolderViewProps) {
+export function FolderView({ folder, folders, focusRequest, onFocusConsumed }: FolderViewProps) {
+  const viewRef = useRef<HTMLDivElement>(null);
+  const consumedRequest = useRef<number>();
+  const [listReturn] = useState(() => takeMessageListReturn(folder.id));
   const [items, setItems] = useState<MessageSummary[]>([]);
   const [total, setTotal] = useState(0);
   const [offset, setOffset] = useState(0);
@@ -56,7 +61,17 @@ export function FolderView({ folder, folders }: FolderViewProps) {
     }
   }, [folder.id]);
 
-  useEffect(() => { void load(0); }, [load]);
+  useEffect(() => {
+    void load(listReturn?.folderId === folder.id ? listReturn.offset : 0);
+  }, [load]);
+
+  useEffect(() => {
+    if (!focusRequest || focusRequest.folderId !== folder.id || loading
+      || consumedRequest.current === focusRequest.requestId) return;
+    consumedRequest.current = focusRequest.requestId;
+    if (!error) viewRef.current?.querySelector<HTMLElement>('.msg-row')?.focus();
+    onFocusConsumed(focusRequest.requestId);
+  }, [focusRequest, folder.id, loading, error, items, onFocusConsumed]);
 
   const reloadRef = useRef<() => void>();
   reloadRef.current = () => { if (!loading) void load(offset); };
@@ -190,7 +205,7 @@ export function FolderView({ folder, folders }: FolderViewProps) {
   const pageEnd = Math.min(offset + PAGE_SIZE, total);
 
   return (
-    <div class="folder-view">
+    <div class="folder-view" ref={viewRef}>
       <div class="folder-toolbar">
         <button class="btn btn-ghost btn-sm" onClick={() => void handleMarkAllRead()}>
           Mark all read
@@ -273,7 +288,11 @@ export function FolderView({ folder, folders }: FolderViewProps) {
             selectedIds={selectedIds}
             onToggleSelect={toggleSelect}
             onToggleSelectAll={toggleSelectAll}
-            onRowClick={(id) => navigate(`#/message/${id}`)}
+            onRowClick={(id) => {
+              rememberMessageList(id, folder.id, offset);
+              navigate(`#/message/${id}`);
+            }}
+            focusMessageId={listReturn?.folderId === folder.id ? listReturn.id : undefined}
             scheduleColumn={SCHEDULE_COLUMNS[folder.id]}
           />
         </div>

@@ -138,7 +138,7 @@ function FilterForm({ form, onChange, folders, error, saving, onSave, onCancel }
         <button class="btn btn-primary btn-sm" onClick={onSave} disabled={saving}>
           {saving ? 'Saving…' : 'Save'}
         </button>
-        <button class="btn btn-ghost btn-sm" onClick={onCancel} disabled={saving}>Cancel</button>
+        <button class="btn btn-ghost btn-sm" data-escape-action="cancel" onClick={onCancel} disabled={saving}>Cancel</button>
       </div>
     </div>
   );

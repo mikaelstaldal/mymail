@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'preact/hooks';
+import { useState, useEffect, useLayoutEffect, useRef } from 'preact/hooks';
 import { subscribe, answerConfirm, type ConfirmRequest } from '../util/confirm.js';
 
 // Renders whatever question `confirmDialog()` currently has outstanding, or
@@ -18,7 +18,7 @@ function Dialog({ request }: { request: ConfirmRequest }) {
   const confirmRef = useRef<HTMLButtonElement>(null);
   const cancelRef = useRef<HTMLButtonElement>(null);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     // Whatever was focused when the question was asked gets it back once the
     // dialog closes — unless the answer navigated away, in which case the old
     // element is detached and focusing it does nothing.

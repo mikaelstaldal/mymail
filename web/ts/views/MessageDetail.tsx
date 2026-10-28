@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useMemo, useId } from 'preact/hooks';
 import { api, NotFoundError } from '../api/client.js';
-import { navigate } from '../router.js';
+import { navigate, restoreMessageList } from '../router.js';
 import { showToast } from '../util/toast.js';
 import { confirmDialog } from '../util/confirm.js';
 import { getMycalUrl, isDemo } from '../util/config.js';
@@ -496,6 +496,22 @@ export function MessageDetail({ id, folders }: MessageDetailProps) {
   const navigateToSourceFolder = (fid: number) =>
     navigate(fid === INBOX_ID ? '#/inbox' : `#/folder/${folderSlug(fid)}`);
 
+  useEffect(() => {
+    const handleKey = (event: KeyboardEvent) => {
+      if (event.key !== 'Backspace' || event.defaultPrevented || event.repeat
+        || event.altKey || event.ctrlKey || event.metaKey || event.shiftKey || !msg) return;
+      const target = event.target;
+      if (target instanceof HTMLElement && (target.isContentEditable
+        || target.closest('input, textarea, select, [contenteditable]'))) return;
+      if (document.querySelector('[aria-modal="true"]')) return;
+      event.preventDefault();
+      restoreMessageList(msg.id, msg.folder_id);
+      navigateToSourceFolder(msg.folder_id);
+    };
+    document.addEventListener('keydown', handleKey);
+    return () => document.removeEventListener('keydown', handleKey);
+  }, [msg, folders]);
+
   const handleDelete = async () => {
     if (!msg || actionInFlight) return;
     const isPermanent = msg.folder_id === JUNK_ID || msg.folder_id === TRASH_ID;
@@ -815,7 +831,7 @@ export function MessageDetail({ id, folders }: MessageDetailProps) {
             <button class="btn btn-ghost btn-sm" onClick={() => navigate(`#/compose?draft=${id}`)}>
               Edit
             </button>
-            <button class="btn btn-danger btn-sm" disabled={actionInFlight} onClick={() => void handleDiscardDraft()}>
+            <button class="btn btn-danger btn-sm" data-escape-action="discard" disabled={actionInFlight} onClick={() => void handleDiscardDraft()}>
               Discard
             </button>
           </>
@@ -974,7 +990,7 @@ export function MessageDetail({ id, folders }: MessageDetailProps) {
           >
             Snooze
           </button>
-          <button class="btn btn-ghost btn-sm" onClick={() => setSnoozeOpen(false)}>
+          <button class="btn btn-ghost btn-sm" data-escape-action="cancel" onClick={() => setSnoozeOpen(false)}>
             Cancel
           </button>
         </div>
@@ -996,7 +1012,7 @@ export function MessageDetail({ id, folders }: MessageDetailProps) {
           >
             Reschedule
           </button>
-          <button class="btn btn-ghost btn-sm" onClick={() => setRescheduleOpen(false)}>
+          <button class="btn btn-ghost btn-sm" data-escape-action="cancel" onClick={() => setRescheduleOpen(false)}>
             Cancel
           </button>
         </div>

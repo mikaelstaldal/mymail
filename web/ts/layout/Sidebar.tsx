@@ -21,14 +21,33 @@ const BUILTIN_SLUGS = new Set([...MAIN_SLUGS, ...SYSTEM_SLUGS]);
 interface FolderItemProps {
   folder: Folder;
   active: boolean;
+  onFolderEnter: (folder: Folder) => void;
 }
 
-function FolderItem({ folder, active }: FolderItemProps) {
+function FolderItem({ folder, active, onFolderEnter }: FolderItemProps) {
   const href = folder.slug === 'inbox' ? '#/inbox' : `#/folder/${folder.slug}`;
   const icon = FOLDER_ICONS[folder.slug] ?? 'folder';
   return (
     <li class={active ? 'folder-item active' : 'folder-item'}>
-      <a href={href} title={`${folder.slug} (id ${folder.id})`}>
+      <a href={href} title={`${folder.slug} (id ${folder.id})`}
+        onKeyDown={event => {
+          if (event.key === 'Enter' && !event.altKey && !event.ctrlKey && !event.metaKey && !event.shiftKey) {
+            event.preventDefault();
+            onFolderEnter(folder);
+            return;
+          }
+          if (event.key === 'ArrowRight') {
+            event.preventDefault();
+            document.querySelector<HTMLElement>('.msg-table .msg-row')?.focus();
+            return;
+          }
+          if (event.key !== 'ArrowUp' && event.key !== 'ArrowDown') return;
+          event.preventDefault();
+          const links = Array.from(event.currentTarget.closest('.sidebar')!
+            .querySelectorAll<HTMLAnchorElement>('.folder-item a'));
+          const index = links.indexOf(event.currentTarget);
+          links[index + (event.key === 'ArrowUp' ? -1 : 1)]?.focus();
+        }}>
         <Icon name={icon} class="folder-icon" />
         {folder.name}
         {folder.unread_count > 0 && (
@@ -42,9 +61,10 @@ function FolderItem({ folder, active }: FolderItemProps) {
 interface SidebarProps {
   folders: Folder[];
   activeSlug: string;
+  onFolderEnter: (folder: Folder) => void;
 }
 
-export function Sidebar({ folders, activeSlug }: SidebarProps) {
+export function Sidebar({ folders, activeSlug, onFolderEnter }: SidebarProps) {
   const main = folders.filter(f => MAIN_SLUGS.includes(f.slug));
   const system = folders.filter(f => SYSTEM_SLUGS.includes(f.slug));
   const user = folders.filter(f => !BUILTIN_SLUGS.has(f.slug));
@@ -67,7 +87,7 @@ export function Sidebar({ folders, activeSlug }: SidebarProps) {
       <div class="sidebar-section-label">Mailboxes</div>
       <ul class="folder-list">
         {main.map(f => (
-          <FolderItem key={f.id} folder={f} active={f.slug === activeSlug} />
+          <FolderItem key={f.id} folder={f} active={f.slug === activeSlug} onFolderEnter={onFolderEnter} />
         ))}
       </ul>
 
@@ -75,7 +95,7 @@ export function Sidebar({ folders, activeSlug }: SidebarProps) {
 
       <ul class="folder-list">
         {system.map(f => (
-          <FolderItem key={f.id} folder={f} active={f.slug === activeSlug} />
+          <FolderItem key={f.id} folder={f} active={f.slug === activeSlug} onFolderEnter={onFolderEnter} />
         ))}
       </ul>
 
@@ -84,7 +104,7 @@ export function Sidebar({ folders, activeSlug }: SidebarProps) {
           <div class="sidebar-section-label">My Folders</div>
           <ul class="folder-list">
             {user.map(f => (
-              <FolderItem key={f.id} folder={f} active={f.slug === activeSlug} />
+              <FolderItem key={f.id} folder={f} active={f.slug === activeSlug} onFolderEnter={onFolderEnter} />
             ))}
           </ul>
         </>

@@ -29,6 +29,7 @@ export interface MessageListProps {
   snippets?: Record<number, string>;
   folders?: Folder[];
   scheduleColumn?: ScheduleColumn;
+  focusMessageId?: number;
 }
 
 function renderSnippet(text: string) {
@@ -97,13 +98,20 @@ export function MessageList({
   snippets,
   folders,
   scheduleColumn,
+  focusMessageId,
 }: MessageListProps) {
+  const tableRef = useRef<HTMLTableElement>(null);
+  useEffect(() => {
+    if (focusMessageId !== undefined) {
+      tableRef.current?.querySelector<HTMLElement>(`[data-message-id="${focusMessageId}"]`)?.focus();
+    }
+  }, [focusMessageId]);
   const allSelected = items.length > 0 && items.every(m => selectedIds.has(m.id));
   const someSelected = selectedIds.size > 0;
   const folderMap = folders ? new Map(folders.map(f => [f.id, f.name])) : null;
 
   return (
-    <table class={`msg-table${snippets ? ' has-snippets' : ''}`}>
+    <table ref={tableRef} class={`msg-table${snippets ? ' has-snippets' : ''}`}>
       <thead>
         <tr>
           <th class="col-check">
@@ -135,12 +143,37 @@ export function MessageList({
           return (
             <tr
               key={msg.id}
+              data-message-id={msg.id}
               class={`msg-row${msg.read ? '' : ' unread'}${selected ? ' selected' : ''}`}
+              tabIndex={0}
               onClick={() => onRowClick(msg.id)}
+              onKeyDown={e => {
+                if (e.target !== e.currentTarget) return;
+                if (e.key === 'ArrowLeft') {
+                  e.preventDefault();
+                  document.querySelector<HTMLAnchorElement>('.sidebar .folder-item.active a')?.focus();
+                  return;
+                }
+                if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
+                  e.preventDefault();
+                  const next = e.key === 'ArrowUp'
+                    ? e.currentTarget.previousElementSibling
+                    : e.currentTarget.nextElementSibling;
+                  if (next instanceof HTMLElement) next.focus();
+                  return;
+                }
+                if (e.key === ' ' || e.key === 'Enter') {
+                  e.preventDefault();
+                  if (e.repeat) return;
+                  if (e.key === ' ') onToggleSelect(msg.id);
+                  else onRowClick(msg.id);
+                }
+              }}
             >
               <td class="col-check" onClick={e => e.stopPropagation()}>
                 <input
                   type="checkbox"
+                  tabIndex={-1}
                   checked={selected}
                   onChange={() => onToggleSelect(msg.id)}
                   aria-label={`Select message from ${senderName(msg.from_addr)}`}

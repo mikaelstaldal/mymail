@@ -670,6 +670,7 @@ html, body {
   transition: background 0.08s;
 }
 .msg-row:hover { background: var(--list-item-hover); }
+.msg-row:focus-visible { outline: 2px solid var(--primary); outline-offset: -2px; }
 .msg-row.selected { background: var(--list-item-active-bg); }
 .msg-row.selected:hover { background: var(--highlight-selected-hover); }
 

@@ -638,7 +638,8 @@ function AddressField({ label, tags, onTagsChange, input, onInputChange, extra }
     } else if (e.key === 'ArrowUp') {
       e.preventDefault();
       setSelIdx(i => Math.max(i - 1, 0));
-    } else if (e.key === 'Escape') {
+    } else if (e.key === 'Escape' && showDrop) {
+      e.preventDefault();
       setShowDrop(false);
     }
   }
@@ -1523,7 +1524,7 @@ export function ComposeForm({ replyId, replyAllId, forwardId, draftId, mailto }:
             value={sendAt}
             onInput={e => setSendAt((e.target as HTMLInputElement).value)}
           />
-          <button type="button" class="btn btn-ghost btn-sm" onClick={() => { editedRef.current = true; setSendLater(false); setSendAt(''); }}>
+          <button type="button" class="btn btn-ghost btn-sm" data-escape-action="cancel" onClick={() => { editedRef.current = true; setSendLater(false); setSendAt(''); }}>
             Cancel
           </button>
         </div>
@@ -1562,6 +1563,7 @@ export function ComposeForm({ replyId, replyAllId, forwardId, draftId, mailto }:
         <span class="compose-save-status">{saveLabel}</span>
         <button
           class="btn btn-ghost btn-sm ml-auto"
+          data-escape-action="discard"
           onClick={async () => {
             discardPendingRef.current = true;
             // A first save may still be copying forward attachments.

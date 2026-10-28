@@ -10,7 +10,7 @@ import { MessageDetail } from './views/MessageDetail.js';
 import { ComposeForm } from './views/ComposeForm.js';
 import { SearchView } from './views/SearchView.js';
 import { SettingsPage } from './views/SettingsPage.js';
-import { initRouter, onRouteChange, type Route } from './router.js';
+import { initRouter, onRouteChange, navigate, type Route } from './router.js';
 import { startPolling } from './poll.js';
 import { isDemo } from './util/config.js';
 import { applyTheme, getTheme } from './util/theme.js';
@@ -50,7 +50,32 @@ function routeLabel(route: Route, folders: Folder[]): string {
 }
 
 function App() {
+  useEffect(() => {
+    const handleEscape = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape' || event.defaultPrevented || event.repeat
+        || event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return;
+      // Modal dialogs own Escape. Never also discard the view behind one.
+      if (document.querySelector('[aria-modal="true"]')) return;
+      const actions = Array.from(document.querySelectorAll<HTMLButtonElement>('[data-escape-action]'))
+        .filter(button => button.getClientRects().length > 0);
+      const target = event.target instanceof Element ? event.target : null;
+      const scope = target?.closest('.settings-form, .snooze-panel, .compose-send-later');
+      const button = actions.find(button => scope?.contains(button))
+        ?? actions.find(button => button.dataset.escapeAction === 'cancel')
+        ?? actions.find(button => button.dataset.escapeAction === 'discard');
+      if (!button || button.disabled) return;
+      event.preventDefault();
+      button.click();
+    };
+    document.addEventListener('keydown', handleEscape);
+    return () => document.removeEventListener('keydown', handleEscape);
+  }, []);
   const [route, setRoute] = useState<Route>(() => initRouter());
+  const [folderFocus, setFolderFocus] = useState<{ folderId: number; slug: string; requestId: number } | null>(null);
+  const focusRequestId = useRef(0);
+  const consumeFolderFocus = useCallback((requestId: number) => {
+    setFolderFocus(pending => pending?.requestId === requestId ? null : pending);
+  }, []);
   const [folders, setFolders] = useState<Folder[]>([]);
   // Tracks the last inbox/folder slug so the sidebar stays highlighted when
   // the user opens a message (which has no folder context of its own).
@@ -59,7 +84,11 @@ function App() {
   const [showDemoNotice, setShowDemoNotice] = useState(() => isDemo() && !demoNoticeSeen());
 
   useEffect(() => {
-    return onRouteChange(setRoute);
+    return onRouteChange(next => {
+      setRoute(next);
+      const slug = next.type === 'inbox' ? 'inbox' : next.type === 'folder' ? next.slug : null;
+      setFolderFocus(pending => pending?.slug === slug ? pending : null);
+    });
   }, []);
 
   const dismissDemoNotice = useCallback(() => {
@@ -133,7 +162,8 @@ function App() {
       if (!currentFolder) {
         return <div class="placeholder-view"><p>Folder not found</p></div>;
       }
-      return <FolderView folder={currentFolder} folders={folders} />;
+      return <FolderView key={currentFolder.id} folder={currentFolder} folders={folders}
+        focusRequest={folderFocus} onFocusConsumed={consumeFolderFocus} />;
     }
     if (route.type === 'link') return <LinkConfirmation key={`${route.id}/${route.index}`} id={route.id} index={route.index} />;
     if (route.type === 'message') {
@@ -162,7 +192,10 @@ function App() {
 
   return (
     <div class="app">
-      <Sidebar folders={folders} activeSlug={activeSlug} />
+      <Sidebar folders={folders} activeSlug={activeSlug} onFolderEnter={folder => {
+        setFolderFocus({ folderId: folder.id, slug: folder.slug, requestId: ++focusRequestId.current });
+        navigate(folder.slug === 'inbox' ? '#/inbox' : `#/folder/${folder.slug}`);
+      }} />
       <header class="topbar">
         <span class="topbar-title">{label}</span>
         {isDemo() && (

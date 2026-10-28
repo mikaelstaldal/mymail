@@ -57,6 +57,25 @@ export function navigate(hash: string): void {
   window.location.hash = hash;
 }
 
+// Keep the originating page in memory while a message detail replaces its list.
+let messageListOrigin: { id: number; folderId: number; offset: number } | null = null;
+let messageListReturn: { id: number; folderId: number; offset: number } | null = null;
+
+export function rememberMessageList(id: number, folderId: number, offset: number): void {
+  messageListOrigin = { id, folderId, offset };
+}
+
+export function restoreMessageList(id: number, folderId: number): void {
+  messageListReturn = { id, folderId, offset: messageListOrigin?.id === id
+    && messageListOrigin.folderId === folderId ? messageListOrigin.offset : 0 };
+}
+
+export function takeMessageListReturn(folderId: number): { id: number; folderId: number; offset: number } | null {
+  const pending = messageListReturn;
+  messageListReturn = null;
+  return pending?.folderId === folderId ? pending : null;
+}
+
 export function currentRoute(): Route {
   return parseRoute(window.location.hash);
 }
