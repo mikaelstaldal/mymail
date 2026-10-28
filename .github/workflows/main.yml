@@ -24,7 +24,9 @@ concurrency:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    # Playwright 1.58.2 supports Ubuntu 24.04; keep ubuntu-latest migrations
+    # from changing the OS underneath its browser dependencies.
+    runs-on: ubuntu-24.04
     # Overrides the workflow default only to add contents: write, which the
     # release step needs to move the `latest` tag and upload the binary.
     permissions:
