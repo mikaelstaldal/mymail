@@ -1036,6 +1036,11 @@ Right moves focus from a folder to the first message in the displayed list, with
 Left moves focus from a message row to the current folder in the sidebar.
 If the target list is empty or no current folder exists, focus stays where it is.
 
+Plain-letter action shortcuts activate visible, enabled buttons: C for compose; while reading a message,
+R for reply, A for reply all, F for forward, D for delete, S for the snooze picker, and M for mark as junk.
+Each button underlines its shortcut letter. Shortcuts preserve button confirmations and are ignored in
+editable controls, with modifier keys, on key repeat, during IME composition, and while a modal is open.
+
 ### Views
 
 1. **Folder view** — Paginated message list. Tab focuses each message row instead of its selection checkbox,

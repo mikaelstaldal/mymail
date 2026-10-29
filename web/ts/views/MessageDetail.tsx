@@ -837,14 +837,14 @@ export function MessageDetail({ id, folders }: MessageDetailProps) {
           </>
         ) : (
           <>
-            <button class="btn btn-ghost btn-sm" onClick={() => navigate(`#/compose?reply=${id}`)}>
-              Reply
+            <button data-shortcut="r" aria-keyshortcuts="r" class="btn btn-ghost btn-sm" onClick={() => navigate(`#/compose?reply=${id}`)}>
+              <span><u>R</u>eply</span>
             </button>
-            <button class="btn btn-ghost btn-sm" onClick={() => navigate(`#/compose?replyall=${id}`)}>
-              Reply All
+            <button data-shortcut="a" aria-keyshortcuts="a" class="btn btn-ghost btn-sm" onClick={() => navigate(`#/compose?replyall=${id}`)}>
+              <span>Reply <u>A</u>ll</span>
             </button>
-            <button class="btn btn-ghost btn-sm" onClick={() => navigate(`#/compose?forward=${id}`)}>
-              Forward
+            <button data-shortcut="f" aria-keyshortcuts="f" class="btn btn-ghost btn-sm" onClick={() => navigate(`#/compose?forward=${id}`)}>
+              <span><u>F</u>orward</span>
             </button>
           </>
         )}
@@ -870,12 +870,13 @@ export function MessageDetail({ id, folders }: MessageDetailProps) {
           </div>
         )}
         {canDelete && (
-          <button class="btn btn-danger btn-sm" disabled={actionInFlight} onClick={() => void handleDelete()}>
-            Delete
+          <button data-shortcut="d" aria-keyshortcuts="d" class="btn btn-danger btn-sm" disabled={actionInFlight} onClick={() => void handleDelete()}>
+            <span><u>D</u>elete</span>
           </button>
         )}
         {canSnooze && (
           <button
+            data-shortcut="s" aria-keyshortcuts="s"
             class={`btn btn-ghost btn-sm${snoozeOpen ? ' active' : ''}`}
             disabled={actionInFlight}
             onClick={() => {
@@ -892,7 +893,7 @@ export function MessageDetail({ id, folders }: MessageDetailProps) {
               setSnoozeOpen(o => !o);
             }}
           >
-            {canCancelSnooze ? 'Edit snooze' : 'Snooze'}
+            <span>{canCancelSnooze ? <>Edit <u>s</u>nooze</> : <><u>S</u>nooze</>}</span>
           </button>
         )}
         {canCancelSnooze && (
@@ -906,8 +907,8 @@ export function MessageDetail({ id, folders }: MessageDetailProps) {
           </span>
         )}
         {canMarkJunk && (
-          <button class="btn btn-ghost btn-sm" disabled={actionInFlight} onClick={() => void handleMarkJunk()}>
-            Mark as junk
+          <button data-shortcut="m" aria-keyshortcuts="m" class="btn btn-ghost btn-sm" disabled={actionInFlight} onClick={() => void handleMarkJunk()}>
+            <span><u>M</u>ark as junk</span>
           </button>
         )}
         {canMarkNotJunk && (

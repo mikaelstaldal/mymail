@@ -16,9 +16,10 @@ export function Toolbar() {
     <footer class="bottombar">
       <button
         class="compose-btn"
+        data-shortcut="c" aria-keyshortcuts="c"
         onClick={() => { window.location.hash = '#/compose'; }}
       >
-        <Icon name="pencil" size={15} /> Compose
+        <Icon name="pencil" size={15} /> <span><u>C</u>ompose</span>
       </button>
       <form class="search-bar" onSubmit={handleSearch}>
         <Icon name="search" size={15} class="search-icon" />

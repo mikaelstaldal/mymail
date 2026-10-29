@@ -12,6 +12,7 @@ import { SearchView } from './views/SearchView.js';
 import { SettingsPage } from './views/SettingsPage.js';
 import { initRouter, onRouteChange, navigate, type Route } from './router.js';
 import { startPolling } from './poll.js';
+import { handleActionShortcut } from './util/shortcuts.js';
 import { isDemo } from './util/config.js';
 import { applyTheme, getTheme } from './util/theme.js';
 import { DemoDialog, demoNoticeSeen, markDemoNoticeSeen } from './components/DemoDialog.js';
@@ -67,8 +68,12 @@ function App() {
       event.preventDefault();
       button.click();
     };
+    document.addEventListener('keydown', handleActionShortcut);
     document.addEventListener('keydown', handleEscape);
-    return () => document.removeEventListener('keydown', handleEscape);
+    return () => {
+      document.removeEventListener('keydown', handleActionShortcut);
+      document.removeEventListener('keydown', handleEscape);
+    };
   }, []);
   const [route, setRoute] = useState<Route>(() => initRouter());
   const [folderFocus, setFolderFocus] = useState<{ folderId: number; slug: string; requestId: number } | null>(null);

@@ -50,6 +50,14 @@ The web UI is available at `http://127.0.0.1:8080`.
 
 ## Keyboard navigation
 
+Press **C** to compose a message. While reading a message, press **R** to reply, **A** to reply all,
+**F** to forward, **D** to delete, **S** to open or close the snooze picker, or **M** to mark as junk.
+The shortcut letter is underlined in each button. A shortcut is available only when its button is visible
+and enabled; Delete keeps the same confirmation as clicking the button. These shortcuts use no modifier
+keys and do not run while typing in a field or editor, or while a modal dialog is open.
+They also cannot receive keys when focus is inside the sandboxed message body; click a message action
+button or use Tab to move focus back to the surrounding UI first.
+
 In the web interface, use **Tab** and **Shift+Tab** to move focus forward and backward through controls.
 Focused message rows have a visible outline; moving focus does not select or open a message.
 
