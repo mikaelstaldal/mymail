@@ -1,6 +1,6 @@
 module github.com/mikaelstaldal/mymail
 
-go 1.26.10
+go 1.26.11
 
 require (
 	github.com/emersion/go-maildir v0.6.0
